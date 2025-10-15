@@ -1,0 +1,39 @@
+# === Python / Flask ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+.venv/
+.env
+instance/
+build/
+dist/
+*.egg-info/
+
+# === GHAminer output ===
+builds_features.csv
+metrics_cache.json
+*.log
+
+# === IDE / OS files ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# === Extension Chrome ===
+/extension/node_modules/
+/extension/*.zip
+/extension/dist/
+
+# === Cache files ===
+__cache__/
+.cache/
+*.tmp
+*.bak
+
+# === Token or secret files ===
+*.env
+token.txt
