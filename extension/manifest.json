@@ -1,0 +1,35 @@
+{
+  "name": "GitHub Actions Dashboard",
+  "version": "0.1.0",
+  "description": "Dashboard for monitoring GitHub Actions workflows metrics.",
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": ["https://github.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["apiService.js", "dashboardTemplates.js", "utils.js", "contentScript.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/dashboard.png",
+        "dashboardStyles.css"
+      ],
+      "matches": ["https://github.com/*"]
+    }
+  ],
+  "action": {
+    "default_icon": {
+      "16": "assets/dashboard.png",
+      "24": "assets/dashboard.png",
+      "32": "assets/dashboard.png"
+    },
+    "default_title": "My GitHub Actions Metrics Dashboard",
+    "default_popup": "popup.html"
+  },
+  "manifest_version": 3
+}

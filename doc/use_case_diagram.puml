@@ -1,0 +1,21 @@
+@startuml
+left to right direction
+actor "Développeur" as Dev
+
+rectangle " Tableau de bord GitHub Actions" #LightYellow {
+  
+  usecase "UC01 : Consulter le tableau de bord" as UC01
+  
+  usecase "UC02 : Visualiser les statistiques globales" as UC02
+
+  usecase "UC03 : Identifier les causes d’échec" as UC03
+}
+
+Dev --> UC01
+Dev --> UC02
+Dev --> UC03
+
+UC02 -[#blue,dashed]-> UC01 : <<extend>>
+UC03 -[#blue,dashed]-> UC01 : <<extend>>
+
+@enduml
