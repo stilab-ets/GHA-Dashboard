@@ -1,4 +1,15 @@
 (() => {
+    // === Injection forcée du script apiService.js dans le contexte de la page GitHub ===
+    (function injectApiService() {
+        const script = document.createElement('script');
+        script.src = chrome.runtime.getURL('apiService.js');
+        script.onload = function () {
+            console.log(" apiService.js injecté dans la page GitHub");
+            this.remove();
+        };
+        (document.head || document.documentElement).appendChild(script);
+    })();
+
     let currentGitHubRepo = "";
     
     const loadModules = async () => {
@@ -76,16 +87,40 @@
         await loadDashboardData(dashboard);
     };
 
+    
     const loadDashboardData = async (dashboard) => {
-        try {
-            // TODO avec l’API (GHAminer + backend)
-            const metricsData = await window.GitHubActionsAPI.fetchMetricsData(currentGitHubRepo);
-            
-            
-            dashboard.innerHTML = window.GitHubActionsTemplates.createDashboardHTML(currentGitHubRepo, metricsData);
+    try {
+        //  Attente que l’API soit bien chargée
+        if (!window.GitHubActionsAPI || !window.GitHubActionsAPI.fetchMetricsData) {
+            console.warn(" Attente du chargement de l'API...");
+            await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+
+        if (!window.GitHubActionsAPI) {
+            throw new Error("L’API GitHubActionsAPI n’est pas disponible.");
+        }
+
+        const metricsData = await new Promise((resolve) => {
+            chrome.runtime.sendMessage(
+                { action: "fetchMetrics", repo: currentGitHubRepo },
+                (response) => resolve(response)
+            );
+        });
+
+        console.log(" Données reçues pour affichage :", metricsData);
+
+
+        dashboard.innerHTML = window.GitHubActionsTemplates.createDashboardHTML(
+            currentGitHubRepo,
+            metricsData
+            );
         } catch (error) {
-            console.error('Error loading dashboard data:', error);
-            dashboard.innerHTML = window.GitHubActionsTemplates.createErrorHTML(currentGitHubRepo, error.message);
+        console.error("Error loading dashboard data:", error);
+        dashboard.innerHTML = window.GitHubActionsTemplates.createErrorHTML(
+            currentGitHubRepo,
+            error.message
+            );
         }
     };
+
 })();

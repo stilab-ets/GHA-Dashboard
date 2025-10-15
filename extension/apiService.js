@@ -1,52 +1,67 @@
-// API service for fetching GitHub Actions metrics
+
 const API_CONFIG = {
-    baseUrl: 'http://localhost:3000/api', // TODO change to API server URL
+    baseUrl: 'http://localhost:5000', 
     endpoints: {
-        metrics: '/github-metrics',
-        workflowRuns: '/workflow-runs'
+        metrics: '/metrics'
     },
-    timeout: 10000 // TODO reduce timeout
+    timeout: 20000 // 20 secondes (pour laisser GHAminer travailler)
 };
 
+// Fonction principale : récupérer les métriques réelles
 const fetchMetricsData = async (repo) => {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeout);
-        
-        const response = await fetch(`${API_CONFIG.baseUrl}${API_CONFIG.endpoints.metrics}?repo=${encodeURIComponent(repo)}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            signal: controller.signal
-        });
-        
+
+        const response = await fetch(
+            `${API_CONFIG.baseUrl}${API_CONFIG.endpoints.metrics}?repo=${encodeURIComponent(repo)}`,
+            {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal
+            }
+        );
+
         clearTimeout(timeoutId);
-        
+
         if (!response.ok) {
-            throw new Error(`API Error: ${response.status} - ${response.statusText}`);
+            throw new Error(`Erreur API: ${response.status} - ${response.statusText}`);
         }
-        
+
         const data = await response.json();
-        return data;
+        console.log(" Données reçues du backend :", data);
+
+        // Adapter les clés du backend à celles du frontend
+        const normalized = {
+            repo: data.repo ?? repo,
+            totalRuns: data.total_runs ?? 0,
+            successRate: data.success_rate ?? 0,
+            successfulRuns: data.successful ?? 0,
+            failedRuns: data.failed ?? 0
+        };
+
+        console.log(" Données normalisées :", normalized);
+        return normalized;
     } catch (error) {
-        console.error('Failed to fetch metrics data:', error);
-        // TODO remove mock data
+        console.error(' Échec de la récupération des métriques:', error);
+
+        // 🧩 Valeurs de secours (mock)
         return {
-            totalRuns: 247,
-            successRate: 87.2,
-            successfulRuns: 215,
-            failedRuns: 32,
-            changePercentage: 15,
+            repo,
+            totalRuns: 0,
+            successRate: 0,
+            successfulRuns: 0,
+            failedRuns: 0,
             error: error.message
         };
     }
 };
 
-// Export for use in content script
+
 if (typeof window !== 'undefined') {
     window.GitHubActionsAPI = {
-        fetchMetricsData,
-        API_CONFIG
+        fetchMetricsData
     };
 }
+
+console.log(" apiService.js chargé dans la page GitHub");

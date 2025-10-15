@@ -1,35 +1,45 @@
 {
+  "manifest_version": 3,
   "name": "GitHub Actions Dashboard",
-  "version": "0.1.0",
-  "description": "Dashboard for monitoring GitHub Actions workflows metrics.",
-  "permissions": ["storage", "tabs", "scripting"],
-  "host_permissions": ["https://github.com/*"],
+  "version": "1.0",
+  "description": "Affiche les métriques GitHub Actions via GHAminer",
+  "permissions": ["storage", "tabs", "scripting", "activeTab", "background"],
+  "host_permissions": [
+    "https://github.com/*",
+    "http://localhost:5000/*"
+  ],
+
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
       "matches": ["https://github.com/*"],
-      "js": ["apiService.js", "dashboardTemplates.js", "utils.js", "contentScript.js"]
+      "js": [
+        "apiService.js",          
+        "dashboardTemplates.js",
+        "utils.js",
+        "contentScript.js"        
+      ],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
-        "assets/dashboard.png",
-        "dashboardStyles.css"
+        "dashboardStyles.css",
+        "assets/dashboard.png"
       ],
       "matches": ["https://github.com/*"]
     }
   ],
   "action": {
+    "default_title": "GitHub Actions Dashboard",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "assets/dashboard.png",
-      "24": "assets/dashboard.png",
-      "32": "assets/dashboard.png"
-    },
-    "default_title": "My GitHub Actions Metrics Dashboard",
-    "default_popup": "popup.html"
-  },
-  "manifest_version": 3
+      "48": "assets/dashboard.png",
+      "128": "assets/dashboard.png"
+    }
+  }
 }
