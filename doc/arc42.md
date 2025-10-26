@@ -273,6 +273,11 @@ Détecter les pics d'exécution ou d'échec pour identifier des comportements in
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+
+## Diagramme de cas d'utilisation :
+Voici le diagramme illustrant les interactions principales entre les acteurs et le système :
+![Diagramme de cas d'utilisation](diagramme_use_case.png)
+
 ### Esquisse du modèle de domaine                   ** TODO ** Fix with real diagramme (or remove this section)
 
 **Entités principales :**
