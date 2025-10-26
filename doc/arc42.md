@@ -228,51 +228,12 @@ Détecter les pics d'exécution ou d'échec pour identifier des comportements in
 | **PostgreSQL** | Système de gestion de base de données pour le stockage persistant des métriques |
 | **Workflow run** | Instance concrète d'un workflow exécuté suite à un événement GitHub |
 
-### Diagramme de contexte                       ** TODO ** Fix with real diagramme (or remove this section)
+### Diagramme de contexte              
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Système GitHub                           │
-│  (Fournit événements, données et résultats des workflows)       │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                           │ API GitHub Actions
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         GHAminer                                │
-│            (Extraction de données depuis GitHub API)            │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                           │ Données brutes
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              Tableau de bord GitHub Actions                     │
-│                                                                 │
-│  ┌────────────┐    ┌─────────────┐    ┌──────────────┐          │
-│  │  Frontend  │◄───┤   Node.js   │◄───┤    Flask     │          │
-│  │  (Chrome)  │    │  (Analyse)  │    │ (Extraction) │          │
-│  └────────────┘    └─────────────┘    └──────────────┘          │
-│         │                  │                    │               │
-│         │                  ▼                    │               │
-│         │          ┌──────────────┐             │               │
-│         │          │  PostgreSQL  │◄────────────┘               │
-│         │          │     (BDD)    │                             │
-│         │          └──────────────┘                             │
-└─────────┼───────────────────────────────────────────────────────┘
-          │
-          │ Utilisation
-          │
-          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Acteurs Humains                             │
-│  • Développeur / Utilisateur GitHub                             │
-│  • Chef d'équipe                                                │
-│  • Gestionnaire de projet                                       │
-└─────────────────────────────────────────────────────────────────┘
-```
+Le diagramme ci-dessous présente l'environement global du système, montrant les interactions entre les acteurs, GitHub, GHAminer, le serveur Flask et le tableau de bord :
+![Diagramme de contexte](context-diagram.png)
 
+---
 
 ## Diagramme de cas d'utilisation :
 Voici le diagramme illustrant les interactions principales entre les acteurs et le système :
@@ -305,9 +266,9 @@ Voici le diagramme illustrant les interactions principales entre les acteurs et 
 |----------|----------|
 | **Extraction de données GitHub** | Utilisation de l'outil GHAminer (Python) pour interroger l'API GitHub Actions et récupérer les métadonnées des workflows |
 | **Gestion des données** | PostgreSQL pour le stockage persistant de l'historique des métriques permettant des analyses à long terme |
-| **Traitement et analyse** | Architecture à deux couches : Flask pour l'extraction brute et Node.js pour l'analyse, le filtrage et l'agrégation des statistiques |
+| **Traitement et analyse** | Architecture à deux couches : Flask |
 | **Visualisation** | Extension Chrome intégrée nativement à l'interface GitHub sur la page "Actions" avec tableaux de bord et graphiques interactifs |
-| **Communication** | API REST au format JSON pour la communication entre le frontend (Chrome) et le backend (Node.js/Flask) |
+| **Communication** | API REST au format JSON pour la communication entre le frontend (Chrome) et le backend (Flask) |
 | **Déploiement** | Conteneurisation complète avec Docker et orchestration via docker-compose pour garantir la portabilité |
 | **Filtrage avancé** | Système de filtres dynamiques permettant de segmenter les données par workflow, branche, acteur et période |
 | **Qualité du code** | Pipeline CI/CD via GitHub Actions avec tests unitaires (frontend et backend) |
