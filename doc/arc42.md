@@ -317,45 +317,8 @@ Voici le diagramme illustrant les interactions principales entre les acteurs et 
 
 **Technologies :** PostgreSQL
 
-### Architecture en couches                    ** TODO ** Fix with real diagramme
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Couche Présentation                      │
-│                   (Extension Chrome)                        │
-│  - Interface utilisateur graphique                          │
-│  - Gestion des filtres et interactions                      │
-│  - Visualisation (graphiques, tableaux)                     │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ HTTP REST (JSON)
-                       │
-┌──────────────────────▼──────────────────────────────────────┐
-│                 Couche Application                          │
-│                   (Flask - Analyse)                         │
-│  - Logique métier                                           │
-│  - Calcul des métriques                                     │
-│  - Filtrage et agrégation                                   │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ API quelconque
-                       │
-┌──────────────────────▼──────────────────────────────────────┐
-│              Couche Intégration                             │
-│               (Flask - Extraction)                          │
-│  - Exécution de GHAminer                                    │
-│  - Interface avec l'API GitHub                              │
-│  - Transformation des données brutes                        │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ SQL
-                       │
-┌──────────────────────▼──────────────────────────────────────┐
-│                Couche Persistance                           │
-│                    (PostgreSQL)                             │
-│  - Stockage des workflow runs                               │
-│  - Historique des métriques                                 │
-└─────────────────────────────────────────────────────────────┘
-``` 
-
----
+### Architecture en couches                   
+![Architecture en couches](architecture_couches.svg)
 
 ## 6. Vue d'exécution
 
@@ -431,56 +394,8 @@ Utilisateur    Extension Chrome    Couche Analyse    Couche Extraction    GHAmin
 
 ## 7. Vue de déploiement
 
-### Architecture de déploiement avec Docker                                            ** TODO ** Fix with real diagramme (or remove this section)
-
-```
-┌───────────────────────────────────────────────────────────────────┐
-│                    Machine locale (Développement)                 │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────────┐ │
-│  │                    Google Chrome                             │ │
-│  │  ┌────────────────────────────────────────────────────────┐  │ │
-│  │  │         Extension GHA Dashboard                        │  │ │
-│  │  │  - popup.html, popup.js                                │  │ │
-│  │  │  - contentScript.js (injection dans GitHub)            │  │ │
-│  │  │  - background.js                                       │  │ │
-│  │  └────────────────────────────────────────────────────────┘  │ │
-│  └──────────────────────────────────────────────────────────────┘ │
-│                              │                                    │
-│                              │ HTTP REST :5000                    │
-│                              ▼                                    │
-│  ┌──────────────────────────────────────────────────────────────┐ │
-│  │             Docker Compose Environment                       │ │
-│  │                                                              │ │
-│  │  ┌─────────────────────────────────────────────────────┐     │ │
-│  │  │  Container: flask-service                           │     │ │
-│  │  │  - Image: python:3.10-slim                          │     │ │
-│  │  │  - Port: 5000                                       │     │ │
-│  │  │  - Service: API d'extraction (GHAminer) et API REST │     │ │
-│  │  │             pour le frontend pour l'analyse         │     │ │
-│  │  └─────────────────────────────────────────────────────┘     │ │
-│  │                       │                                      │ │
-│  │                       │ PostgreSQL :5432                     │ │
-│  │                       ▼                                      │ │
-│  │  ┌─────────────────────────────────────────────────────┐     │ │
-│  │  │  Container: postgres                                │     │ │
-│  │  │  - Image: postgres:15-alpine                        │     │ │
-│  │  │  - Port: 5432                                       │     │ │
-│  │  │  - Volume: postgres-data (persistance)              │     │ │
-│  │  │  - Service: Stockage des métriques                  │     │ │
-│  │  └─────────────────────────────────────────────────────┘     │ │
-│  │                                                              │ │
-│  └──────────────────────────────────────────────────────────────┘ │
-│                              │                                    │
-└──────────────────────────────┼────────────────────────────────────┘
-                               │
-                               │ HTTPS API GitHub
-                               ▼
-                    ┌──────────────────────┐
-                    │   GitHub API         │
-                    │   api.github.com     │
-                    └──────────────────────┘
-```
+### Architecture de déploiement avec Docker    
+![Vue de déploiement](vue_deploiement.svg)
 
 ### Mapping des composants sur l'infrastructure
 
