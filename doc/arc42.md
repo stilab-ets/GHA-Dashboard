@@ -1,4 +1,4 @@
-# BrokerX - Documentation d’Architecture (Arc42)
+# GHA-Dashboard - Documentation d’Architecture (Arc42)
 
 Projet réalisé dans le cadre du cours LOG795 – Projet de fin d’études en génie logiciel
 Ce document suit la structure **arc42** pour documenter l’architecture du GitHub Actions Dashboard.
