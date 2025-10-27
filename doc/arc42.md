@@ -55,8 +55,8 @@ L'objectif de ce document est de définir l'architecture du **tableau de bord in
 | **C07 - CI/CD GitHub Actions** | Le pipeline CI/CD du projet doit être configuré via GitHub Actions |
 | **C08 - Méthodologie Scrum** | L'équipe doit suivre une approche itérative Scrum avec des sprints de deux semaines |
 | **C09 - Documentation du code** | Le code source doit être documenté (commentaires, README) |
-| **C10 - Module Node.js** | Un module Node.js doit être intégré pour le traitement et l'analyse des données |
-| **C11 - Architecture modulaire** | Séparation stricte entre services Flask (extraction) et Node.js (analyse) |
+| **C10 - Module Flask** | Un module Flask doit être intégré pour l'extraction, le traitement et l'analyse des données |
+| **C11 - Architecture modulaire** | Séparation stricte logique entre services d'extraction et d'analyse des données à même le serveur Flask |
 | **C12 - API REST JSON** | Le frontend doit consommer les données via une API REST au format JSON standard |
 
 ---
@@ -224,7 +224,6 @@ Détecter les pics d'exécution ou d'échec pour identifier des comportements in
 | **GHAminer** | Outil Python pour obtenir toutes les informations des workflow runs d'un dépôt spécifique |
 | **GitHub** | Plateforme de stockage de code source où les Actions sont exécutées |
 | **Métrique** | Valeur quantitative pour évaluer la performance (nombre d'exécutions, taux de succès, durée) |
-| **Node.js** | Environnement JavaScript côté serveur pour analyser et agréger les données |
 | **PostgreSQL** | Système de gestion de base de données pour le stockage persistant des métriques |
 | **Workflow run** | Instance concrète d'un workflow exécuté suite à un événement GitHub |
 
@@ -289,25 +288,25 @@ Voici le diagramme illustrant les interactions principales entre les acteurs et 
 
 **Technologies :** JavaScript, HTML5, CSS3, Chrome Extension API
 
-#### 5.2 Backend - Service Flask (Extraction)
-**Responsabilité :** Extraction des données brutes depuis GitHub
-- Exécution des scripts Python de GHAminer
-- Interrogation de l'API GitHub Actions
-- Exposition d'une API REST locale pour transmettre les données brutes
-- Gestion des erreurs de connexion et des limites d'API
-- Persistance initiale dans PostgreSQL
-
-**Technologies :** Python, Flask, GHAminer, PostgreSQL
-
-#### 5.3 Backend - Service Node.js (Analyse)                        ** TODO ** Maybe remove
+#### 5.2 Backend - Service Flask (Analyse)
 **Responsabilité :** Traitement et analyse des données
-- Consommation des données brutes de Flask
+- Consommation des données brutes de la couche d'extraction 
 - Calcul des métriques agrégées (taux de succès, durées moyennes, écart-type)
 - Filtrage et transformation des données selon les critères utilisateur
 - Génération de statistiques de performance
 - Exposition d'une API REST pour le frontend
 
-**Technologies :** Node.js, Express.js, PostgreSQL
+**Technologies :** Python, Flask, PostgreSQL
+
+#### 5.3 Backend - Service Flask (Extraction)
+**Responsabilité :** Extraction des données brutes depuis GitHub
+- Exécution des scripts Python de GHAminer
+- Interrogation de l'API GitHub Actions
+- Exposition d'une API quelconque locale pour transmettre les données brutes à la couche d'analyse
+- Gestion des erreurs de connexion et des limites d'API
+- Persistance initiale dans PostgreSQL
+
+**Technologies :** Python, Flask, GHAminer, PostgreSQL
 
 #### 5.4 Base de données - PostgreSQL
 **Responsabilité :** Stockage persistant
@@ -332,12 +331,12 @@ Voici le diagramme illustrant les interactions principales entre les acteurs et 
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
 │                 Couche Application                          │
-│                   (Node.js - Analyse)                       │
+│                   (Flask - Analyse)                         │
 │  - Logique métier                                           │
 │  - Calcul des métriques                                     │
 │  - Filtrage et agrégation                                   │
 └──────────────────────┬──────────────────────────────────────┘
-                       │ HTTP REST (JSON)
+                       │ API quelconque
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
 │              Couche Intégration                             │
@@ -363,68 +362,68 @@ Voici le diagramme illustrant les interactions principales entre les acteurs et 
 ### Diagramme de séquence pour UC-01 : Consulter le tableau de bord                    ** TODO ** Fix with real diagramme
 
 ```
-Utilisateur    Extension Chrome    Node.js API    Flask API    GHAminer    GitHub API    PostgreSQL
-    │                 │                 │             │            │            │             │
-    │ Ouvre "Actions" │                 │             │            │            │             │
-    ├────────────────>│                 │             │            │            │             │
-    │                 │                 │             │            │            │             │
-    │                 │ GET /metrics    │             │            │            │             │
-    │                 │ (repo, filters) │             │            │            │             │
-    │                 ├────────────────>│             │            │            │             │
-    │                 │                 │             │            │            │             │
-    │                 │                 │ GET /raw-data           │            │             │
-    │                 │                 ├────────────>│            │            │             │
-    │                 │                 │             │            │            │             │
-    │                 │                 │             │ Execute    │            │             │
-    │                 │                 │             ├───────────>│            │             │
-    │                 │                 │             │            │            │             │
-    │                 │                 │             │            │ GET workflows            │
-    │                 │                 │             │            ├───────────>│             │
-    │                 │                 │             │            │            │             │
-    │                 │                 │             │            │<───────────┤             │
-    │                 │                 │             │            │ Workflow data            │
-    │                 │                 │             │            │            │             │
-    │                 │                 │             │<───────────┤            │             │
-    │                 │                 │             │ Raw data   │            │             │
-    │                 │                 │             │            │            │             │
-    │                 │                 │             │ Store data │            │             │
-    │                 │                 │             ├────────────────────────────────────>│
-    │                 │                 │             │            │            │             │
-    │                 │                 │<────────────┤            │            │             │
-    │                 │                 │ Raw JSON   │            │            │             │
-    │                 │                 │             │            │            │             │
-    │                 │                 │ Query historical data    │            │             │
-    │                 │                 ├──────────────────────────────────────────────────>│
-    │                 │                 │             │            │            │             │
-    │                 │                 │<──────────────────────────────────────────────────┤
-    │                 │                 │ Historical data          │            │             │
-    │                 │                 │             │            │            │             │
-    │                 │                 │ Calculate metrics        │            │             │
-    │                 │                 │ (success rate, avg duration, etc.)    │             │
-    │                 │                 │             │            │            │             │
-    │                 │<────────────────┤             │            │            │             │
-    │                 │ JSON metrics    │             │            │            │             │
-    │                 │                 │             │            │            │             │
-    │<────────────────┤                 │             │            │            │             │
-    │ Display dashboard                │             │            │            │             │
-    │                 │                 │             │            │            │             │
+Utilisateur    Extension Chrome    Couche Analyse    Couche Extraction    GHAminer    GitHub API    PostgreSQL
+    │                 │                  │                   │               │            │             │
+    │ Ouvre "Actions" │                  │                   │               │            │             │
+    ├────────────────>│                  │                   │               │            │             │
+    │                 │                  │                   │               │            │             │
+    │                 │ GET /metrics     │                   │               │            │             │
+    │                 │ (repo, filters)  │                   │               │            │             │
+    │                 ├─────────────────>│                   │               │            │             │
+    │                 │                  │                   │               │            │             │
+    │                 │                  │ raw_data()        │               │            │             │
+    │                 │                  ├──────────────────>│               │            │             │
+    │                 │                  │                   │               │            │             │
+    │                 │                  │                   │ Execute       │            │             │
+    │                 │                  │                   ├──────────────>│            │             │
+    │                 │                  │                   │               │            │             │
+    │                 │                  │                   │               │ GET workflows            │
+    │                 │                  │                   │               ├───────────>│             │
+    │                 │                  │                   │               │            │             │
+    │                 │                  │                   │               │<───────────┤             │
+    │                 │                  │                   │               │ Workflow data            │
+    │                 │                  │                   │               │            │             │
+    │                 │                  │                   │<──────────────┤            │             │
+    │                 │                  │                   │ Raw data      │            │             │
+    │                 │                  │                   │               │            │             │
+    │                 │                  │                   │ Store data    │            │             │
+    │                 │                  │                   ├─────────────────────────────────────────>│
+    │                 │                  │                   │               │            │             │
+    │                 │                  │<──────────────────┤               │            │             │
+    │                 │                  │ Raw Data          │               │            │             │
+    │                 │                  │                   │               │            │             │
+    │                 │                  │ Query historical data             │            │             │
+    │                 │                  ├─────────────────────────────────────────────────────────────>│
+    │                 │                  │                   │               │            │             │
+    │                 │                  │<─────────────────────────────────────────────────────────────┤
+    │                 │                  │ Historical data   │               │            │             │
+    │                 │                  │                   │               │            │             │
+    │                 │                  │ Calculate metrics │               │            │             │
+    │                 │                  │ (success rate, avg duration, etc.)│            │             │
+    │                 │                  │                   │               │            │             │
+    │                 │<─────────────────┤                   │               │            │             │
+    │                 │ JSON metrics     │                   │               │            │             │
+    │                 │                  │                   │               │            │             │
+    │<────────────────┤                  │                   │               │            │             │
+    │ Display dashboard                  │                   │               │            │             │
+    │                 │                  │                   │               │            │             │
 ```
 
 ### Flux d'exécution pour UC-02 : Filtrer les statistiques
 
 1. **Utilisateur** sélectionne des filtres (workflow, branche, acteur, période) dans l'interface
-2. **Extension Chrome** envoie une requête GET avec les paramètres de filtrage à Node.js
-3. **Node.js** interroge PostgreSQL avec les critères de filtrage
+2. **Extension Chrome** envoie une requête GET avec les paramètres de filtrage à Flask 
+3. **Flask** interroge PostgreSQL avec les critères de filtrage
 4. **PostgreSQL** retourne les données filtrées
-5. **Node.js** recalcule les métriques pour le sous-ensemble filtré
+5. **Flask** recalcule les métriques pour le sous-ensemble filtré
 6. **Extension Chrome** reçoit les nouvelles métriques et met à jour l'affichage dynamiquement
 
 ### Flux d'exécution pour UC-05 : Analyser les échecs au fil du temps
 
 1. **Utilisateur** sélectionne une période d'analyse (jour/semaine/mois)
-2. **Extension Chrome** envoie une requête GET avec la période à Node.js                                           ** TODO ** Maybe directly to flask
-3. **Node.js** interroge PostgreSQL pour obtenir l'historique des workflow runs sur la période
-4. **Node.js** calcule le taux d'échec par intervalle de temps (agrégation temporelle)
+2. **Extension Chrome** envoie une requête GET avec la période à Flask
+3. **Flask** interroge PostgreSQL pour obtenir l'historique des workflow runs sur la période
+4. **Flask** calcule le taux d'échec par intervalle de temps (agrégation temporelle)
 5. **Extension Chrome** reçoit les données et génère un graphique linéaire
 6. **Utilisateur** visualise l'évolution du taux d'échec dans le temps  
 
@@ -436,52 +435,44 @@ Utilisateur    Extension Chrome    Node.js API    Flask API    GHAminer    GitHu
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
-│                    Machine locale (Développement)                  │
-│                                                                    │
+│                    Machine locale (Développement)                 │
+│                                                                   │
 │  ┌──────────────────────────────────────────────────────────────┐ │
-│  │                    Google Chrome                              │ │
+│  │                    Google Chrome                             │ │
 │  │  ┌────────────────────────────────────────────────────────┐  │ │
-│  │  │         Extension GHA Dashboard                         │  │ │
-│  │  │  - popup.html, popup.js                                 │  │ │
-│  │  │  - contentScript.js (injection dans GitHub)             │  │ │
-│  │  │  - background.js                                        │  │ │
+│  │  │         Extension GHA Dashboard                        │  │ │
+│  │  │  - popup.html, popup.js                                │  │ │
+│  │  │  - contentScript.js (injection dans GitHub)            │  │ │
+│  │  │  - background.js                                       │  │ │
 │  │  └────────────────────────────────────────────────────────┘  │ │
 │  └──────────────────────────────────────────────────────────────┘ │
-│                              │                                     │
-│                              │ HTTP REST :3000                     │
-│                              ▼                                     │
+│                              │                                    │
+│                              │ HTTP REST :5000                    │
+│                              ▼                                    │
 │  ┌──────────────────────────────────────────────────────────────┐ │
-│  │             Docker Compose Environment                        │ │
-│  │                                                               │ │
-│  │  ┌─────────────────────────────────────────────────────┐    │ │
-│  │  │  Container: nodejs-service                          │    │ │
-│  │  │  - Image: node:18-alpine                            │    │ │
-│  │  │  - Port: 3000                                       │    │ │
-│  │  │  - Service: API REST d'analyse et agrégation        │    │ │
-│  │  └─────────────────────────────────────────────────────┘    │ │
-│  │                       │                                       │ │
-│  │                       │ HTTP :5000                            │ │
-│  │                       ▼                                       │ │
-│  │  ┌─────────────────────────────────────────────────────┐    │ │
-│  │  │  Container: flask-service                           │    │ │
-│  │  │  - Image: python:3.10-slim                          │    │ │
-│  │  │  - Port: 5000                                       │    │ │
-│  │  │  - Service: API REST d'extraction (GHAminer)        │    │ │
-│  │  └─────────────────────────────────────────────────────┘    │ │
-│  │                       │                                       │ │
-│  │                       │ PostgreSQL :5432                      │ │
-│  │                       ▼                                       │ │
-│  │  ┌─────────────────────────────────────────────────────┐    │ │
-│  │  │  Container: postgres                                │    │ │
-│  │  │  - Image: postgres:15-alpine                        │    │ │
-│  │  │  - Port: 5432                                       │    │ │
-│  │  │  - Volume: postgres-data (persistance)              │    │ │
-│  │  │  - Service: Stockage des métriques                  │    │ │
-│  │  └─────────────────────────────────────────────────────┘    │ │
-│  │                                                               │ │
-│  └───────────────────────────────────────────────────────────────┘ │
-│                              │                                     │
-└──────────────────────────────┼─────────────────────────────────────┘
+│  │             Docker Compose Environment                       │ │
+│  │                                                              │ │
+│  │  ┌─────────────────────────────────────────────────────┐     │ │
+│  │  │  Container: flask-service                           │     │ │
+│  │  │  - Image: python:3.10-slim                          │     │ │
+│  │  │  - Port: 5000                                       │     │ │
+│  │  │  - Service: API d'extraction (GHAminer) et API REST │     │ │
+│  │  │             pour le frontend pour l'analyse         │     │ │
+│  │  └─────────────────────────────────────────────────────┘     │ │
+│  │                       │                                      │ │
+│  │                       │ PostgreSQL :5432                     │ │
+│  │                       ▼                                      │ │
+│  │  ┌─────────────────────────────────────────────────────┐     │ │
+│  │  │  Container: postgres                                │     │ │
+│  │  │  - Image: postgres:15-alpine                        │     │ │
+│  │  │  - Port: 5432                                       │     │ │
+│  │  │  - Volume: postgres-data (persistance)              │     │ │
+│  │  │  - Service: Stockage des métriques                  │     │ │
+│  │  └─────────────────────────────────────────────────────┘     │ │
+│  │                                                              │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│                              │                                    │
+└──────────────────────────────┼────────────────────────────────────┘
                                │
                                │ HTTPS API GitHub
                                ▼
@@ -496,7 +487,6 @@ Utilisateur    Extension Chrome    Node.js API    Flask API    GHAminer    GitHu
 | Composant | Infrastructure | Configuration |
 |-----------|---------------|---------------|
 | **Extension Chrome** | Client (navigateur) | Installée manuellement via Chrome Web Store ou en mode développeur |
-| **Node.js API** | Container Docker | Port 3000, connexion à PostgreSQL, communication avec Flask |
 | **Flask API** | Container Docker | Port 5000, accès à GHAminer, connexion à PostgreSQL |
 | **PostgreSQL** | Container Docker | Port 5432, volume persistant `postgres-data` |
 | **Docker Compose** | Hôte local | Orchestration des 3 containers, réseau interne |
@@ -510,9 +500,8 @@ Utilisateur    Extension Chrome    Node.js API    Flask API    GHAminer    GitHu
 - Connexion Internet (pour accéder à l'API GitHub)
 
 **Ports utilisés :**
-- `3000` : Node.js API (exposition externe)
-- `5000` : Flask API (interne, accessible depuis Node.js)                                     ** TODO ** Maybe directly to flask
-- `5432` : PostgreSQL (interne, accessible depuis Flask et Node.js)
+- `5000` : Flask API (exposition externe)
+- `5432` : PostgreSQL (interne, accessible depuis Flask)
 
 **Volumes Docker :**
 - `postgres-data` : Persistance des données de la base PostgreSQL
@@ -534,7 +523,7 @@ Utilisateur    Extension Chrome    Node.js API    Flask API    GHAminer    GitHu
 
 - **Cache** : Mise en cache des résultats de requêtes fréquentes dans PostgreSQL
 - **Pagination** : Récupération paginée des workflow runs pour limiter la charge mémoire
-- **Agrégation côté serveur** : Calculs statistiques effectués par Node.js pour alléger le frontend
+- **Agrégation côté serveur** : Calculs statistiques effectués par Flask pour alléger le frontend
 - **Indexation BDD** : Index sur les colonnes fréquemment filtrées (workflow_id, branch, actor, created_at)
 
 ### 8.3 Gestion des erreurs
@@ -547,7 +536,7 @@ Utilisateur    Extension Chrome    Node.js API    Flask API    GHAminer    GitHu
 ### 8.4 Tests
 
 - **Tests unitaires frontend** : Jest pour tester les composants JavaScript
-- **Tests unitaires backend** : pytest (Flask) et Jest (Node.js)                                              ** TODO ** Maybe directly to flask
+- **Tests unitaires backend** : pytest (Flask)
 - **Tests d'intégration** : Tests des flux complets via API
 - **CI/CD** : Exécution automatique des tests via GitHub Actions à chaque push
 
@@ -555,7 +544,7 @@ Utilisateur    Extension Chrome    Node.js API    Flask API    GHAminer    GitHu
 
 ## 9. Décisions d'architecture
 
-### ADR-001 : Architecture en trois couches (Chrome + Node.js + Flask)                                       ** TODO ** Maybe directly to flask                
+### ADR-001 : Architecture en trois couches (Chrome + Flask (analyse) + Flask (extraction))
 
 #### Statut
 Acceptée
@@ -565,8 +554,7 @@ Le système doit séparer les responsabilités : extraction des données, analys
 
 #### Décision
 Adopter une architecture en trois couches :
-- **Flask** : Couche d'extraction (interface avec GHAminer et GitHub API)
-- **Node.js** : Couche d'analyse et d'agrégation des métriques
+- **Flask** : Couche d'extraction (interface avec GHAminer et GitHub API), couche d'analyse et couche d'agrégation
 - **Extension Chrome** : Couche de présentation et visualisation
 
 #### Conséquences
@@ -574,8 +562,8 @@ Adopter une architecture en trois couches :
 - Séparation claire des responsabilités
 - Scalabilité : chaque couche peut évoluer indépendamment
 - Facilite les tests unitaires par composant
-- Réutilisabilité : Node.js peut servir d'autres clients que Chrome
-- Spécialisation technologique (Python pour extraction, JavaScript pour analyse)
+- Réutilisabilité : Flask peut servir d'autres clients que Chrome
+- Spécialisation technologique (Python pour extraction et analyse)
 
 ##### Négatives :
 - Complexité accrue du déploiement (3 services)
@@ -599,7 +587,7 @@ Utiliser PostgreSQL comme base de données relationnelle.
 ##### Positives :
 - Base de données robuste et éprouvée
 - Support natif des requêtes complexes et agrégations
-- Excellente intégration avec Python et Node.js
+- Excellente intégration avec Python (Flask)
 - Open source et bien documentée
 - Support des index pour optimiser les requêtes de filtrage
 
@@ -645,7 +633,7 @@ Acceptée
 Le système doit être facilement déployable sur différentes machines de développement et de production.
 
 #### Décision
-Conteneuriser tous les services backend (Flask, Node.js, PostgreSQL) avec Docker et orchestrer avec docker-compose.
+Conteneuriser tous les services backend (Flask, PostgreSQL) avec Docker et orchestrer avec docker-compose.
 
 #### Conséquences
 ##### Positives :
@@ -789,7 +777,6 @@ Conteneuriser tous les services backend (Flask, Node.js, PostgreSQL) avec Docker
 | **GitHub** | Plateforme de stockage de code source où les Actions sont exécutées |
 | **Job** | Tâche individuelle au sein d'un workflow run |
 | **Métrique** | Valeur quantitative pour évaluer la performance (nombre d'exécutions, taux de succès, durée) |
-| **Node.js** | Environnement JavaScript côté serveur pour analyser et agréger les données |
 | **PAT** | Personal Access Token : Token d'authentification GitHub pour accéder aux API |
 | **PostgreSQL** | Système de gestion de base de données pour le stockage persistant des métriques |
 | **Rate limiting** | Limitation du nombre de requêtes API autorisées par période de temps |
