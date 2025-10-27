@@ -322,55 +322,8 @@ Voici le diagramme illustrant les interactions principales entre les acteurs et 
 
 ## 6. Vue d'exécution
 
-### Diagramme de séquence pour UC-01 : Consulter le tableau de bord                    ** TODO ** Fix with real diagramme
-
-```
-Utilisateur    Extension Chrome    Couche Analyse    Couche Extraction    GHAminer    GitHub API    PostgreSQL
-    │                 │                  │                   │               │            │             │
-    │ Ouvre "Actions" │                  │                   │               │            │             │
-    ├────────────────>│                  │                   │               │            │             │
-    │                 │                  │                   │               │            │             │
-    │                 │ GET /metrics     │                   │               │            │             │
-    │                 │ (repo, filters)  │                   │               │            │             │
-    │                 ├─────────────────>│                   │               │            │             │
-    │                 │                  │                   │               │            │             │
-    │                 │                  │ raw_data()        │               │            │             │
-    │                 │                  ├──────────────────>│               │            │             │
-    │                 │                  │                   │               │            │             │
-    │                 │                  │                   │ Execute       │            │             │
-    │                 │                  │                   ├──────────────>│            │             │
-    │                 │                  │                   │               │            │             │
-    │                 │                  │                   │               │ GET workflows            │
-    │                 │                  │                   │               ├───────────>│             │
-    │                 │                  │                   │               │            │             │
-    │                 │                  │                   │               │<───────────┤             │
-    │                 │                  │                   │               │ Workflow data            │
-    │                 │                  │                   │               │            │             │
-    │                 │                  │                   │<──────────────┤            │             │
-    │                 │                  │                   │ Raw data      │            │             │
-    │                 │                  │                   │               │            │             │
-    │                 │                  │                   │ Store data    │            │             │
-    │                 │                  │                   ├─────────────────────────────────────────>│
-    │                 │                  │                   │               │            │             │
-    │                 │                  │<──────────────────┤               │            │             │
-    │                 │                  │ Raw Data          │               │            │             │
-    │                 │                  │                   │               │            │             │
-    │                 │                  │ Query historical data             │            │             │
-    │                 │                  ├─────────────────────────────────────────────────────────────>│
-    │                 │                  │                   │               │            │             │
-    │                 │                  │<─────────────────────────────────────────────────────────────┤
-    │                 │                  │ Historical data   │               │            │             │
-    │                 │                  │                   │               │            │             │
-    │                 │                  │ Calculate metrics │               │            │             │
-    │                 │                  │ (success rate, avg duration, etc.)│            │             │
-    │                 │                  │                   │               │            │             │
-    │                 │<─────────────────┤                   │               │            │             │
-    │                 │ JSON metrics     │                   │               │            │             │
-    │                 │                  │                   │               │            │             │
-    │<────────────────┤                  │                   │               │            │             │
-    │ Display dashboard                  │                   │               │            │             │
-    │                 │                  │                   │               │            │             │
-```
+### Diagramme de séquence pour UC-01 : Consulter le tableau de bord
+![Diagramme de séquence pour UC-01](architecture_sequence_diagram.png)
 
 ### Flux d'exécution pour UC-02 : Filtrer les statistiques
 
