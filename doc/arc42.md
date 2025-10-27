@@ -238,25 +238,6 @@ Le diagramme ci-dessous présente l'environement global du système, montrant le
 Voici le diagramme illustrant les interactions principales entre les acteurs et le système :
 ![Diagramme de cas d'utilisation](diagramme_use_case.png)
 
-### Esquisse du modèle de domaine                   ** TODO ** Fix with real diagramme (or remove this section)
-
-**Entités principales :**
-- **Repository** : Dépôt GitHub contenant des workflows
-- **Workflow** : Ensemble d'actions configurées pour un dépôt
-- **WorkflowRun** : Instance d'exécution d'un workflow
-- **Job** : Tâche individuelle au sein d'un workflow run
-- **Actor** : Développeur ayant déclenché un workflow
-- **Branch** : Branche Git sur laquelle le workflow s'exécute
-- **Metric** : Métriques calculées (taux de succès, durée moyenne, écart-type)
-
-**Relations :**
-- Un Repository contient plusieurs Workflows
-- Un Workflow a plusieurs WorkflowRuns
-- Un WorkflowRun contient plusieurs Jobs
-- Un Actor déclenche plusieurs WorkflowRuns
-- Une Branch est associée à plusieurs WorkflowRuns
-- Des Metrics sont calculées à partir des WorkflowRuns
-
 ---
 
 ## 4. Stratégie de solution
