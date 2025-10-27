@@ -22,7 +22,7 @@ activate db
 db --> lExtraction : Données historiques filtrées
 deactivate db
 
-opt ["Données historiques incomplêtes"]
+opt ["Données historiques incomplètes"]
     lExtraction -> miner : Obtention des données manquantes
     activate miner
     miner -> gh : GET /workflows
