@@ -1,0 +1,39 @@
+@startuml
+title Vue de déploiement - Architecture
+
+skinparam shadowing false
+skinparam rectangle {
+  RoundCorner 15
+  BorderColor #555
+}
+skinparam node {
+  RoundCorner 15
+  BorderColor #555
+}
+skinparam cloud {
+  BorderColor #555
+}
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+
+rectangle "Machine locale (Développement)" as Local {
+
+  node "Google Chrome" as Chrome {
+    component "Extension GHA Dashboard\n- popup.html, popup.js\n- contentScript.js (injection GitHub)\n- background.js" as Ext <<extension>>
+  }
+
+  package "Docker Compose Environment" as DCE {
+
+    node "flask-service\n«container»\nImage : python:3.10-slim\nPort : 5000\nService :\n- API d'extraction (GHAminer)\n- API REST pour l'analyse" as Flask
+    node "postgres\n<<container>>\nImage : postgres:15-alpine\nPort : 5432\nVolume : postgres-data (persistance)\nService : Stockage des métriques" as Pg
+  }
+}
+
+cloud "GitHub API\napi.github.com" as GH
+
+' --- Liaisons / ports ---
+Ext -down-> Flask : HTTP REST : 5000
+Flask -down-> Pg : PostgreSQL : 5432
+Flask -down-> GH : HTTPS API GitHub
+
+@enduml

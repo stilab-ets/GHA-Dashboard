@@ -1,0 +1,60 @@
+@startuml architecture_sequence_diagram
+' Participant definitions
+actor "Utilisateur" as user
+participant "Extension Chrome" as ext
+participant "Couche Analyse" as lAnalysis
+participant "Couche Extraction" as lExtraction
+participant "PostgreSQL" as db
+participant "GHAminer" as miner
+participant "GitHub API" as gh
+
+user -> ext : Ouvre "Actions"
+activate ext
+
+ext -> lAnalysis : GET /metrics (repo, filters)
+
+activate lAnalysis
+lAnalysis -> lExtraction : get_raw_data(repo, filters)
+
+activate lExtraction
+lExtraction -> db : Requête des données historique\n(selon repo et filters)
+activate db
+db --> lExtraction : Données historiques filtrées
+deactivate db
+
+opt ["Données historiques incomplètes"]
+    lExtraction -> miner : Obtention des données manquantes
+    activate miner
+    miner -> gh : GET /workflows
+    activate gh
+    gh --> miner: Données des workflows
+    deactivate gh
+
+    miner --> lExtraction : Retour des données manquantes
+    deactivate miner
+
+    lExtraction -> db : Ajout des nouvelles données
+    activate db
+    db --> lExtraction : Confirmation d'ajout
+    deactivate db
+
+    lExtraction -> lExtraction: Filtrer les nouvelles données\n(selon repo et filters)\net les ajouter aux données\nhistoriques filtrées qu'on retourne
+    activate lExtraction
+    deactivate lExtraction
+end
+
+lExtraction --> lAnalysis: Retour des données brutes filtrées
+deactivate lExtraction
+
+lAnalysis -> lAnalysis: Calcul des métriques
+activate lAnalysis
+deactivate lAnalysis
+
+lAnalysis --> ext : Retour des données traitées
+deactivate lAnalysis
+ext --> user : Affichage des données traitées
+deactivate ext
+
+deactivate ext
+
+@enduml

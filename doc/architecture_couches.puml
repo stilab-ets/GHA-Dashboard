@@ -1,0 +1,26 @@
+@startuml
+title Architecture en couches
+
+skinparam shadowing false
+skinparam rectangle {
+  RoundCorner 15
+  BorderColor #555
+  FontSize 12
+}
+skinparam arrowColor #555
+
+' --- Définition des couches ---
+rectangle "Couche Présentation\n(Extension Chrome)\n\n- Interface utilisateur graphique\n- Gestion des filtres et interactions\n- Visualisation (graphiques, tableaux)" as Pres
+
+rectangle "Couche Application\n(Flask - Analyse)\n\n- Logique métier\n- Calcul des métriques\n- Filtrage et agrégation" as App
+
+rectangle "Couche Intégration\n(Flask - Extraction)\n\n- Exécution de GHAminer\n- Interface avec l'API GitHub\n- Transformation des données brutes" as Intg
+
+database "Couche Persistance\n(PostgreSQL)\n\n- Stockage des workflow runs\n- Historique des métriques" as DB
+
+' --- Relations entre couches ---
+Pres -down-> App : HTTP REST (JSON)
+App -down-> Intg : API interne
+Intg -down-> DB : SQL
+
+@enduml
