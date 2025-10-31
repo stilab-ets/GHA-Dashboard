@@ -1,0 +1,98 @@
+#github-actions-metrics-dashboard {
+    background: var(--color-canvas-default);
+    color: var(--color-fg-default);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    margin: 20px 0;
+    padding: 16px;
+    border: 1px solid var(--color-border-default);
+    border-radius: 8px;
+}
+
+.dashboard {
+    padding: 16px;
+}
+
+.dashboard h3 {
+    margin: 0 0 12px 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.dashboard p {
+    margin: 8px 0;
+    font-size: 14px;
+}
+
+/* Dark theme and card layout for dashboard */
+.dashboard.dark {
+    --bg: #0f1720; /* deep charcoal */
+    --card-bg: #0b1220;
+    --muted: #9aa6b2;
+    --accent: #60a5fa;
+    --accent-2: #34d399;
+    --text: #e6eef6;
+    --border: rgba(255,255,255,0.06);
+    background: var(--bg);
+    color: var(--text);
+}
+
+.dashboard.dark .card {
+    background: var(--card-bg);
+    padding: 14px;
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(2,6,23,0.6);
+    border: 1px solid var(--border);
+}
+
+.dashboard .container {
+    padding: 18px;
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.stats-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    min-width: 160px;
+    padding: 12px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+}
+
+.stat-card .title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.stat-card .value { font-size: 18px; font-weight: 700; }
+
+.layout-grid {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 18px;
+}
+
+.layout-grid-2 {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+}
+
+.card h3 { margin-top: 0; margin-bottom: 12px; font-size: 16px; }
+
+.box-plot-wrapper { width: 100%; height: 220px; }
+
+@media (max-width: 900px) {
+    .layout-grid { grid-template-columns: 1fr; }
+    .layout-grid-2 { grid-template-columns: 1fr; }
+}
+
+html, body {
+    background: #0f1720; /* match .dashboard.dark background */
+    color: var(--text, #e6eef6);
+    margin: 0;
+    min-height: 100%;
+}

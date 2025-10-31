@@ -5,23 +5,80 @@ const isGitHubActionsPage = (url) => {
          (url.endsWith("/actions") || url.includes("/actions/"));
 };
 
-// Function to update popup content based on the current tab
-const updatePopupContent = async () => {
+// Function to update dashboard button state based on the current tab
+const updateDashboardButtonState = async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const dashboardElement = document.getElementById("dashboard");
+    const openDashboardBtn = document.getElementById("open-dashboard");
+    const hint = document.getElementById("dashboard-hint");
+    if (!openDashboardBtn || !hint) return;
+
     if (isGitHubActionsPage(tab.url)) {
-      dashboardElement.innerHTML = '<div class="message">Click the green dashboard button</div>';
+      openDashboardBtn.disabled = false;
+      openDashboardBtn.style.background = "#238636";
+      openDashboardBtn.style.cursor = "pointer";
+      hint.textContent = "";
     } else {
-      dashboardElement.innerHTML = '<div class="message">This is not a GitHub Actions page</div>';
+      openDashboardBtn.disabled = true;
+      openDashboardBtn.style.background = "#bbb";
+      openDashboardBtn.style.cursor = "not-allowed";
+      hint.textContent = "Go to github actions page";
     }
   } catch (error) {
-    console.error("Error updating popup content:", error);
-    const dashboardElement = document.getElementById("dashboard");
-    dashboardElement.innerHTML = '<div class="message">Error loading page information</div>';
+    console.error("Error updating dashboard button state:", error);
   }
 };
 
+// GitHub Token field handling
 document.addEventListener("DOMContentLoaded", () => {
-  updatePopupContent();
+  updateDashboardButtonState();
+
+  const tokenInput = document.getElementById("github-token");
+  const saveBtn = document.getElementById("save-token");
+  const statusSpan = document.getElementById("token-status");
+  const openDashboardBtn = document.getElementById("open-dashboard");
+
+  // Pre-fill token if saved
+  chrome.storage.local.get(["githubToken"], (result) => {
+    if (result.githubToken) {
+      tokenInput.value = result.githubToken;
+      statusSpan.textContent = "Token loaded";
+      statusSpan.style.color = "green";
+    }
+  });
+
+  saveBtn.addEventListener("click", () => {
+    const token = tokenInput.value.trim();
+    if (token.length > 0) {
+      chrome.storage.local.set({ githubToken: token }, () => {
+        statusSpan.textContent = "Token saved";
+        statusSpan.style.color = "green";
+      });
+    } else {
+      chrome.storage.local.remove(["githubToken"], () => {
+        statusSpan.textContent = "Token deleted";
+        statusSpan.style.color = "orange";
+      });
+    }
+  });
+
+  // Open dashboard button handling
+  openDashboardBtn.addEventListener("click", async () => {
+    if (!openDashboardBtn.disabled) {
+      const reactUrl = chrome.runtime.getURL('react_page/index.html');
+      const dashUrl = chrome.runtime.getURL('dashboard.html');
+      try {
+        // prefer react_page if it exists in the packaged extension
+        const res = await fetch(reactUrl, { method: 'HEAD' });
+        if (res.ok) {
+          chrome.tabs.create({ url: reactUrl });
+          return;
+        }
+      } catch (err) {
+        // ignore and fallback
+      }
+      // fallback to dashboard.html
+      chrome.tabs.create({ url: dashUrl });
+    }
+  });
 });

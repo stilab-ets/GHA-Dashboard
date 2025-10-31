@@ -4,7 +4,15 @@
 <div class="container">
   <div>
     <div class="title">Your GitHub Actions Dashboard</div>
-
-    <div class="dashboard" id="dashboard"></div>
+    <div class="token-section">
+      <label for="github-token">GitHub Token :</label>
+      <input type="password" id="github-token" placeholder="ghp_xxx..." autocomplete="off" />
+      <button id="save-token">Save</button>
+      <span id="token-status" style="margin-left:8px;font-size:0.9em;"></span>
+    </div>
+    <div style="margin-top: 18px; text-align: center;">
+      <button id="open-dashboard" style="padding:8px 18px;font-size:15px;background:#238636;color:white;border:none;border-radius:6px;cursor:pointer;">Open Dashboard</button>
+      <div id="dashboard-hint" style="margin-top:8px;font-size:13px;color:#888;"></div>
+    </div>
   </div>
 </div>

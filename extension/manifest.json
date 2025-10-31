@@ -10,7 +10,7 @@
   "content_scripts": [
     {
       "matches": ["https://github.com/*"],
-      "js": ["apiService.js", "dashboardTemplates.js", "utils.js", "contentScript.js"]
+      "js": ["apiService.js", "contentScript.js"]
     }
   ],
   "web_accessible_resources": [
