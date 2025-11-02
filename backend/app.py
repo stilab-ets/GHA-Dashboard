@@ -1,44 +1,43 @@
 from flask import Flask, jsonify, request
-from flask_cors import CORS
-import subprocess
-import json
+import pandas as pd
 import os
+from extraction.extractor import extract_data
 
 app = Flask(__name__)
-CORS(app)
 
-@app.route('/api/github-metrics', methods=['GET'])
+CSV_PATH = "builds_features.csv"
+
+
+
+@app.route("/api/extraction", methods=["GET"])
+def extraction_api():
+    repo = request.args.get("repo")
+    if not repo:
+        return jsonify({"error": "Repo manquant"}), 400
+
+    token = os.getenv("GITHUB_TOKEN", "<TON_TOKEN_ICI>")
+    result = extract_data(repo, token)
+    return jsonify(result)
+
+@app.route("/api/github-metrics")
 def github_metrics():
-    repo = request.args.get('repo', 'stilab-ets/GHA-Dashboard')
-    start_date = request.args.get('start_date', '2024-01-01')
-    end_date = request.args.get('end_date', '2025-10-31')
-    token = os.getenv("GITHUB_TOKEN")  # on garde le token caché dans l’environnement
+    repo = request.args.get("repo")
+    if not repo:
+        return jsonify({"error": "repo manquant"}), 400
 
-    try:
-        cmd = [
-            "python", "GHAminer/src/GHAMetrics.py",
-            "-t", token,
-            "-s", f"https://github.com/{repo}",
-            "-fd", start_date,
-            "-td", end_date
-        ]
-        print(" Lancement de GHAminer...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-        print(" Exécution terminée.")
+    df = pd.read_csv("extraction/all_builds.csv")
+    repo_df = df[df["repo"] == repo]
 
-        # Afficher ce que GHAminer a renvoyé
-        print(result.stdout)
+    if repo_df.empty:
+        return jsonify({"error": "Aucune donnée trouvée pour ce dépôt."}), 404
 
-        # Essayer de charger le JSON
-        data = json.loads(result.stdout)
+    result = {
+        "repo": repo,
+        "totalRuns": len(repo_df),
+        "successRate": round((repo_df[repo_df["conclusion"] == "success"].shape[0] / len(repo_df)) * 100, 2),
+        "avgDuration": round(repo_df["run_duration"].mean(), 2)
+    }
+    return jsonify(result)
 
-        return jsonify(data)
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": " Temps d’exécution dépassé"})
-    except json.JSONDecodeError:
-        return jsonify({"error": " Sortie GHAminer non valide ou vide"})
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(port=3000, debug=True)
