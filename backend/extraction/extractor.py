@@ -93,5 +93,5 @@ def merge_with_history(new_df, merged_csv_path):
         combined_df = new_df
 
     combined_df.to_csv(merged_csv_path, index=False)
-    print(f"💾 Historique mis à jour : {merged_csv_path}")
+    print(f" Historique mis à jour : {merged_csv_path}")
     return combined_df
