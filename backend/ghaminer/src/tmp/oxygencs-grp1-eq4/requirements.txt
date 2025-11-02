@@ -1,4 +1,0 @@
-pytest
-python-dotenv
-signalrcore
-psycopg2

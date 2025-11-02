@@ -35,7 +35,7 @@ def github_metrics():
         "repo": repo,
         "totalRuns": len(repo_df),
         "successRate": round((repo_df[repo_df["conclusion"] == "success"].shape[0] / len(repo_df)) * 100, 2),
-        "avgDuration": round(repo_df["run_duration"].mean(), 2)
+        "avgDuration": round(repo_df["build_duration"].mean(), 2)
     }
     return jsonify(result)
 
