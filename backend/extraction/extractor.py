@@ -6,7 +6,7 @@ import datetime
 # ---------------------------------------------------------------------------
 #  Configuration de base
 # ---------------------------------------------------------------------------
-GHAMINER_PATH = os.path.join("ghaminer1", "src", "GHAMetrics.py")
+GHAMINER_PATH = os.path.join("ghaminer", "src", "GHAMetrics.py")
 BUILD_FEATURES_PATH = os.path.join("builds_features.csv")
 MERGED_PATH = os.path.join("extraction", "all_builds.csv")
 LAST_REPO_FILE = os.path.join("last_repo.txt")
