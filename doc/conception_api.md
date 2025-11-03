@@ -87,11 +87,11 @@ Voir la section appropriée sur les WebSockets.
 
 ### /data/\<path:repositoryName\>
 Après la connection initial au WebSocket, le serveur PEUT envoyer un message de
-type `"initialData"` contenant une liste des données qui sont déjà existantes.
+type [`InitialDataMessage`](#initialdatamessage) contenant une liste des données qui sont déjà existantes.
 
 Ensuite, lorsque le serveur reçoit assez de nouvelles informations de GHAMiner
 pour la période d'agrégation choisie, il DOIT renvoyer un message de type
-`"newData"`, contenant une nouvelle donnée d'analyse.
+[`NewDataMessage`](#newdatamessage), contenant une nouvelle donnée d'analyse.
 
 Lorsque GHAMiner a fini son exécution, le serveur DOIT fermer la connexion.
 
@@ -106,6 +106,7 @@ Les messages provenant du client sont ignorés par le serveur.
     data: AggregationData[]
 }
 ```
+Voir: [`AggregationData`](#aggregationdata).
 
 #### `NewDataMessage`
 ```ts
@@ -114,6 +115,7 @@ Les messages provenant du client sont ignorés par le serveur.
     data: AggregationData
 }
 ```
+Voir: [`AggregationData`](#aggregationdata).
 
 #### `AggregationData`
 ```ts
@@ -126,6 +128,7 @@ Les messages provenant du client sont ignorés par le serveur.
     timeInfo: TimeInfo
 }
 ```
+Voir: [`RunInfo`](#runinfo), [`StatusInfo`](#runinfo), [`TimeInfo`](#timeinfo).
 
 ### `RunInfo`
 ```ts
