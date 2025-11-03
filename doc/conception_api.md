@@ -64,7 +64,7 @@ paramètres dans un URI ([RFC 3986 (section 2)](https://datatracker.ietf.org/doc
     - Filtre sur le workflow qui est utilisé pour la run.
 
 #### Retour
-Voir la section appropriée sur les WebSockets.
+Voir la [section appropriée](#datapathrepositoryname) sur les WebSockets.
 
 #### Exemples de requêtes
 - Requête pour aller chercher toutes les données disponibles sur le dépôt
