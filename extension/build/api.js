@@ -30,7 +30,7 @@ export async function fetchDashboardData() {
   ];
 
   return {
-    repo: 'stilab-ets/GHA-Dashboard',
+    repo: request.args.get("repo"),
     totalRuns: runsOverTime.reduce((s, r) => s + r.runs, 0),
     successRate: 0.86,
     failureRate: 0.10,

@@ -16,8 +16,21 @@ def extraction_api():
         return jsonify({"error": "Repo manquant"}), 400
 
     token = os.getenv("GITHUB_TOKEN", "<TON_TOKEN_ICI>")
-    result = extract_data(repo, token)
-    return jsonify(result)
+    
+    # Appel à la fonction d’extraction
+    result = extract_data(repo, token, "2024-04-01", "2025-10-31")
+
+    #  Gestion des retours (DataFrame ou erreur)
+    if isinstance(result, tuple):
+        df, error = result
+        if error:
+            return jsonify({"error": error}), 400
+        else:
+            # Conversion DataFrame → JSON
+            return jsonify(df.to_dict(orient="records"))
+    else:
+        return jsonify({"error": "Format de retour inattendu"}), 500
+
 
 @app.route("/api/github-metrics")
 def github_metrics():
@@ -25,7 +38,7 @@ def github_metrics():
     if not repo:
         return jsonify({"error": "repo manquant"}), 400
 
-    df = pd.read_csv("extraction/all_builds.csv")
+    df = pd.read_csv("builds_features.csv")
     repo_df = df[df["repo"] == repo]
 
     if repo_df.empty:
