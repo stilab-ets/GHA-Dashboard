@@ -4,6 +4,7 @@
 - **[Introduction](#introduction)**
 - **[Requêtes HTTP](#requêtes-http)**
 - **[Messages WebSockets](#messages-websockets)**
+- **[Représentation des données](#représentation-des-données)**
 
 ## Introduction
 Ce document contient des descriptions détaillées de tout les aspect en rapport
@@ -59,6 +60,8 @@ paramètres dans un URI ([RFC 3986 (section 2)](https://datatracker.ietf.org/doc
     - Filtre sur le nom d'utilisateur de la personne ayant déclenché la run.
   - **branch** (*string*):
     - Filtre sur la branche qui est utilisé pour la run.
+  - **workflowName** (*string*):
+    - Filtre sur le workflow qui est utilisé pour la run.
 
 #### Retour
 Voir la section appropriée sur les WebSockets.
@@ -76,11 +79,81 @@ Voir la section appropriée sur les WebSockets.
   ```
 - Requête avec tous les filtres:
   ```
-  /data/rust-lang/crates.io?aggregationPeriod=week&startDate=2025-10-01&endDate=2025-10-31&author=Gaubbe&branch=main
+  /data/rust-lang/crates.io?aggregationPeriod=week&startDate=2025-10-01&endDate=2025-10-31&workflowName=CI&author=Gaubbe&branch=main
   ```
 
 
 ### Messages WebSockets
 
 ### /data/\<path:repositoryName\>
+Après la connection initial au WebSocket, le serveur PEUT envoyer un message de
+type `"initialData"` contenant une liste des données qui sont déjà existantes.
 
+Ensuite, lorsque le serveur reçoit assez de nouvelles informations de GHAMiner
+pour la période d'agrégation choisie, il DOIT renvoyer un message de type
+`"newData"`, contenant une nouvelle donnée d'analyse.
+
+Lorsque GHAMiner a fini son exécution, le serveur DOIT fermer la connexion.
+
+Les messages provenant du client sont ignorés par le serveur.
+
+### Représentation des données
+
+#### `InitialDataMessage`
+```json
+{
+    type: "initialData",
+    data: AggregationData[]
+}
+```
+
+#### `NewDataMessage`
+```json
+{
+    type: "newData",
+    data: AggregationData
+}
+```
+
+#### `AggregationData`
+```json
+{
+    runInfo: RunInfo
+    aggregationPeriod: "day" | "month" | "week",
+    periodStart: date,
+    runs: int,
+    statusInfo: StatusInfo,
+    timeInfo: TimeInfo
+}
+```
+
+### `RunInfo`
+```json
+{
+    repositoryName: string,
+    workflowName: string,
+    branch: string,
+    author: string,
+}
+```
+
+### `StatusInfo`
+```json
+{
+    sucesses: int,
+    failures: int,
+    cancelled: int,
+}
+```
+
+### `TimeInfo`
+```json
+{
+    min: float,
+    q1: float,
+    median: float,
+    q3: float,
+    max: float,
+    average: float
+}
+```
