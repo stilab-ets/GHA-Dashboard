@@ -100,7 +100,7 @@ Les messages provenant du client sont ignorés par le serveur.
 ### Représentation des données
 
 #### `InitialDataMessage`
-```json
+```ts
 {
     type: "initialData",
     data: AggregationData[]
@@ -108,7 +108,7 @@ Les messages provenant du client sont ignorés par le serveur.
 ```
 
 #### `NewDataMessage`
-```json
+```ts
 {
     type: "newData",
     data: AggregationData
@@ -116,7 +116,7 @@ Les messages provenant du client sont ignorés par le serveur.
 ```
 
 #### `AggregationData`
-```json
+```ts
 {
     runInfo: RunInfo
     aggregationPeriod: "day" | "month" | "week",
@@ -128,7 +128,7 @@ Les messages provenant du client sont ignorés par le serveur.
 ```
 
 ### `RunInfo`
-```json
+```ts
 {
     repositoryName: string,
     workflowName: string,
@@ -138,7 +138,7 @@ Les messages provenant du client sont ignorés par le serveur.
 ```
 
 ### `StatusInfo`
-```json
+```ts
 {
     sucesses: int,
     failures: int,
@@ -147,7 +147,7 @@ Les messages provenant du client sont ignorés par le serveur.
 ```
 
 ### `TimeInfo`
-```json
+```ts
 {
     min: float,
     q1: float,
