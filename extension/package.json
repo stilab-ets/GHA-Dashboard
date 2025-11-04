@@ -10,12 +10,12 @@
     "dist": "npm run pack && powershell -NoProfile -Command \"Compress-Archive -Path build\\* -DestinationPath gha-dashboard.zip -Force\""
   },
   "dependencies": {
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "recharts": "^2.4.0"
   },
   "devDependencies": {
-    "vite": "^4.0.0",
-    "@vitejs/plugin-react": "^4.0.0"
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^4.5.14"
   }
 }
