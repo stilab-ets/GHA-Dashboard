@@ -1,4 +1,4 @@
-# Conception de l'API (v0.0.1)
+# Conception de l'API (v0.0.2)
 ## Tables des matières
 
 - **[Introduction](#introduction)**
@@ -143,9 +143,10 @@ Voir: [`RunInfo`](#runinfo), [`StatusInfo`](#runinfo), [`TimeInfo`](#timeinfo).
 ### `StatusInfo`
 ```ts
 {
-    sucesses: int,
+    numRuns: int,
+    successes: int,
     failures: int,
-    cancelled: int,
+    cancelled: int
 }
 ```
 
