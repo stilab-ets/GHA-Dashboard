@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, Self
+from pandas import DataFrame
 
 @dataclass
 class RawData:
@@ -26,6 +27,36 @@ class RawData:
     workflow_name: str
     fetch_duration: float
 
+    @classmethod
+    def from_data_frame(cls, df: DataFrame) -> list[Self]:
+        return [
+            cls(
+                str(row["repo"]),
+                int(row["id_build"]),
+                int(row["workflow_id"]),
+                str(row["issuer_name"]),
+                str(row["branch"]),
+                str(row["commit_sha"]),
+                str(row["languages"]),
+                str(row["status"]),
+                str(row["workflow_event_trigger"]),
+                str(row["conclusion"]),
+                datetime.fromisoformat(str(row["created_at"])),
+                datetime.fromisoformat(str(row["updated_at"])),
+                float(row["build_duration"]),
+                int(row["total_builds"]),
+                datetime.fromisoformat(str(row["gh_first_commit_created_at"])),
+                str(row["build_language"]),
+                int(row["dependencies_count"]),
+                float(row["workflow_size"]),
+                str(row["test_framework"]),
+                str(row["workflow_name"]),
+                float(row["fetch_duration"]),
+            )
+            for _, row in df.iterrows()
+        ]
+
+
 @dataclass
 class TimeInfo:
     min: float
@@ -49,10 +80,12 @@ class RunInfo:
     branch: str
     author: str
 
+type AggregationPeriod = Literal["day", "month", "week"]
+
 @dataclass
 class AggregationData:
     runInfo: RunInfo
-    aggregationPeriod: Literal["day", "month", "week"]
+    aggregationPeriod: AggregationPeriod
     periodStart: date
     statusInfo: StatusInfo
     timeInfo: TimeInfo
