@@ -10,7 +10,7 @@ class AggregationFilters:
     startDate: date
     endDate: date
 
-def period_bounds_from_date(date: date, aggregationPeriod: AggregationPeriod) -> tuple[datetime, datetime]:
+def period_bounds_from_date(date: date, aggregationPeriod: AggregationPeriod) -> tuple[dt, dt]:
     if aggregationPeriod == "day":
         periodStart = dt(date.year, date.month, date.day)
         periodEnd = periodStart + timedelta(days=1)
@@ -28,7 +28,7 @@ def period_bounds_from_date(date: date, aggregationPeriod: AggregationPeriod) ->
             periodEnd = dt(date.year, date.month + 1, 1)
         return (periodStart, periodEnd)
 
-async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod: AggregationPeriod) -> AsyncGenerator[list[RawData], None]:
+async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod: AggregationPeriod) -> AsyncGenerator[tuple[list[RawData], dt, dt], None]:
     result = []
     periodStart: datetime | None = None
     periodEnd: datetime | None = None
@@ -39,7 +39,7 @@ async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod:
             result.append(run)
         else:
             if run.created_at < periodStart or run.created_at >= periodEnd:
-                yield result
+                yield (result, periodStart, periodEnd)
                 periodStart, periodEnd = period_bounds_from_date(run.created_at.date(), aggregationPeriod)
                 result = [run]
             else:
