@@ -47,6 +47,11 @@ async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod:
                 result.append(run)
 
 def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeriod: AggregationPeriod) -> AggregationData:
+    # Runs info
+    workflow_names: set[str] = set()
+    branches: set[str] = set()
+    authors: set[str] = set()
+
     # Run status
     num_runs: int = len(runs)
     num_successes: int = 0
@@ -58,6 +63,10 @@ def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeri
     average_build_time: float = 0
 
     for run in runs:
+        workflow_names.add(run.workflow_name)
+        branches.add(run.branch)
+        authors.add(run.issuer_name)
+
         build_times.append(run.build_duration)
         average_build_time += run.build_duration / num_runs
 
@@ -93,9 +102,9 @@ def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeri
     return AggregationData(
         RunInfo(
             runs[0].repo,
-            runs[0].workflow_name,
-            runs[0].branch,
-            runs[0].issuer_name,
+            list(workflow_names),
+            list(branches),
+            list(authors),
         ),
         aggregationPeriod,
         periodStart,

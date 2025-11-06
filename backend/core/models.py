@@ -76,15 +76,15 @@ class StatusInfo:
 @dataclass
 class RunInfo:
     repositoryName: str
-    workflowName: str
-    branch: str
-    author: str
+    workflowNames: list[str]
+    branches: list[str]
+    authors: list[str]
 
 type AggregationPeriod = Literal["day", "month", "week"]
 
 @dataclass
 class AggregationData:
-    runInfo: RunInfo
+    runsInfo: RunInfo
     aggregationPeriod: AggregationPeriod
     periodStart: date
     statusInfo: StatusInfo
