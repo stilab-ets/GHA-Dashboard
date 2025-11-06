@@ -9,11 +9,12 @@ from sqlalchemy import text
 from models import db, Repository, Workflow, WorkflowRun
 from extraction.extractor import extract_data
 
-# ───────────────── Config de l'app ─────────────────
+# Initialisation de l'application Flask
 load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
+# connexion a la BD du conteneur
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
@@ -21,17 +22,9 @@ db.init_app(app)
 CSV_PATH = "builds_features.csv"
 
 # ============================================
-# Route de Health Check (pour Docker)
+# Helpers ingestion 
 # ============================================
-@app.route("/health")
-def health():
-    """Health check endpoint pour Docker healthcheck"""
-    return jsonify({
-        "status": "ok",
-        "service": "GHA Dashboard Backend",
-        "csv_exists": os.path.exists(CSV_PATH)
-    }), 200
-# ─────────── Helpers ingestion ───────────
+
 def _iso_dt(v):
     if not v:
         return None
@@ -57,24 +50,28 @@ def _get_or_create_workflow(repo_id: int, wf_name: str) -> Workflow:
     return wf
 
 # ============================================
-# Route d'Extraction des Données
+# Health (BD + API) 
 # ============================================
-@app.route("/api/extraction", methods=["GET"])
-def extraction_api():
-    """
-    Extrait les données GitHub Actions via GHAminer
-    Query params: repo (required)
-    """
-# ─────────── test BD ───────────
+
 @app.get("/health")
 def health():
     try:
         db.session.execute(text("SELECT 1"))
-        return {"status": "ok"}, 200
+        return {
+            "status": "ok",
+            "service": "GHA Dashboard Backend",
+            "csv_exists" : os.path.exists(CSV_PATH)
+            }, 200
     except Exception as e:
-        return {"status": "db_error", "message": str(e)}, 500
+        return {
+            "status": "db_error", 
+            "message": str(e),
+            "csv_exists" : os.path.exists(CSV_PATH)
+            }, 500
 
-# ─────────── Route extraction  ───────────
+# ============================================
+# Route extraction 
+# ============================================
 @app.get("/api/extraction")
 def extraction_api():
     # Extrait les données pour ?repo=owner/name et retourne le DataFrame en JSON
@@ -99,7 +96,7 @@ def extraction_api():
             "detail": str(e)
         }), 500
 
-    # Gestion des retours (DataFrame ou erreur)
+    # Gestion des retours 
     if isinstance(result, tuple):
         df, error = result
         if error:
@@ -111,28 +108,14 @@ def extraction_api():
                 "repo": repo,
                 "runs_extracted": len(df),
                 "data": df.to_dict(orient="records")
-            })
-    else:
-        return jsonify({"error": "Format de retour inattendu"}), 500
+            }), 200
+    return jsonify({"error": "Format de retour inattendu"}), 500
 
 
 # ============================================
-# Route des Métriques GitHub
+# Route KPI depuis CSV
 # ============================================
-@app.route("/api/github-metrics")
-    token = os.getenv("GITHUB_TOKEN")
-    if not token:
-        return jsonify({"error": "GITHUB_TOKEN manquant dans .env"}), 400
 
-    df, error = extract_data(repo, token, "2024-04-01", "2025-10-31")
-    if error:
-        return jsonify({"error": error}), 400
-    if df is None or df.empty:
-        return jsonify({"error": "Aucune donnée extraite"}), 404
-
-    return jsonify(df.to_dict(orient="records")), 200
-
-# ─────────── Route KPI depuis CSV ───────────
 @app.get("/api/github-metrics")
 def github_metrics():
     """
@@ -216,27 +199,9 @@ def debug():
 
 
 # ============================================
-# Démarrage de l'Application
+# Route Extraction + Ingestion BD 
 # ============================================
-if __name__ == "__main__":
-    # Utiliser les variables d'environnement pour le port
-    port = int(os.getenv("FLASK_RUN_PORT", 3000))
-    debug = os.getenv("FLASK_DEBUG", "1") == "1"
-    
-    print(f"Starting GHA Dashboard Backend on port {port}")
-    print(f"CSV Path: {os.path.abspath(CSV_PATH)}")
-    print(f"GitHub Token configured: {bool(os.getenv('GITHUB_TOKEN'))}")
-    
-    app.run(host="0.0.0.0", port=port, debug=debug)
-    result = {
-        "repo": repo,
-        "totalRuns": len(repo_df),
-        "successRate": round((repo_df[repo_df["conclusion"] == "success"].shape[0] / len(repo_df)) * 100, 2),
-        "avgDuration": round(repo_df["build_duration"].mean(), 2),
-    }
-    return jsonify(result), 200
 
-# ─────────── Route Extraction + Ingestion BD  ───────────
 @app.post("/api/sync")
 def sync_repo():
     """
@@ -318,14 +283,15 @@ def sync_repo():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
     
-# ─────────── Lancement de l'app ───────────
+# ============================================
+# Démarrage de l'Application
+# ============================================
 if __name__ == "__main__":
-    with app.app_context():
-        try:
-            db.session.execute(text("SELECT 1"))
-            print("Connexion PostgreSQL OK")
-        except Exception as e:
-            print("Erreur de connexion PostgreSQL :", e)
-        db.create_all()
-        print("Tables créées ou déjà existantes.")
-    app.run(port=3000, debug=True)
+    port = int(os.getenv("FLASK_RUN_PORT", 3000))
+    debug = os.getenv("FLASK_DEBUG", "1") == "1"
+
+    print(f"Starting GHA Dashboard Backend on port {port}")
+    print(f"CSV Path: {os.path.abspath(CSV_PATH)}")
+    print(f"GitHub Token configured: {bool(os.getenv('GITHUB_TOKEN'))}")
+
+    app.run(host="0.0.0.0", port=port, debug=debug)
