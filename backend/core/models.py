@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Literal, Self
+from typing import Literal, Self, ClassVar
 from pandas import DataFrame
 
 @dataclass
@@ -92,11 +92,11 @@ class AggregationData:
 
 @dataclass
 class NewDataMessage:
-    type: Literal["newData"]
+    type: ClassVar[Literal["newData"]] = "newData"
     data: AggregationData
 
 @dataclass
 class InitialDataMessage:
-    type: Literal["initialData"]
+    type: ClassVar[Literal["initialData"]] = "initialData"
     data: list[AggregationData]
 
