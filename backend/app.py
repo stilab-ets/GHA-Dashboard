@@ -1,9 +1,16 @@
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 import pandas as pd
 import os
+from core.models import AggregationPeriod
 from extraction.extractor import extract_data
+from analysis.endpoint import AggregationFilters, send_data
+from typing import cast
+from datetime import date
+import asyncio
+from flask_sock import Sock
 
 app = Flask(__name__)
+sock = Sock(app)
 
 CSV_PATH = "builds_features.csv"
 
@@ -51,6 +58,36 @@ def github_metrics():
         "avgDuration": round(repo_df["build_duration"].mean(), 2)
     }
     return jsonify(result)
+
+@sock.route("/data/<path:repositoryName>")
+def websocket_data(ws, repositoryName: str):
+    filters = AggregationFilters()
+
+    aggregationPeriod = request.args.get("aggregationPeriod")
+    if aggregationPeriod != None:
+        filters.aggregationPeriod = cast(AggregationPeriod, aggregationPeriod)
+
+    startDate = request.args.get("startDate")
+    if startDate != None:
+        filters.startDate = date.fromisoformat(startDate)
+
+    endDate = request.args.get("endDate")
+    if endDate != None:
+        filters.endDate = date.fromisoformat(endDate)
+
+    branch = request.args.get("branch")
+    if branch != None:
+        filters.branch = branch
+
+    author = request.args.get("author")
+    if author != None:
+        filters.author = author
+
+    workflowName = request.args.get("workflowName")
+    if workflowName != None:
+        filters.workflowName = workflowName
+
+    asyncio.run(send_data(ws, repositoryName, filters))
 
 if __name__ == "__main__":
     app.run(port=3000, debug=True)

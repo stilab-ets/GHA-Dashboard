@@ -4,13 +4,6 @@ from typing import AsyncIterator, AsyncGenerator
 from datetime import datetime as dt, date, timedelta
 from math import floor
 
-@dataclass
-class AggregationFilters:
-    runInfo: RunInfo
-    aggregationPeriod: AggregationPeriod
-    startDate: date
-    endDate: date
-
 def period_bounds_from_date(date: date, aggregationPeriod: AggregationPeriod) -> tuple[dt, dt]:
     if aggregationPeriod == "day":
         periodStart = dt(date.year, date.month, date.day)
@@ -123,3 +116,33 @@ def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeri
             average_build_time,
         )
     )
+
+from extraction.extractor import *
+from typing import cast, Any
+import asyncio
+import json
+
+def test(aggregationPeriod: AggregationPeriod):
+    res = extract_data("rust-lang/crates.io", "", "2024-04-01", "2025-10-31")
+    df = cast(DataFrame, res[0])
+
+    raw_data = RawData.from_data_frame(df)
+
+    async def gen() -> AsyncGenerator[RawData, None]:
+        for data in raw_data:
+            await asyncio.sleep(0.01)
+            yield data
+
+    async def runner():
+        async for data, periodStart, _periodEnd in separate_into_periods(gen(), aggregationPeriod):
+            aggregated = aggregate_one_period(data, periodStart, aggregationPeriod)
+
+            def serialize_default(any: Any) -> Any:
+                if isinstance(any, dt):
+                    return any.isoformat()
+                else:
+                    return any.__dict__
+
+            print(json.dumps(aggregated, default=serialize_default))
+
+    asyncio.run(runner())
