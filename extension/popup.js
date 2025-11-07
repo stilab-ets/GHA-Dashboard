@@ -5,6 +5,26 @@ const isGitHubActionsPage = (url) => {
          (url.endsWith("/actions") || url.includes("/actions/"));
 };
 
+// Fonction helper
+function extractRepoFromUrl(url) {
+  if (!url || !url.includes('github.com')) {
+    return null;
+  }
+  
+  try {
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/').filter(p => p);
+    
+    if (pathParts.length >= 2) {
+      return `${pathParts[0]}/${pathParts[1]}`;
+    }
+  } catch (error) {
+    console.error('Error parsing URL:', error);
+  }
+  
+  return null;
+}
+
 // Function to update dashboard button state based on the current tab
 const updateDashboardButtonState = async () => {
   try {
@@ -65,20 +85,38 @@ document.addEventListener("DOMContentLoaded", () => {
   // Open dashboard button handling
   openDashboardBtn.addEventListener("click", async () => {
     if (!openDashboardBtn.disabled) {
-      const reactUrl = chrome.runtime.getURL('react_page/index.html');
-      const dashUrl = chrome.runtime.getURL('dashboard.html');
       try {
-        // prefer react_page if it exists in the packaged extension
-        const res = await fetch(reactUrl, { method: 'HEAD' });
-        if (res.ok) {
-          chrome.tabs.create({ url: reactUrl });
-          return;
+        // 1. Détecter et sauvegarder le repo actuel
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const repo = extractRepoFromUrl(tab.url);
+
+        if (repo) {
+          // Sauvegarder le repo dans storage
+          await chrome.storage.local.set({ currentRepo: repo });
+          console.log(`Saved repo for dashboard: ${repo}`);
         }
-      } catch (err) {
-        // ignore and fallback
+
+        // 2. Ouvrir le dashboard
+        const reactUrl = chrome.runtime.getURL('react_page/index.html');
+        const dashUrl = chrome.runtime.getURL('dashboard.html');
+
+        try {
+          const res = await fetch(reactUrl, { method: 'HEAD' });
+          if (res.ok) {
+            chrome.tabs.create({ url: reactUrl });
+            return;
+          }
+        } catch (err) {
+          // ignore and fallback
+        }
+
+        // fallback to dashboard.html
+        chrome.tabs.create({ url: dashUrl });
+
+      } catch (error) {
+        console.error('Error opening dashboard:', error);
+        alert('Error: Could not detect repository');
       }
-      // fallback to dashboard.html
-      chrome.tabs.create({ url: dashUrl });
     }
   });
 });
