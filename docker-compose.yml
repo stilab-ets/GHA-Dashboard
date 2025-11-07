@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: gha-postgres
@@ -22,7 +21,6 @@ services:
     networks:
       - gha-network
 
-  # Backend Flask (Python)
   backend:
     build:
       context: ./backend
@@ -35,25 +33,23 @@ services:
       FLASK_RUN_PORT: 3000
       FLASK_ENV: ${FLASK_ENV:-development}
       FLASK_DEBUG: 1
-      
-      # Database
+
+      # Database (ce que ton app.py lit)
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/gha_dashboard
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-gha_dashboard}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      
+
       # GitHub
       GITHUB_TOKEN: ${GITHUB_TOKEN}
     ports:
       - "3000:3000"
     volumes:
-      # Hot reload - code source
       - ./backend/src:/app/src:ro
       - ./backend/extraction:/app/extraction:ro
       - ./backend/ghaminer:/app/ghaminer:ro
-      
-      # Fichiers CSV générés
       - ./backend/builds_features.csv:/app/builds_features.csv
     depends_on:
       postgres:
@@ -63,7 +59,6 @@ services:
     restart: unless-stopped
     command: flask run --host=0.0.0.0 --port=3000
 
-  # pgAdmin
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: gha-pgadmin
