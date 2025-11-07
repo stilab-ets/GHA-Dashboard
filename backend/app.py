@@ -235,11 +235,12 @@ def sync_repo():
     try:
         ids = [int(x) for x in df["id_build"].tolist() if pd.notnull(x)]
         existing_ids = {
-            x[0]
-            for x in db.session.query(WorkflowRun.id)
-                               .filter(WorkflowRun.id.in_(ids)).all()
+        x[0]
+        for x in db.session.query(WorkflowRun.id_build)
+                       .filter(WorkflowRun.id_build.in_(ids))
+                       .all()
         }
-
+        
         owner_name = repo.split("/")[0] if "/" in repo else "unknown"
         repo_obj = _get_or_create_repo(repo_name=repo, owner=owner_name)
         inserted, skipped = 0, 0
