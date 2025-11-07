@@ -33,18 +33,18 @@ def _iso_dt(v):
     except Exception:
         return None
 
-def _get_or_create_repo(name: str) -> Repository:
-    repo = db.session.query(Repository).filter_by(name=name).one_or_none()
+def _get_or_create_repo(repo_name: str, owner: str = "unknown") -> Repository:
+    repo = db.session.query(Repository).filter_by(repo_name=repo_name).one_or_none()
     if not repo:
-        repo = Repository(name=name)
+        repo = Repository(repo_name=repo_name, owner=owner)
         db.session.add(repo)
         db.session.flush()
     return repo
 
 def _get_or_create_workflow(repo_id: int, wf_name: str) -> Workflow:
-    wf = db.session.query(Workflow).filter_by(repo_id=repo_id, name=wf_name).one_or_none()
+    wf = db.session.query(Workflow).filter_by(repository_id=repo_id, workflow_name=wf_name).one_or_none()
     if not wf:
-        wf = Workflow(repo_id=repo_id, name=wf_name)
+        wf = Workflow(repository_id=repo_id, workflow_name=wf_name)
         db.session.add(wf)
         db.session.flush()
     return wf
@@ -240,7 +240,8 @@ def sync_repo():
                                .filter(WorkflowRun.id.in_(ids)).all()
         }
 
-        repo_obj = _get_or_create_repo(repo)
+        owner_name = repo.split("/")[0] if "/" in repo else "unknown"
+        repo_obj = _get_or_create_repo(repo_name=repo, owner=owner_name)
         inserted, skipped = 0, 0
 
         for _, row in df.iterrows():
@@ -257,14 +258,17 @@ def sync_repo():
             wf_obj = _get_or_create_workflow(repo_obj.id, wf_name)
 
             wr = WorkflowRun(
-                id=run_id,
-                workflow_id=wf_obj.id,
-                status=str(row.get("status") or "completed"),
-                conclusion=str(row.get("conclusion") or "unknown"),
-                started_at=_iso_dt(row.get("created_at")),
-                completed_at=_iso_dt(row.get("updated_at")),
-                duration_s=int(row.get("build_duration") or 0),
-                branch=str(row.get("branch") or "unknown"),
+            id_build=run_id,
+            workflow_id=wf_obj.id,
+            repository_id=repo_obj.id,
+            status=str(row.get("status") or "completed"),
+            conclusion=str(row.get("conclusion") or "unknown"),
+            created_at=_iso_dt(row.get("created_at")) or datetime.utcnow(),
+            updated_at=_iso_dt(row.get("updated_at")),
+            build_duration=float(row.get("build_duration") or 0),
+            branch=str(row.get("branch") or "unknown"),
+            issuer_name=str(row.get("issuer_name") or None),
+            workflow_event_trigger=str(row.get("event") or row.get("workflow_event_trigger") or None),
             )
             db.session.add(wr)
             inserted += 1
