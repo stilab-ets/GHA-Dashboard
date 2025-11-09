@@ -58,20 +58,23 @@ async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod:
     """
 
     result = []
-    periodStart: datetime | None = None
-    periodEnd: datetime | None = None
+    periodStart: datetime = dt.max
+    periodEnd: datetime = dt.min
 
     async for run in runs:
-        if periodStart == None or periodEnd == None:
-            periodStart, periodEnd = period_bounds_from_date(run.created_at.date(), aggregationPeriod)
-            result.append(run)
-        else:
-            if run.created_at < periodStart or run.created_at >= periodEnd:
+        if run.created_at < periodStart or run.created_at >= periodEnd:
+            if len(result) > 0:
                 yield (result, periodStart, periodEnd)
-                periodStart, periodEnd = period_bounds_from_date(run.created_at.date(), aggregationPeriod)
-                result = [run]
-            else:
-                result.append(run)
+            periodStart, periodEnd = period_bounds_from_date(run.created_at.date(), aggregationPeriod)
+            result = [run]
+        else:
+            result.append(run)
+
+    # Once we're done with runs, we might have left over runs that didn't
+    # trigger the yield. So we yield the rest.
+    if len(result) > 0:
+        yield (result, periodStart, periodEnd)
+
 
 def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeriod: AggregationPeriod) -> AggregationData:
     """
