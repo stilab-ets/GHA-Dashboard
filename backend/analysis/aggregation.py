@@ -5,6 +5,20 @@ from datetime import datetime as dt, date, timedelta
 from math import floor
 
 def period_bounds_from_date(date: date, aggregationPeriod: AggregationPeriod) -> tuple[dt, dt]:
+    """
+    Obtain the beginning and end times of a period of given length that
+    contains the date passed in.
+
+    Args:
+        date (date): The date to be contained in the period.
+        aggregationPeriod (AggregationPeriod): The length of the time period
+            returned.
+
+    Returns:
+        A tuple whose first element is the start time of the period and whose
+        second element is the end time of the period, non-inclusive.
+    """
+
     if aggregationPeriod == "day":
         periodStart = dt(date.year, date.month, date.day)
         periodEnd = periodStart + timedelta(days=1)
@@ -23,6 +37,26 @@ def period_bounds_from_date(date: date, aggregationPeriod: AggregationPeriod) ->
         return (periodStart, periodEnd)
 
 async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod: AggregationPeriod) -> AsyncGenerator[tuple[list[RawData], dt, dt], None]:
+    """
+    Takes an asynchronous iterator to the raw data and, according to the chosen
+    aggregation period, returns an iterator of lists of raw data, where all the
+    data in those lists come from the same aggregation period.
+
+    This is useful, as it makes our aggregation code agnostic to the period
+    length, allowing it to simply aggregate all the values in the list, knowing
+    in advace they all belong to the same aggregation period.
+
+    Args:
+        runs (AsyncIterator[RawData]): The asynchonous source of the raw data.
+        aggregationPeriod (AggregationPeriod): The length of the time period.
+
+    Returns:
+        An asynchronous iterator yielding a tuple, whose first element is a
+        list containing all the raw data for a single period, whose second
+        element is the start time of the period, and whose third element is the
+        end time of the period.
+    """
+
     result = []
     periodStart: datetime | None = None
     periodEnd: datetime | None = None
@@ -40,6 +74,21 @@ async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod:
                 result.append(run)
 
 def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeriod: AggregationPeriod) -> AggregationData:
+    """
+    Takes a list of pre-separated sets of raw data, aggregates the data and
+    returns the data representation to be sent to the WebSocket.
+
+    Args:
+        runs (list[RawData]): The runs to be aggregated.
+        periodStart (date): The start of the period. Used only for the
+            final object.
+        aggregationPeriod (AggregationPeriod): The length of the period over
+            which the data was aggregated. Used only for the final object
+
+    Returns:
+        The aggregated data to be sent to the WebSocket.
+    """
+
     # Runs info
     workflow_names: set[str] = set()
     branches: set[str] = set()
