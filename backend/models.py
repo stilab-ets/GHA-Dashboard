@@ -27,7 +27,6 @@ class Workflow(db.Model):
 
 class WorkflowRun(db.Model):
     __tablename__ = "workflow_runs"
-    id = db.Column(db.BigInteger, primary_key=True)
     id = db.Column(db.Integer, primary_key=True)
     
     id_build = db.Column(db.BigInteger, unique=True, nullable=False)
