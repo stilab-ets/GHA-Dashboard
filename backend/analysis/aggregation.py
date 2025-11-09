@@ -1,4 +1,4 @@
-from core.models import *
+from models import WorkflowRun, AggregationPeriod, AggregationData, RunInfo, StatusInfo, TimeInfo
 
 from typing import AsyncIterator, AsyncGenerator
 from datetime import datetime as dt, date, timedelta
@@ -36,7 +36,7 @@ def period_bounds_from_date(date: date, aggregationPeriod: AggregationPeriod) ->
             periodEnd = dt(date.year, date.month + 1, 1)
         return (periodStart, periodEnd)
 
-async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod: AggregationPeriod) -> AsyncGenerator[tuple[list[RawData], dt, dt], None]:
+async def separate_into_periods(runs: AsyncIterator[WorkflowRun], aggregationPeriod: AggregationPeriod) -> AsyncGenerator[tuple[list[WorkflowRun], dt, dt], None]:
     """
     Takes an asynchronous iterator to the raw data and, according to the chosen
     aggregation period, returns an iterator of lists of raw data, where all the
@@ -58,8 +58,8 @@ async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod:
     """
 
     result = []
-    periodStart: datetime = dt.max
-    periodEnd: datetime = dt.min
+    periodStart: dt = dt.max
+    periodEnd: dt = dt.min
 
     async for run in runs:
         if run.created_at < periodStart or run.created_at >= periodEnd:
@@ -76,13 +76,13 @@ async def separate_into_periods(runs: AsyncIterator[RawData], aggregationPeriod:
         yield (result, periodStart, periodEnd)
 
 
-def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeriod: AggregationPeriod) -> AggregationData:
+def aggregate_one_period(runs: list[WorkflowRun], periodStart: date, aggregationPeriod: AggregationPeriod) -> AggregationData:
     """
     Takes a list of pre-separated sets of raw data, aggregates the data and
     returns the data representation to be sent to the WebSocket.
 
     Args:
-        runs (list[RawData]): The runs to be aggregated.
+        runs (list[WorkflowRun]): The runs to be aggregated.
         periodStart (date): The start of the period. Used only for the
             final object.
         aggregationPeriod (AggregationPeriod): The length of the period over
@@ -108,7 +108,7 @@ def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeri
     average_build_time: float = 0
 
     for run in runs:
-        workflow_names.add(run.workflow_name)
+        workflow_names.add(run.workflow.workflow_name)
         branches.add(run.branch)
         authors.add(run.issuer_name)
 
@@ -146,7 +146,7 @@ def aggregate_one_period(runs: list[RawData], periodStart: date, aggregationPeri
 
     return AggregationData(
         RunInfo(
-            runs[0].repo,
+            runs[0].repository.repo_name,
             list(workflow_names),
             list(branches),
             list(authors),

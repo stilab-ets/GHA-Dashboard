@@ -1,5 +1,9 @@
 from flask_sqlalchemy import SQLAlchemy
 
+from dataclasses import dataclass
+from datetime import date
+from typing import Literal, ClassVar
+
 db = SQLAlchemy()
 
 class Repository(db.Model):
@@ -82,3 +86,46 @@ class WorkflowRun(db.Model):
     gh_sloc = db.Column(db.Integer)
     git_num_committers = db.Column(db.Integer)
     git_commits = db.Column(db.Integer)
+
+type AggregationPeriod = Literal["day", "month", "week"]
+
+@dataclass
+class TimeInfo:
+    min: float
+    q1: float
+    median: float
+    q3: float
+    max: float
+    average: float
+
+@dataclass
+class StatusInfo:
+    numRuns: int
+    successes: int
+    failures: int
+    cancelled: int
+
+@dataclass
+class RunInfo:
+    repositoryName: str
+    workflowNames: list[str]
+    branches: list[str]
+    authors: list[str]
+
+@dataclass
+class AggregationData:
+    runsInfo: RunInfo
+    aggregationPeriod: AggregationPeriod
+    periodStart: date
+    statusInfo: StatusInfo
+    timeInfo: TimeInfo
+
+@dataclass
+class NewDataMessage:
+    type: ClassVar[Literal["newData"]] = "newData"
+    data: AggregationData
+
+@dataclass
+class InitialDataMessage:
+    type: ClassVar[Literal["initialData"]] = "initialData"
+    data: list[AggregationData]
