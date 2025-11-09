@@ -1,7 +1,11 @@
-import subprocess
+from models import WorkflowRun
+
 import pandas as pd
+
+import subprocess
 import os
 import datetime
+from typing import AsyncIterator
 
 # ---------------------------------------------------------------------------
 #  Configuration de base
@@ -75,3 +79,80 @@ def extract_data(repo_url, token, from_date, to_date):
         return None, "Aucune donnée dans la plage de dates sélectionnée"
 
     return repo_df, None
+
+def async_extract_data(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime) -> tuple[list[WorkflowRun], AsyncIterator[WorkflowRun]]:
+    """
+    Returns a list of raw workflow runs that were already in the database,
+    and returns an asynchronous iterator that yields the data that was not in
+    the database, coming from GHAMiner.
+
+    This function will also add the new data to the database.
+
+    Args:
+        repo_url (str): The name of the GitHub repository.
+        token (str): The GitHub API token to use for GHAMiner.
+        from_date (datetime): The start time of the search.
+        to_date (datetime): The end time of the search (non-inclusive).
+
+    Returns:
+        A tuple whose first element is a list of raw workflow runs that were
+        already in the database, and whose second element is an asynchronous
+        iterator that yields the data that was not in the database, coming from
+        GHAMiner.
+    """
+
+    db_data = _get_data_from_db(repo_url, from_date, to_date)
+    if len(db_data) > 0:
+        miner_start_date: datetime.datetime = db_data[-1].created_at
+    else:
+        miner_start_date = from_date
+
+    miner_end_date = to_date
+
+    if miner_start_date >= miner_end_date:
+        class EmptyAsyncIter:
+            def __aiter__(self) -> 'EmptyAsyncIter':
+                return self
+
+            async def __anext__(self) -> WorkflowRun:
+                raise StopAsyncIteration
+
+        return (db_data, EmptyAsyncIter())
+
+    # FIXME: It could happen that we're missing data BEFORE, we're only
+    # checking for missing data after
+    iter = _execute_ghaminer_async(repo_url, token, miner_start_date, miner_end_date)
+    return (db_data, iter)
+
+
+def _get_data_from_db(repo_url: str, from_date: datetime.datetime, to_date: datetime.datetime) -> list[WorkflowRun]:
+    """
+    Returns a list of raw workflow runs from the database, in chronological
+    order (the oldest run should be at the end of the list).
+
+    Args:
+        repo_url (str): The name of the GitHub repository.
+        from_date (datetime): The start time of the search.
+        to_date (datetime): The end time of the search (non-inclusive).
+
+    Returns:
+        A list of raw workflow runs from the database.
+    """
+
+    pass
+
+def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime) -> AsyncIterator[WorkflowRun]:
+    """
+    Returns an asynchronous iterator that yields the data coming from GHAMiner.
+
+    Args:
+        repo_url (str): The name of the GitHub repository.
+        token (str): The GitHub API token to use for GHAMiner.
+        from_date (datetime): The start time of the search.
+        to_date (datetime): The end time of the search (non-inclusive).
+
+    Returns:
+        An asynchronous iterator that yields the data coming from GHAMiner.
+    """
+
+    pass

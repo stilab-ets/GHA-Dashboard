@@ -1,4 +1,4 @@
-from typing import TypeVar, Generic, Iterable, AsyncIterable, AsyncIterator
+from typing import TypeVar, Iterable, AsyncIterable, AsyncIterator
 
 T = TypeVar('T') # Represents the yield type of the iterator
 
