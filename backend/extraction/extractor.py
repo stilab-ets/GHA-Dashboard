@@ -179,7 +179,7 @@ async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.
         gha_miner = await asyncio.create_subprocess_exec(*cmd)
 
         async for item in tail:
-            if item.startswith("repo"):
+            if item.startswith("repo,"):
                 # GHAMiner added the labels, we cant parse this line
                 continue
 
