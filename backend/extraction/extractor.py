@@ -1,4 +1,5 @@
-from sqlalchemy import BigInteger
+from sqlalchemy import BigInteger, select
+from sqlalchemy.orm import joinedload
 from models import WorkflowRun, Workflow, Repository, db
 from core.utils.sync import async_tail
 
@@ -142,7 +143,20 @@ def _get_data_from_db(repo_url: str, from_date: datetime.datetime, to_date: date
         A list of raw workflow runs from the database.
     """
 
-    pass
+    repo = db.session.execute(
+        select(Repository).where(Repository.repo_name == repo_url)
+    ).scalar_one_or_none()
+
+    if repo == None:
+        return []
+
+    result = db.session.execute(
+        select(WorkflowRun).where(WorkflowRun.created_at >= from_date)
+        .where(WorkflowRun.created_at < to_date)
+        .where(WorkflowRun.repository_id == repo.id)
+    ).scalars().all();
+
+    return list(result)
 
 async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime) -> AsyncIterator[WorkflowRun]:
     """
