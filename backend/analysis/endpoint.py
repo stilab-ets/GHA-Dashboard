@@ -78,7 +78,6 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
 
         # CONTINUOUS DATA
         async def async_filter() -> AsyncIterator[WorkflowRun]:
-            logging.getLogger('flask.app').warning("WAITING FOR FIRST RUN")
             async for run in from_miner:
                 if predicate(run):
                     yield run
