@@ -27,15 +27,15 @@ db.init_app(app)
 
 CSV_PATH = "builds_features.csv"
 
-@app.route("/health")
-def health():
-    """Health check pour Docker et debugging"""
-    return jsonify({
-        "status": "ok",
-        "service": "GHA Dashboard Backend",
-        "csv_exists": os.path.exists(CSV_PATH),
-        "github_token_set": bool(os.getenv("GITHUB_TOKEN"))
-    }), 200
+#@app.route("/health")
+#def health():
+#    """Health check pour Docker et debugging"""
+#    return jsonify({
+#        "status": "ok",
+#        "service": "GHA Dashboard Backend",
+#        "csv_exists": os.path.exists(CSV_PATH),
+#        "github_token_set": bool(os.getenv("GITHUB_TOKEN"))
+#    }), 200 
 # ============================================
 # Helpers ingestion 
 # ============================================
