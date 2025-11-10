@@ -47,7 +47,8 @@
 
 .dashboard .container {
     padding: 18px;
-    max-width: 1100px;
+    max-width: 100%;
+    width: 100%;
     margin: 0 auto;
 }
 
@@ -68,17 +69,17 @@
 .stat-card .title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .stat-card .value { font-size: 18px; font-weight: 700; }
 
-.layout-grid {
-    display: grid;
-    grid-template-columns: 1fr 420px;
-    gap: 18px;
-}
-
-.layout-grid-2 {
-    margin-top: 18px;
+/* Main dashboard grid - 2 columns layout */
+.dashboard-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 18px;
+    margin-top: 18px;
+}
+
+/* Card that spans 2 columns */
+.card-span-2 {
+    grid-column: span 2;
 }
 
 .card h3 { margin-top: 0; margin-bottom: 12px; font-size: 16px; }
@@ -91,8 +92,252 @@
 }
 
 html, body {
-    background: #0f1720; /* match .dashboard.dark background */
+    background: #0f1720;
     color: var(--text, #e6eef6);
     margin: 0;
     min-height: 100%;
+}
+
+/* UC-02: Filter Panel */
+.filter-panel {
+    margin-bottom: 18px;
+}
+
+.filter-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 180px;
+}
+
+.filter-group label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.filter-group select {
+    padding: 8px 12px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.filter-group select:hover {
+    border-color: var(--accent);
+}
+
+.filter-group select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+}
+
+/* View Toggle Buttons */
+.view-toggle {
+    margin-bottom: 18px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.view-toggle button {
+    padding: 10px 16px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.view-toggle button:hover {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: var(--accent);
+}
+
+.view-toggle button.active {
+    background: var(--accent);
+    color: #0b1220;
+    border-color: var(--accent);
+}
+
+/* UC-03: Branch Comparison Section */
+.branch-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.branch-table thead th {
+    text-align: left;
+    padding: 10px;
+    background: var(--bg);
+    color: var(--muted);
+    font-weight: 600;
+    border-bottom: 2px solid var(--border);
+}
+
+.branch-table tbody td {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.branch-table tbody tr:hover {
+    background: rgba(96, 165, 250, 0.05);
+}
+
+.branch-table .success-high {
+    color: var(--accent-2);
+    font-weight: 600;
+}
+
+.branch-table .success-medium {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.branch-table .success-low {
+    color: #f44336;
+    font-weight: 600;
+}
+
+.branch-table .failures-high {
+    color: #f44336;
+    font-weight: 600;
+}
+
+/* UC-05: Chart description */
+.chart-description {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 16px;
+}
+
+/* UC-07: Spike Detection */
+.spike-list {
+    margin-top: 16px;
+    background: var(--bg);
+    padding: 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.spike-list h4 {
+    margin: 0 0 12px 0;
+    font-size: 15px;
+    color: var(--accent);
+}
+
+.spike-item {
+    display: flex;
+    gap: 12px;
+    padding: 10px;
+    margin-bottom: 8px;
+    background: var(--card-bg);
+    border-radius: 6px;
+    border-left: 3px solid #f44336;
+    font-size: 13px;
+}
+
+.spike-date {
+    font-weight: 600;
+    color: var(--text);
+    min-width: 100px;
+}
+
+.spike-type {
+    color: #f44336;
+    font-weight: 600;
+    min-width: 120px;
+}
+
+.spike-detail {
+    color: var(--muted);
+}
+
+/* Inline spike list for anomaly detection */
+.spike-list-inline {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.spike-list-inline .spike-item {
+    margin-bottom: 0;
+}
+
+/* Custom Tooltip */
+.custom-tooltip {
+    background: var(--card-bg);
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.custom-tooltip .label {
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--accent);
+}
+
+.custom-tooltip p {
+    margin: 4px 0;
+    font-size: 13px;
+}
+
+.custom-tooltip .anomaly-flag {
+    color: #f44336;
+    font-weight: 600;
+    margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+    .dashboard-grid { 
+        grid-template-columns: 1fr; 
+    }
+    
+    .card-span-2 {
+        grid-column: span 1;
+    }
+    
+    .filter-row { 
+        flex-direction: column; 
+    }
+    
+    .filter-group { 
+        width: 100%; 
+    }
+    
+    .spike-list-inline {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 600px) {
+    .dashboard .container {
+        padding: 12px;
+    }
+    
+    .stats-row {
+        flex-direction: column;
+    }
+    
+    .stat-card {
+        width: 100%;
+    }
 }
