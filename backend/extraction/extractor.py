@@ -150,13 +150,7 @@ def _get_data_from_db(repo_url: str, from_date: datetime.datetime, to_date: date
     if repo == None:
         return []
 
-    result = db.session.execute(
-        select(WorkflowRun).where(WorkflowRun.created_at >= from_date)
-        .where(WorkflowRun.created_at < to_date)
-        .where(WorkflowRun.repository_id == repo.id)
-    ).scalars().all();
-
-    return list(result)
+    return list(repo.runs)
 
 async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime) -> AsyncIterator[WorkflowRun]:
     """
