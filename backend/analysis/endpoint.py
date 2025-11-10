@@ -92,9 +92,11 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
             message = NewDataMessage(aggregated)
             ws.send(json.dumps(message, default=json_default))
 
+        cancellation.set()
+
     async def set_off_cancellation():
         def _check_ws_closed_sync():
-            while ws.close_reason == CloseReason.NO_STATUS_RCVD:
+            while ws.close_reason == CloseReason.NO_STATUS_RCVD and not cancellation.is_set():
                 pass
 
         await asyncio.to_thread(_check_ws_closed_sync)
@@ -103,6 +105,5 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
     async with asyncio.TaskGroup() as tg:
         tg.create_task(send_data_internal())
         tg.create_task(set_off_cancellation())
-
 
     ws.close()

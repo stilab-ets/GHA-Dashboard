@@ -198,7 +198,6 @@ async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.
 
             if run.created_at < from_date:
                 logging.getLogger('flask.app').warning(f"created_at ({run.created_at.isoformat()}) < from_date({from_date.isoformat()})");
-                gha_miner.kill()
                 break
 
             yield run
