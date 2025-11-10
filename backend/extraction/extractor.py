@@ -84,7 +84,7 @@ def extract_data(repo_url, token, from_date, to_date):
 
     return repo_df, None
 
-def async_extract_data(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime) -> tuple[list[WorkflowRun], AsyncIterator[WorkflowRun]]:
+def async_extract_data(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime, cancellation: asyncio.Event) -> tuple[list[WorkflowRun], AsyncIterator[WorkflowRun]]:
     """
     Returns a list of raw workflow runs that were already in the database,
     and returns an asynchronous iterator that yields the data that was not in
@@ -97,6 +97,7 @@ def async_extract_data(repo_url: str, token:str, from_date: datetime.datetime, t
         token (str): The GitHub API token to use for GHAMiner.
         from_date (datetime): The start time of the search.
         to_date (datetime): The end time of the search (non-inclusive).
+        cancellation (asyncio.Event): An event to stop the search at any time.
 
     Returns:
         A tuple whose first element is a list of raw workflow runs that were
@@ -125,7 +126,7 @@ def async_extract_data(repo_url: str, token:str, from_date: datetime.datetime, t
 
     # FIXME: It could happen that we're missing data BEFORE, we're only
     # checking for missing data after
-    iter = _execute_ghaminer_async(repo_url, token, miner_start_date, miner_end_date)
+    iter = _execute_ghaminer_async(repo_url, token, miner_start_date, miner_end_date, cancellation)
     return (db_data, iter)
 
 
@@ -152,7 +153,7 @@ def _get_data_from_db(repo_url: str, from_date: datetime.datetime, to_date: date
 
     return list(repo.runs)
 
-async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime) -> AsyncIterator[WorkflowRun]:
+async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime, cancellation: asyncio.Event) -> AsyncIterator[WorkflowRun]:
     """
     Returns an asynchronous iterator that yields the data coming from GHAMiner.
 
@@ -161,13 +162,14 @@ async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.
         token (str): The GitHub API token to use for GHAMiner.
         from_date (datetime): The start time of the search.
         to_date (datetime): The end time of the search (non-inclusive).
+        cancellation (asyncio.Event): An event to stop the search at any time.
 
     Returns:
         An asynchronous iterator that yields the data coming from GHAMiner.
     """
 
     with open(BUILD_FEATURES_PATH, 'r') as f:
-        tail = async_tail(f)
+        tail = async_tail(f, cancellation)
 
         cmd = [
             "python", "ghaminer/src/GHAMetrics.py",
@@ -195,10 +197,13 @@ async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.
                 continue
 
             if run.created_at < from_date:
+                logging.getLogger('flask.app').warning(f"created_at ({run.created_at.isoformat()}) < from_date({from_date.isoformat()})");
                 gha_miner.kill()
                 break
 
             yield run
+
+        gha_miner.kill()
 
 def _generate_models_from_series(line: str) -> WorkflowRun:
     """
