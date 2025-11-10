@@ -1,12 +1,11 @@
 import os
-from core.models import AggregationPeriod
 import pandas as pd
 from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import text
-from models import db, Repository, Workflow, WorkflowRun
+from models import db, Repository, Workflow, WorkflowRun, AggregationPeriod
 from extraction.extractor import extract_data
 from analysis.endpoint import AggregationFilters, send_data
 from typing import cast
