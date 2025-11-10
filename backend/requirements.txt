@@ -1,3 +1,10 @@
 Flask
+flask-cors
 requests
 pandas
+flask-sock
+python-dotenv
+Flask-SQLAlchemy
+SQLAlchemy
+psycopg2-binary
+PyYAML
