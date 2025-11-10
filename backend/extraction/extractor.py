@@ -8,6 +8,7 @@ import subprocess
 import os
 import datetime
 from typing import AsyncIterator
+import asyncio
 
 # ---------------------------------------------------------------------------
 #  Configuration de base
@@ -143,7 +144,7 @@ def _get_data_from_db(repo_url: str, from_date: datetime.datetime, to_date: date
 
     pass
 
-def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime) -> AsyncIterator[WorkflowRun]:
+async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime) -> AsyncIterator[WorkflowRun]:
     """
     Returns an asynchronous iterator that yields the data coming from GHAMiner.
 
@@ -157,7 +158,39 @@ def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.dateti
         An asynchronous iterator that yields the data coming from GHAMiner.
     """
 
-    pass
+    with open(BUILD_FEATURES_PATH, 'r') as f:
+        tail = async_tail(f)
+
+        cmd = [
+            "python", "ghaminer/src/GHAMetrics.py",
+            "-t", token,
+            "-s", f"https://github.com/{repo_url}",
+            "-fd", from_date.date().isoformat(),
+            "-td", to_date.date().isoformat()
+        ]
+        gha_miner = await asyncio.create_subprocess_exec(*cmd)
+
+        async for item in tail:
+            if item.startswith("repo"):
+                # GHAMiner added the labels, we cant parse this line
+                continue
+
+            try:
+                run = _generate_models_from_series(item)
+            except Exception as e:
+                gha_miner.kill()
+                raise e
+
+            # Failsafe, if GHAminer returns runs outside the range for some reason
+            # NOTE: GHAminer returns runs in reverse chronological order
+            if run.created_at >= to_date:
+                continue
+
+            if run.created_at < from_date:
+                gha_miner.kill()
+                break
+
+            yield run
 
 def _generate_models_from_series(line: str) -> WorkflowRun:
     """
