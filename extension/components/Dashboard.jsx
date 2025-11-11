@@ -22,6 +22,21 @@ import {
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3'];
 
+// helper to format JS Date for <input type="datetime-local"> (YYYY-MM-DDTHH:MM)
+function formatDateForInput(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+const _now = new Date();
+const _defaultEnd = formatDateForInput(_now);
+const _defaultStart = formatDateForInput(new Date(_now.getTime() - 30 * 24 * 60 * 60 * 1000));
+
 export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -29,10 +44,13 @@ export default function Dashboard() {
   
   // UC-02: Filter state
   const [filters, setFilters] = useState({
-    workflow: 'all',
-    branch: 'all',
-    actor: 'all',
-    period: '30d'
+    // store multi-selects as arrays; use ['all'] as sentinel meaning no filter
+    workflow: ['all'],
+    branch: ['all'],
+    actor: ['all'],
+    // ISO-like local strings for datetime-local inputs
+    start: _defaultStart,
+    end: _defaultEnd
   });
 
   useEffect(() => {
@@ -64,10 +82,70 @@ export default function Dashboard() {
     branches = [],
     actors = []
   } = data;
+  // compute percent for status breakdown so we can show it in the legend
+  const totalStatus = statusBreakdown.reduce((sum, s) => sum + (s.value || 0), 0);
+  const statusData = statusBreakdown.map(s => ({
+    ...s,
+    percent: totalStatus ? Math.round((s.value / totalStatus) * 100) : 0
+  }));
   
-  // UC-02: Filter handler
+  // UC-02: Filter handlers
   const handleFilterChange = (filterType, value) => {
+    // For start/end we sanitize to ensure start <= end and neither is in the future
+    if (filterType === 'start' || filterType === 'end') {
+      const nowStr = _defaultEnd; // formatted 'now'
+      let newStart = filterType === 'start' ? value : filters.start;
+      let newEnd = filterType === 'end' ? value : filters.end;
+
+      // clamp to now
+      if (newStart > nowStr) newStart = nowStr;
+      if (newEnd > nowStr) newEnd = nowStr;
+
+      // ensure start <= end
+      if (newStart > newEnd) {
+        // if user changed start to after end, move end forward to match start
+        newEnd = newStart;
+      } else if (newEnd < newStart) {
+        // if user changed end to before start, move start back to match end
+        newStart = newEnd;
+      }
+
+      setFilters(prev => ({ ...prev, start: newStart, end: newEnd }));
+      return;
+    }
+
     setFilters(prev => ({ ...prev, [filterType]: value }));
+  };
+
+  // for selects that allow multiple values
+  const handleMultiChange = (filterType, e) => {
+    const selected = Array.from(e.target.selectedOptions).map(o => o.value);
+    // if 'all' is selected, treat it as the only value
+    const values = selected.includes('all') ? ['all'] : selected.length ? selected : ['all'];
+    setFilters(prev => ({ ...prev, [filterType]: values }));
+  };
+
+  // checkbox-based multi-select toggler
+  const toggleCheckbox = (filterType, value, checked) => {
+    setFilters(prev => {
+      const prevVals = Array.isArray(prev[filterType]) ? prev[filterType] : ['all'];
+
+      let newVals = [];
+      if (value === 'all') {
+        newVals = checked ? ['all'] : [];
+      } else {
+        if (checked) {
+          // add value, ensure 'all' removed
+          newVals = Array.from(new Set([...prevVals.filter(v => v !== 'all'), value]));
+        } else {
+          // remove value
+          newVals = prevVals.filter(v => v !== value && v !== 'all');
+        }
+      }
+
+      if (!newVals || newVals.length === 0) newVals = ['all'];
+      return { ...prev, [filterType]: newVals };
+    });
   };
 
   return (
@@ -80,33 +158,91 @@ export default function Dashboard() {
           <div className="filter-row">
             <div className="filter-group">
               <label>Workflow</label>
-              <select value={filters.workflow} onChange={(e) => handleFilterChange('workflow', e.target.value)}>
-                <option value="all">All workflows</option>
-                {workflows.map(w => <option key={w} value={w}>{w}</option>)}
-              </select>
+              <div className="checkbox-list">
+                <label className="checkbox-item">
+                  <input
+                    type="checkbox"
+                    checked={filters.workflow.includes('all')}
+                    onChange={(e) => toggleCheckbox('workflow', 'all', e.target.checked)}
+                  />
+                  <span>All workflows</span>
+                </label>
+                {workflows.map(w => (
+                  <label key={w} className="checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={filters.workflow.includes(w)}
+                      onChange={(e) => toggleCheckbox('workflow', w, e.target.checked)}
+                    />
+                    <span>{w}</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="filter-group">
               <label>Branch</label>
-              <select value={filters.branch} onChange={(e) => handleFilterChange('branch', e.target.value)}>
-                <option value="all">All branches</option>
-                {branches.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
+              <div className="checkbox-list">
+                <label className="checkbox-item">
+                  <input
+                    type="checkbox"
+                    checked={filters.branch.includes('all')}
+                    onChange={(e) => toggleCheckbox('branch', 'all', e.target.checked)}
+                  />
+                  <span>All branches</span>
+                </label>
+                {branches.map(b => (
+                  <label key={b} className="checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={filters.branch.includes(b)}
+                      onChange={(e) => toggleCheckbox('branch', b, e.target.checked)}
+                    />
+                    <span>{b}</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="filter-group">
               <label>Actor</label>
-              <select value={filters.actor} onChange={(e) => handleFilterChange('actor', e.target.value)}>
-                <option value="all">All actors</option>
-                {actors.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
+              <div className="checkbox-list">
+                <label className="checkbox-item">
+                  <input
+                    type="checkbox"
+                    checked={filters.actor.includes('all')}
+                    onChange={(e) => toggleCheckbox('actor', 'all', e.target.checked)}
+                  />
+                  <span>All actors</span>
+                </label>
+                {actors.map(a => (
+                  <label key={a} className="checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={filters.actor.includes(a)}
+                      onChange={(e) => toggleCheckbox('actor', a, e.target.checked)}
+                    />
+                    <span>{a}</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="filter-group">
-              <label>Period</label>
-              <select value={filters.period} onChange={(e) => handleFilterChange('period', e.target.value)}>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-                <option value="90d">Last 90 days</option>
-                <option value="6m">Last 6 months</option>
-              </select>
+              <label>Period start</label>
+              <input
+                type="datetime-local"
+                value={filters.start}
+                max={filters.end || _defaultEnd}
+                onChange={(e) => handleFilterChange('start', e.target.value)}
+              />
+            </div>
+            <div className="filter-group">
+              <label>Period end</label>
+              <input
+                type="datetime-local"
+                value={filters.end}
+                min={filters.start}
+                max={_defaultEnd}
+                onChange={(e) => handleFilterChange('end', e.target.value)}
+              />
             </div>
           </div>
         </div>
@@ -157,13 +293,22 @@ export default function Dashboard() {
             <h3>Status breakdown</h3>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
-                <Pie data={statusBreakdown} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
-                  {statusBreakdown.map((entry, index) => (
+                <Pie
+                  data={statusData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  // custom label to show name + percent
+                  label={(entry) => `${entry.name} (${entry.payload.percent}%)`}
+                >
+                  {statusData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Legend />
-                <Tooltip />
+                <Legend formatter={(value, entry) => `${value} (${entry.payload.percent}%)`} />
+                <Tooltip content={<StatusPieTooltip />} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -325,6 +470,20 @@ function CustomSpikeTooltip({ active, payload }) {
         <p>{`Failures: ${data.failures}`}</p>
         <p>{`Median Duration: ${data.medianDuration}s`}</p>
         {data.isAnomaly && <p className="anomaly-flag">⚠️ Anomaly detected</p>}
+      </div>
+    );
+  }
+  return null;
+}
+
+function StatusPieTooltip({ active, payload }) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="custom-tooltip">
+        <p className="label">{`${data.name}`}</p>
+        <p>{`Value: ${data.value}`}</p>
+        <p>{`Percent: ${data.percent}%`}</p>
       </div>
     );
   }
