@@ -26,15 +26,16 @@
 
 /* Dark theme and card layout for dashboard */
 .dashboard.dark {
-    --bg: #0f1720; /* deep charcoal */
-    --card-bg: #0b1220;
-    --muted: #9aa6b2;
-    --accent: #60a5fa;
-    --accent-2: #34d399;
-    --text: #e6eef6;
-    --border: rgba(255,255,255,0.06);
-    background: var(--bg);
+    --bg: #0d1117; /* GitHub dark background */
+    --card-bg: #161b22; /* GitHub card background */
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --accent-2: #3fb950;
+    --text: #c9d1d9;
+    --border: #30363d;
+    background: transparent;
     color: var(--text);
+    padding: 24px;
 }
 
 .dashboard.dark .card {
@@ -50,6 +51,8 @@
     max-width: 100%;
     width: 100%;
     margin: 0 auto;
+    overflow: visible;
+    height: auto;
 }
 
 .stats-row {
@@ -95,7 +98,19 @@ html, body {
     background: #0f1720;
     color: var(--text, #e6eef6);
     margin: 0;
+    padding: 0;
     min-height: 100%;
+    overflow: visible !important;
+    height: auto !important;
+    width: 100% !important;
+}
+
+#root {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 100vh;
+    width: 100% !important;
+    background: #0f1720;
 }
 
 /* UC-02: Filter Panel */
