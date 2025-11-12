@@ -33,11 +33,17 @@ function formatDateForInput(d) {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
-const _now = new Date();
-const _defaultEnd = formatDateForInput(_now);
-const _defaultStart = formatDateForInput(new Date(_now.getTime() - 30 * 24 * 60 * 60 * 1000));
-
 export default function Dashboard() {
+  // Calculate current time defaults dynamically
+  const getCurrentDefaults = () => {
+    const now = new Date();
+    const defaultEnd = formatDateForInput(now);
+    const defaultStart = formatDateForInput(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000));
+    return { defaultStart, defaultEnd };
+  };
+
+  const { defaultStart, defaultEnd } = getCurrentDefaults();
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -49,8 +55,15 @@ export default function Dashboard() {
     branch: ['all'],
     actor: ['all'],
     // ISO-like local strings for datetime-local inputs
-    start: _defaultStart,
-    end: _defaultEnd
+    start: defaultStart,
+    end: defaultEnd
+  });
+
+  // UC-02: Dropdown open/close state
+  const [openDropdowns, setOpenDropdowns] = useState({
+    workflow: false,
+    branch: false,
+    actor: false
   });
 
   useEffect(() => {
@@ -93,7 +106,8 @@ export default function Dashboard() {
   const handleFilterChange = (filterType, value) => {
     // For start/end we sanitize to ensure start <= end and neither is in the future
     if (filterType === 'start' || filterType === 'end') {
-      const nowStr = _defaultEnd; // formatted 'now'
+      const currentDefaults = getCurrentDefaults();
+      const nowStr = currentDefaults.defaultEnd; // formatted 'now' (updated in real-time)
       let newStart = filterType === 'start' ? value : filters.start;
       let newEnd = filterType === 'end' ? value : filters.end;
 
@@ -156,73 +170,111 @@ export default function Dashboard() {
         {/* UC-02: Filter Panel */}
         <div className="filter-panel card">
           <div className="filter-row">
+            {/* Workflow Dropdown */}
             <div className="filter-group">
               <label>Workflow</label>
-              <div className="checkbox-list">
-                <label className="checkbox-item">
-                  <input
-                    type="checkbox"
-                    checked={filters.workflow.includes('all')}
-                    onChange={(e) => toggleCheckbox('workflow', 'all', e.target.checked)}
-                  />
-                  <span>All workflows</span>
-                </label>
-                {workflows.map(w => (
-                  <label key={w} className="checkbox-item">
-                    <input
-                      type="checkbox"
-                      checked={filters.workflow.includes(w)}
-                      onChange={(e) => toggleCheckbox('workflow', w, e.target.checked)}
-                    />
-                    <span>{w}</span>
-                  </label>
-                ))}
+              <div className="dropdown-container">
+                <button
+                  className="dropdown-toggle"
+                  onClick={() => setOpenDropdowns(prev => ({ ...prev, workflow: !prev.workflow }))}
+                >
+                  {filters.workflow.includes('all') ? 'All workflows' : `${filters.workflow.length} selected`}
+                  <span className="dropdown-arrow">▼</span>
+                </button>
+                {openDropdowns.workflow && (
+                  <div className="dropdown-menu">
+                    <label className="dropdown-item">
+                      <input
+                        type="checkbox"
+                        checked={filters.workflow.includes('all')}
+                        onChange={(e) => toggleCheckbox('workflow', 'all', e.target.checked)}
+                      />
+                      <span>All workflows</span>
+                    </label>
+                    {workflows.map(w => (
+                      <label key={w} className="dropdown-item">
+                        <input
+                          type="checkbox"
+                          checked={filters.workflow.includes(w)}
+                          onChange={(e) => toggleCheckbox('workflow', w, e.target.checked)}
+                        />
+                        <span>{w}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Branch Dropdown */}
             <div className="filter-group">
               <label>Branch</label>
-              <div className="checkbox-list">
-                <label className="checkbox-item">
-                  <input
-                    type="checkbox"
-                    checked={filters.branch.includes('all')}
-                    onChange={(e) => toggleCheckbox('branch', 'all', e.target.checked)}
-                  />
-                  <span>All branches</span>
-                </label>
-                {branches.map(b => (
-                  <label key={b} className="checkbox-item">
-                    <input
-                      type="checkbox"
-                      checked={filters.branch.includes(b)}
-                      onChange={(e) => toggleCheckbox('branch', b, e.target.checked)}
-                    />
-                    <span>{b}</span>
-                  </label>
-                ))}
+              <div className="dropdown-container">
+                <button
+                  className="dropdown-toggle"
+                  onClick={() => setOpenDropdowns(prev => ({ ...prev, branch: !prev.branch }))}
+                >
+                  {filters.branch.includes('all') ? 'All branches' : `${filters.branch.length} selected`}
+                  <span className="dropdown-arrow">▼</span>
+                </button>
+                {openDropdowns.branch && (
+                  <div className="dropdown-menu">
+                    <label className="dropdown-item">
+                      <input
+                        type="checkbox"
+                        checked={filters.branch.includes('all')}
+                        onChange={(e) => toggleCheckbox('branch', 'all', e.target.checked)}
+                      />
+                      <span>All branches</span>
+                    </label>
+                    {branches.map(b => (
+                      <label key={b} className="dropdown-item">
+                        <input
+                          type="checkbox"
+                          checked={filters.branch.includes(b)}
+                          onChange={(e) => toggleCheckbox('branch', b, e.target.checked)}
+                        />
+                        <span>{b}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Actor Dropdown */}
             <div className="filter-group">
               <label>Actor</label>
-              <div className="checkbox-list">
-                <label className="checkbox-item">
-                  <input
-                    type="checkbox"
-                    checked={filters.actor.includes('all')}
-                    onChange={(e) => toggleCheckbox('actor', 'all', e.target.checked)}
-                  />
-                  <span>All actors</span>
-                </label>
-                {actors.map(a => (
-                  <label key={a} className="checkbox-item">
-                    <input
-                      type="checkbox"
-                      checked={filters.actor.includes(a)}
-                      onChange={(e) => toggleCheckbox('actor', a, e.target.checked)}
-                    />
-                    <span>{a}</span>
-                  </label>
-                ))}
+              <div className="dropdown-container">
+                <button
+                  className="dropdown-toggle"
+                  onClick={() => setOpenDropdowns(prev => ({ ...prev, actor: !prev.actor }))}
+                >
+                  {filters.actor.includes('all') ? 'All actors' : `${filters.actor.length} selected`}
+                  <span className="dropdown-arrow">▼</span>
+                </button>
+                {openDropdowns.actor && (
+                  <div className="dropdown-menu">
+                    <label className="dropdown-item">
+                      <input
+                        type="checkbox"
+                        checked={filters.actor.includes('all')}
+                        onChange={(e) => toggleCheckbox('actor', 'all', e.target.checked)}
+                      />
+                      <span>All actors</span>
+                    </label>
+                    {actors.map(a => (
+                      <label key={a} className="dropdown-item">
+                        <input
+                          type="checkbox"
+                          checked={filters.actor.includes(a)}
+                          onChange={(e) => toggleCheckbox('actor', a, e.target.checked)}
+                        />
+                        <span>{a}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="filter-group">
@@ -230,7 +282,7 @@ export default function Dashboard() {
               <input
                 type="datetime-local"
                 value={filters.start}
-                max={filters.end || _defaultEnd}
+                max={filters.end || defaultEnd}
                 onChange={(e) => handleFilterChange('start', e.target.value)}
               />
             </div>
@@ -240,7 +292,7 @@ export default function Dashboard() {
                 type="datetime-local"
                 value={filters.end}
                 min={filters.start}
-                max={_defaultEnd}
+                max={defaultEnd}
                 onChange={(e) => handleFilterChange('end', e.target.value)}
               />
             </div>
