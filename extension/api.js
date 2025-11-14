@@ -7,7 +7,7 @@ export async function fetchDashboardData(filters = {}) {
   const branches = ['main', 'develop', 'feature/dashboard', 'feature/api', 'hotfix/security'];
   const actors = ['john.doe', 'jane.smith', 'bob.wilson', 'alice.cooper', 'mike.johnson'];
   
-  const runsOverTime = [
+  const allRunsOverTime = [
     { date: '2025-10-01', runs: 2, successes: 2, failures: 0, avgDuration: 180, medianDuration: 178, minDuration: 170, maxDuration: 190 },
     { date: '2025-10-05', runs: 3, successes: 3, failures: 0, avgDuration: 190, medianDuration: 188, minDuration: 180, maxDuration: 200 },
     { date: '2025-10-10', runs: 5, successes: 4, failures: 1, avgDuration: 220, medianDuration: 215, minDuration: 190, maxDuration: 280 },
@@ -17,13 +17,13 @@ export async function fetchDashboardData(filters = {}) {
     { date: '2025-10-30', runs: 7, successes: 6, failures: 1, avgDuration: 205, medianDuration: 200, minDuration: 185, maxDuration: 240 }
   ];
 
-  const statusBreakdown = [
+  const allStatusBreakdown = [
     { name: 'success', value: 86 },
     { name: 'failure', value: 10 },
     { name: 'cancelled', value: 4 }
   ];
 
-  const topWorkflows = [
+  const allTopWorkflows = [
     { name: 'CI', runs: 30, success: 28, avgDuration: 200, medianDuration: 198 },
     { name: 'Deploy', runs: 12, success: 11, avgDuration: 250, medianDuration: 245 },
     { name: 'Tests', runs: 20, success: 18, avgDuration: 210, medianDuration: 207 },
@@ -31,7 +31,7 @@ export async function fetchDashboardData(filters = {}) {
     { name: 'Lint', runs: 25, success: 24, avgDuration: 90, medianDuration: 88 }
   ];
 
-  const durationBox = [
+  const allDurationBox = [
     { name: 'CI', min: 120, q1: 160, median: 200, q3: 240, max: 320 },
     { name: 'Deploy', min: 190, q1: 220, median: 250, q3: 270, max: 330 },
     { name: 'Tests', min: 140, q1: 180, median: 210, q3: 230, max: 280 },
@@ -40,7 +40,7 @@ export async function fetchDashboardData(filters = {}) {
   ];
   
   // UC-05: Failure rate over time
-  const failureRateOverTime = [
+  const allFailureRateOverTime = [
     { date: '2025-09-01', failureRate: 8.5, avgFailureRate: 10, totalRuns: 45 },
     { date: '2025-09-08', failureRate: 12.3, avgFailureRate: 10, totalRuns: 52 },
     { date: '2025-09-15', failureRate: 15.7, avgFailureRate: 10, totalRuns: 48 },
@@ -54,7 +54,7 @@ export async function fetchDashboardData(filters = {}) {
   ];
   
   // UC-03: Branch comparison
-  const branchComparison = [
+  const allBranchComparison = [
     { branch: 'main', workflow: 'CI', totalRuns: 120, successRate: 92, avgDuration: 195, medianDuration: 190, failures: 10 },
     { branch: 'develop', workflow: 'CI', totalRuns: 85, successRate: 88, avgDuration: 210, medianDuration: 205, failures: 10 },
     { branch: 'feature/dashboard', workflow: 'Tests', totalRuns: 45, successRate: 82, avgDuration: 225, medianDuration: 220, failures: 8 },
@@ -63,7 +63,7 @@ export async function fetchDashboardData(filters = {}) {
   ];
   
   // UC-07: Spike detection with anomalies
-  const spikes = [
+  const allSpikes = [
     { date: '2025-09-01', runs: 45, failures: 4, avgDuration: 195, medianDuration: 190, anomalyScore: null, isAnomaly: false },
     { date: '2025-09-08', runs: 52, failures: 6, avgDuration: 200, medianDuration: 195, anomalyScore: null, isAnomaly: false },
     { date: '2025-09-15', runs: 48, failures: 8, avgDuration: 210, medianDuration: 205, anomalyScore: null, isAnomaly: false },
@@ -76,14 +76,80 @@ export async function fetchDashboardData(filters = {}) {
     { date: '2025-11-03', runs: 60, failures: 4, avgDuration: 195, medianDuration: 190, anomalyScore: null, isAnomaly: false },
   ];
 
+  // Apply filters
+  const {
+    workflow: selectedWorkflows = ['all'],
+    branch: selectedBranches = ['all'],
+    actor: selectedActors = ['all'],
+    start: startDate,
+    end: endDate
+  } = filters;
+
+  // Filter by date range
+  let runsOverTime = allRunsOverTime;
+  if (startDate || endDate) {
+    runsOverTime = allRunsOverTime.filter(item => {
+      const itemDate = new Date(item.date);
+      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
+      const end = endDate ? new Date(endDate) : new Date('2100-01-01');
+      return itemDate >= start && itemDate <= end;
+    });
+  }
+
+  // Filter branch comparison by selected branches and workflows
+  let branchComparison = allBranchComparison;
+  if (!selectedBranches.includes('all')) {
+    branchComparison = branchComparison.filter(b => selectedBranches.includes(b.branch));
+  }
+  if (!selectedWorkflows.includes('all')) {
+    branchComparison = branchComparison.filter(b => selectedWorkflows.includes(b.workflow));
+  }
+
+  // Filter top workflows by selected workflows
+  let topWorkflows = allTopWorkflows;
+  if (!selectedWorkflows.includes('all')) {
+    topWorkflows = topWorkflows.filter(w => selectedWorkflows.includes(w.name));
+  }
+
+  // Filter duration box by selected workflows
+  let durationBox = allDurationBox;
+  if (!selectedWorkflows.includes('all')) {
+    durationBox = durationBox.filter(d => selectedWorkflows.includes(d.name));
+  }
+
+  // Filter failure rate over time by date range
+  let failureRateOverTime = allFailureRateOverTime;
+  if (startDate || endDate) {
+    failureRateOverTime = allFailureRateOverTime.filter(item => {
+      const itemDate = new Date(item.date);
+      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
+      const end = endDate ? new Date(endDate) : new Date('2100-01-01');
+      return itemDate >= start && itemDate <= end;
+    });
+  }
+
+  // Filter spikes by date range
+  let spikes = allSpikes;
+  if (startDate || endDate) {
+    spikes = allSpikes.filter(item => {
+      const itemDate = new Date(item.date);
+      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
+      const end = endDate ? new Date(endDate) : new Date('2100-01-01');
+      return itemDate >= start && itemDate <= end;
+    });
+  }
+
+  // For now, keep status breakdown the same (would need more complex logic to recalculate based on filtered data)
+  const statusBreakdown = allStatusBreakdown;
+
   return {
     repo: 'stilab-ets/GHA-Dashboard',
     totalRuns: runsOverTime.reduce((s, r) => s + r.runs, 0),
-    successRate: 0.86,
-    failureRate: 0.10,
-    avgDuration: Math.round(runsOverTime.reduce((s, r) => s + r.avgDuration * r.runs, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0)),
-    medianDuration: 200,
-    stdDeviation: 35,
+    successRate: runsOverTime.length > 0 ? runsOverTime.reduce((s, r) => s + r.successes, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0) : 0,
+    failureRate: runsOverTime.length > 0 ? runsOverTime.reduce((s, r) => s + r.failures, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0) : 0,
+    avgDuration: runsOverTime.length > 0 ? Math.round(runsOverTime.reduce((s, r) => s + r.avgDuration * r.runs, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0)) : 0,
+    medianDuration: runsOverTime.length > 0 ? Math.round(runsOverTime.reduce((s, r) => s + r.medianDuration, 0) / runsOverTime.length) : 0,
+    stdDeviation: 35, // Keep static for now
     runsOverTime,
     statusBreakdown,
     topWorkflows,

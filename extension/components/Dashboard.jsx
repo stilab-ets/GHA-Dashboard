@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { fetchDashboardData } from '../api';
 import '../styles/dashboardStyles.css';
 import {
@@ -65,6 +65,29 @@ export default function Dashboard() {
     branch: false,
     actor: false
   });
+
+  // Refs for dropdown containers to detect clicks outside
+  const dropdownRefs = {
+    workflow: useRef(null),
+    branch: useRef(null),
+    actor: useRef(null)
+  };
+
+  // Handle clicks outside dropdowns to close them
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      Object.keys(dropdownRefs).forEach(key => {
+        if (dropdownRefs[key].current && !dropdownRefs[key].current.contains(event.target)) {
+          setOpenDropdowns(prev => ({ ...prev, [key]: false }));
+        }
+      });
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   useEffect(() => {
     fetchDashboardData(filters)
@@ -179,10 +202,14 @@ export default function Dashboard() {
             {/* Workflow Dropdown */}
             <div className="filter-group">
               <label>Workflow</label>
-              <div className="dropdown-container">
+              <div className="dropdown-container" ref={dropdownRefs.workflow}>
                 <button
                   className="dropdown-toggle"
-                  onClick={() => setOpenDropdowns(prev => ({ ...prev, workflow: !prev.workflow }))}
+                  onClick={() => setOpenDropdowns(prev => ({
+                    workflow: !prev.workflow,
+                    branch: false,
+                    actor: false
+                  }))}
                 >
                   {filters.workflow.includes('all') ? 'All workflows' : `${filters.workflow.length} selected`}
                   <span className="dropdown-arrow">▼</span>
@@ -215,10 +242,14 @@ export default function Dashboard() {
             {/* Branch Dropdown */}
             <div className="filter-group">
               <label>Branch</label>
-              <div className="dropdown-container">
+              <div className="dropdown-container" ref={dropdownRefs.branch}>
                 <button
                   className="dropdown-toggle"
-                  onClick={() => setOpenDropdowns(prev => ({ ...prev, branch: !prev.branch }))}
+                  onClick={() => setOpenDropdowns(prev => ({
+                    workflow: false,
+                    branch: !prev.branch,
+                    actor: false
+                  }))}
                 >
                   {filters.branch.includes('all') ? 'All branches' : `${filters.branch.length} selected`}
                   <span className="dropdown-arrow">▼</span>
@@ -251,10 +282,14 @@ export default function Dashboard() {
             {/* Actor Dropdown */}
             <div className="filter-group">
               <label>Actor</label>
-              <div className="dropdown-container">
+              <div className="dropdown-container" ref={dropdownRefs.actor}>
                 <button
                   className="dropdown-toggle"
-                  onClick={() => setOpenDropdowns(prev => ({ ...prev, actor: !prev.actor }))}
+                  onClick={() => setOpenDropdowns(prev => ({
+                    workflow: false,
+                    branch: false,
+                    actor: !prev.actor
+                  }))}
                 >
                   {filters.actor.includes('all') ? 'All actors' : `${filters.actor.length} selected`}
                   <span className="dropdown-arrow">▼</span>
