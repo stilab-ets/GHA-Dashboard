@@ -55,11 +55,11 @@ export async function fetchDashboardData(filters = {}) {
   
   // UC-03: Branch comparison
   const branchComparison = [
-    { branch: 'main', totalRuns: 120, successRate: 92, avgDuration: 195, medianDuration: 190, failures: 10 },
-    { branch: 'develop', totalRuns: 85, successRate: 88, avgDuration: 210, medianDuration: 205, failures: 10 },
-    { branch: 'feature/dashboard', totalRuns: 45, successRate: 82, avgDuration: 225, medianDuration: 220, failures: 8 },
-    { branch: 'feature/api', totalRuns: 32, successRate: 78, avgDuration: 240, medianDuration: 235, failures: 7 },
-    { branch: 'hotfix/security', totalRuns: 15, successRate: 93, avgDuration: 180, medianDuration: 175, failures: 1 }
+    { branch: 'main', workflow: 'CI', totalRuns: 120, successRate: 92, avgDuration: 195, medianDuration: 190, failures: 10 },
+    { branch: 'develop', workflow: 'CI', totalRuns: 85, successRate: 88, avgDuration: 210, medianDuration: 205, failures: 10 },
+    { branch: 'feature/dashboard', workflow: 'Tests', totalRuns: 45, successRate: 82, avgDuration: 225, medianDuration: 220, failures: 8 },
+    { branch: 'feature/api', workflow: 'Build', totalRuns: 32, successRate: 78, avgDuration: 240, medianDuration: 235, failures: 7 },
+    { branch: 'hotfix/security', workflow: 'Deploy', totalRuns: 15, successRate: 93, avgDuration: 180, medianDuration: 175, failures: 1 }
   ];
   
   // UC-07: Spike detection with anomalies
