@@ -1,29 +1,15 @@
-// Function to check if the current tab is a GitHub Actions page
-const isGitHubActionsPage = (url) => {
-  return url && 
-         url.startsWith("https://github.com/") &&
-         (url.endsWith("/actions") || url.includes("/actions/"));
-};
-
-// Fonction helper
-function extractRepoFromUrl(url) {
-  if (!url || !url.includes('github.com')) {
-    return null;
-  }
-  
+// Function to check if the URL is a GitHub page
+const isGitHubRepoPage = (url) => {
+  if (!url) return false;
   try {
     const urlObj = new URL(url);
     const pathParts = urlObj.pathname.split('/').filter(p => p);
-    
-    if (pathParts.length >= 2) {
-      return `${pathParts[0]}/${pathParts[1]}`;
-    }
-  } catch (error) {
-    console.error('Error parsing URL:', error);
+    // Check if we have at least owner/repo structure
+    return pathParts.length >= 2 && urlObj.hostname === 'github.com';
+  } catch (e) {
+    return false;
   }
-  
-  return null;
-}
+};
 
 // Function to update dashboard button state based on the current tab
 const updateDashboardButtonState = async () => {
@@ -33,16 +19,16 @@ const updateDashboardButtonState = async () => {
     const hint = document.getElementById("dashboard-hint");
     if (!openDashboardBtn || !hint) return;
 
-    if (isGitHubActionsPage(tab.url)) {
+    if (isGitHubRepoPage(tab.url)) {
       openDashboardBtn.disabled = false;
       openDashboardBtn.style.background = "#238636";
       openDashboardBtn.style.cursor = "pointer";
-      hint.textContent = "";
+      hint.textContent = "Dashboard will appear inline on the page";
     } else {
       openDashboardBtn.disabled = true;
       openDashboardBtn.style.background = "#bbb";
       openDashboardBtn.style.cursor = "not-allowed";
-      hint.textContent = "Go to github actions page";
+      hint.textContent = "Go to a GitHub repository page";
     }
   } catch (error) {
     console.error("Error updating dashboard button state:", error);
@@ -85,38 +71,27 @@ document.addEventListener("DOMContentLoaded", () => {
   // Open dashboard button handling
   openDashboardBtn.addEventListener("click", async () => {
     if (!openDashboardBtn.disabled) {
-      try {
-        // 1. Détecter et sauvegarder le repo actuel
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        const repo = extractRepoFromUrl(tab.url);
-
-        if (repo) {
-          // Sauvegarder le repo dans storage
-          await chrome.storage.local.set({ currentRepo: repo });
-          console.log(`Saved repo for dashboard: ${repo}`);
+      // Send message to content script to toggle inline dashboard
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      chrome.tabs.sendMessage(tab.id, { action: "openDashboardPage" }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.log("Content script not ready, opening in new tab as fallback");
+          // Fallback: open in new tab if content script isn't available
+          const reactUrl = chrome.runtime.getURL('react_page/index.html');
+          const dashUrl = chrome.runtime.getURL('dashboard.html');
+          fetch(reactUrl, { method: 'HEAD' })
+            .then(res => {
+              if (res.ok) {
+                chrome.tabs.create({ url: reactUrl });
+              } else {
+                chrome.tabs.create({ url: dashUrl });
+              }
+            })
+            .catch(() => chrome.tabs.create({ url: dashUrl }));
+        } else {
+          window.close();
         }
-
-        // 2. Ouvrir le dashboard
-        const reactUrl = chrome.runtime.getURL('react_page/index.html');
-        const dashUrl = chrome.runtime.getURL('dashboard.html');
-
-        try {
-          const res = await fetch(reactUrl, { method: 'HEAD' });
-          if (res.ok) {
-            chrome.tabs.create({ url: reactUrl });
-            return;
-          }
-        } catch (err) {
-          // ignore and fallback
-        }
-
-        // fallback to dashboard.html
-        chrome.tabs.create({ url: dashUrl });
-
-      } catch (error) {
-        console.error('Error opening dashboard:', error);
-        alert('Error: Could not detect repository');
-      }
+      });
     }
   });
 });

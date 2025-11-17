@@ -17,7 +17,9 @@
     {
       "resources": [
         "assets/dashboard.png",
-        "dashboardStyles.css"
+        "dashboardStyles.css",
+        "dashboard.html",
+        "react_page/*"
       ],
       "matches": ["https://github.com/*"]
     }
