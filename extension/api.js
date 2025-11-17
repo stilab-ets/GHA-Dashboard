@@ -3,7 +3,7 @@ import { fetchDashboardDataViaWebSocket } from './websocket.js';
 const API_CONFIG = {
   baseUrl: 'http://localhost:3000/api',
   defaultRepo: 'facebook/react',
-  useWebSocket: true
+  useWebSocket: false
 };
 
 /**
@@ -11,7 +11,6 @@ const API_CONFIG = {
  */
 function extractRepoFromCurrentPage() {
   try {
-    // Essayer de récupérer depuis le storage Chrome d'abord
     return new Promise((resolve) => {
       if (typeof chrome !== 'undefined' && chrome.storage) {
         chrome.storage.local.get(['currentRepo'], (result) => {
@@ -19,14 +18,12 @@ function extractRepoFromCurrentPage() {
             console.log(`📌 Using repo from storage: ${result.currentRepo}`);
             resolve(result.currentRepo);
           } else {
-            // Fallback: extraire depuis window.location si possible
             const repo = extractRepoFromURL(window.location.href);
             console.log(`📌 Extracted repo from URL: ${repo || API_CONFIG.defaultRepo}`);
             resolve(repo || API_CONFIG.defaultRepo);
           }
         });
       } else {
-        // Pas d'accès à chrome.storage, extraire depuis l'URL
         const repo = extractRepoFromURL(window.location.href);
         console.log(`📌 Extracted repo from URL: ${repo || API_CONFIG.defaultRepo}`);
         resolve(repo || API_CONFIG.defaultRepo);
@@ -38,9 +35,6 @@ function extractRepoFromCurrentPage() {
   }
 }
 
-/**
- * Helper pour extraire le repo depuis une URL
- */
 function extractRepoFromURL(url) {
   try {
     const urlObj = new URL(url);
@@ -57,8 +51,346 @@ function extractRepoFromURL(url) {
 }
 
 /**
- * Récupère les métriques depuis le backend Flask
+ * Fonction intelligente pour trouver le bon nom de colonne
  */
+function findColumnName(row, possibleNames) {
+  for (const name of possibleNames) {
+    if (row.hasOwnProperty(name) && row[name] !== null && row[name] !== undefined) {
+      return name;
+    }
+  }
+  return possibleNames[0];
+}
+
+/**
+ * Détecte automatiquement les noms de colonnes depuis les données
+ */
+function detectColumnNames(sampleRow) {
+  const detected = {
+    workflow: findColumnName(sampleRow, ['workflow_name', 'workflowName', 'workflow', 'name']),
+    branch: findColumnName(sampleRow, ['branch', 'head_branch', 'ref']),
+    actor: findColumnName(sampleRow, ['issuer_name', 'actor', 'triggering_actor', 'sender', 'author']),
+    created_at: findColumnName(sampleRow, ['created_at', 'createdAt', 'timestamp']),
+    conclusion: findColumnName(sampleRow, ['conclusion', 'status', 'result']),
+    build_duration: findColumnName(sampleRow, ['build_duration', 'buildDuration', 'duration'])
+  };
+  
+  console.log('🔍 Auto-detected column names:', detected);
+  return detected;
+}
+
+/**
+ * 🆕 Filtre les données extraites selon les filtres sélectionnés
+ */
+function filterExtractionData(data, filters, columnNames) {
+  const {
+    workflow: selectedWorkflows = ['all'],
+    branch: selectedBranches = ['all'],
+    actor: selectedActors = ['all'],
+    start: startDate,
+    end: endDate
+  } = filters;
+
+  return data.filter(run => {
+    // Filtre workflow
+    if (!selectedWorkflows.includes('all')) {
+      const workflow = run[columnNames.workflow];
+      if (!selectedWorkflows.includes(workflow)) return false;
+    }
+
+    // Filtre branch
+    if (!selectedBranches.includes('all')) {
+      const branch = run[columnNames.branch];
+      if (!selectedBranches.includes(branch)) return false;
+    }
+
+    // Filtre actor
+    if (!selectedActors.includes('all')) {
+      const actor = run[columnNames.actor];
+      if (!selectedActors.includes(actor)) return false;
+    }
+
+    // Filtre date
+    if (startDate || endDate) {
+      const runDate = new Date(run[columnNames.created_at]);
+      if (startDate && runDate < new Date(startDate)) return false;
+      if (endDate && runDate > new Date(endDate)) return false;
+    }
+
+    return true;
+  });
+}
+
+/**
+ * 🆕 Génère les données de graphiques depuis les vraies données filtrées
+ */
+function generateChartsFromRealData(filteredData, columnNames) {
+  if (!filteredData || filteredData.length === 0) {
+    return null;
+  }
+
+  console.log(`📊 Generating charts from ${filteredData.length} filtered runs`);
+
+  // 1. Calculs de base
+  const totalRuns = filteredData.length;
+  const successfulRuns = filteredData.filter(r => r[columnNames.conclusion] === 'success').length;
+  const failedRuns = filteredData.filter(r => r[columnNames.conclusion] === 'failure').length;
+  const cancelledRuns = filteredData.filter(r => r[columnNames.conclusion] === 'cancelled').length;
+  
+  const successRate = totalRuns > 0 ? successfulRuns / totalRuns : 0;
+  const failureRate = totalRuns > 0 ? failedRuns / totalRuns : 0;
+
+  // Calcul durée moyenne
+  const durations = filteredData
+    .map(r => parseFloat(r[columnNames.build_duration]))
+    .filter(d => !isNaN(d) && d > 0);
+  const avgDuration = durations.length > 0 
+    ? durations.reduce((a, b) => a + b, 0) / durations.length 
+    : 0;
+  const medianDuration = durations.length > 0
+    ? durations.sort((a, b) => a - b)[Math.floor(durations.length / 2)]
+    : 0;
+
+  // 2. Status breakdown
+  const statusBreakdown = [
+    { name: 'success', value: successfulRuns },
+    { name: 'failure', value: failedRuns },
+    { name: 'cancelled', value: cancelledRuns }
+  ];
+
+  // 3. Runs over time (grouper par jour)
+  const runsByDate = {};
+  filteredData.forEach(run => {
+    const date = new Date(run[columnNames.created_at]).toISOString().split('T')[0];
+    if (!runsByDate[date]) {
+      runsByDate[date] = { total: 0, successes: 0, failures: 0, durations: [] };
+    }
+    runsByDate[date].total++;
+    if (run[columnNames.conclusion] === 'success') runsByDate[date].successes++;
+    if (run[columnNames.conclusion] === 'failure') runsByDate[date].failures++;
+    const duration = parseFloat(run[columnNames.build_duration]);
+    if (!isNaN(duration) && duration > 0) runsByDate[date].durations.push(duration);
+  });
+
+  const runsOverTime = Object.entries(runsByDate)
+    .sort(([a], [b]) => new Date(a) - new Date(b))
+    .map(([date, stats]) => ({
+      date,
+      runs: stats.total,
+      successes: stats.successes,
+      failures: stats.failures,
+      avgDuration: stats.durations.length > 0 
+        ? Math.round(stats.durations.reduce((a, b) => a + b, 0) / stats.durations.length)
+        : 0,
+      medianDuration: stats.durations.length > 0
+        ? Math.round(stats.durations.sort((a, b) => a - b)[Math.floor(stats.durations.length / 2)])
+        : 0
+    }));
+
+  // 4. Top workflows
+  const workflowStats = {};
+  filteredData.forEach(run => {
+    const workflow = run[columnNames.workflow];
+    if (!workflowStats[workflow]) {
+      workflowStats[workflow] = { runs: 0, success: 0, durations: [] };
+    }
+    workflowStats[workflow].runs++;
+    if (run[columnNames.conclusion] === 'success') workflowStats[workflow].success++;
+    const duration = parseFloat(run[columnNames.build_duration]);
+    if (!isNaN(duration) && duration > 0) workflowStats[workflow].durations.push(duration);
+  });
+
+  const topWorkflows = Object.entries(workflowStats)
+    .sort(([, a], [, b]) => b.runs - a.runs)
+    .slice(0, 10)
+    .map(([name, stats]) => ({
+      name,
+      runs: stats.runs,
+      success: stats.success,
+      avgDuration: stats.durations.length > 0
+        ? Math.round(stats.durations.reduce((a, b) => a + b, 0) / stats.durations.length)
+        : 0,
+      medianDuration: stats.durations.length > 0
+        ? Math.round(stats.durations.sort((a, b) => a - b)[Math.floor(stats.durations.length / 2)])
+        : 0
+    }));
+
+  // 5. Duration box plot
+  const durationBox = topWorkflows.map(w => {
+    const durations = filteredData
+      .filter(r => r[columnNames.workflow] === w.name)
+      .map(r => parseFloat(r[columnNames.build_duration]))
+      .filter(d => !isNaN(d) && d > 0)
+      .sort((a, b) => a - b);
+
+    if (durations.length === 0) {
+      return { name: w.name, min: 0, q1: 0, median: 0, q3: 0, max: 0 };
+    }
+
+    return {
+      name: w.name,
+      min: Math.round(durations[0]),
+      q1: Math.round(durations[Math.floor(durations.length * 0.25)]),
+      median: Math.round(durations[Math.floor(durations.length * 0.5)]),
+      q3: Math.round(durations[Math.floor(durations.length * 0.75)]),
+      max: Math.round(durations[durations.length - 1])
+    };
+  });
+
+  // 6. Failure rate over time
+  const avgFailureRate = failureRate * 100;
+  const failureRateOverTime = runsOverTime.map(item => ({
+    date: item.date,
+    failureRate: item.runs > 0 ? (item.failures / item.runs) * 100 : 0,
+    avgFailureRate: avgFailureRate,
+    totalRuns: item.runs
+  }));
+
+  // 7. Branch comparison
+  const branchStats = {};
+  filteredData.forEach(run => {
+    const branch = run[columnNames.branch];
+    const workflow = run[columnNames.workflow];
+    const key = `${branch}-${workflow}`;
+    
+    if (!branchStats[key]) {
+      branchStats[key] = { 
+        branch, 
+        workflow, 
+        totalRuns: 0, 
+        successes: 0, 
+        durations: [] 
+      };
+    }
+    branchStats[key].totalRuns++;
+    if (run[columnNames.conclusion] === 'success') branchStats[key].successes++;
+    const duration = parseFloat(run[columnNames.build_duration]);
+    if (!isNaN(duration) && duration > 0) branchStats[key].durations.push(duration);
+  });
+
+  const branchComparison = Object.values(branchStats)
+    .sort((a, b) => b.totalRuns - a.totalRuns)
+    .slice(0, 10)
+    .map(stats => ({
+      branch: stats.branch,
+      workflow: stats.workflow,
+      totalRuns: stats.totalRuns,
+      successRate: stats.totalRuns > 0 ? Math.round((stats.successes / stats.totalRuns) * 100) : 0,
+      avgDuration: stats.durations.length > 0
+        ? Math.round(stats.durations.reduce((a, b) => a + b, 0) / stats.durations.length)
+        : 0,
+      medianDuration: stats.durations.length > 0
+        ? Math.round(stats.durations.sort((a, b) => a - b)[Math.floor(stats.durations.length / 2)])
+        : 0,
+      failures: stats.totalRuns - stats.successes
+    }));
+
+  // 8. Spike detection
+  const avgRunsPerDay = runsOverTime.length > 0
+    ? runsOverTime.reduce((sum, day) => sum + day.runs, 0) / runsOverTime.length
+    : 0;
+  const avgDurationOverTime = runsOverTime.length > 0
+    ? runsOverTime.reduce((sum, day) => sum + day.avgDuration, 0) / runsOverTime.length
+    : 0;
+
+  const spikes = runsOverTime.map(item => {
+    const failureRate = item.runs > 0 ? (item.failures / item.runs) * 100 : 0;
+    const isFailureSpike = failureRate > avgFailureRate * 2;
+    const isDurationSpike = item.avgDuration > avgDurationOverTime * 1.5;
+    const isExecutionSpike = item.runs > avgRunsPerDay * 1.8;
+    
+    const isAnomaly = isFailureSpike || isDurationSpike || isExecutionSpike;
+    let anomalyType = null;
+    let anomalyDetail = null;
+    
+    if (isFailureSpike) {
+      anomalyType = 'Failure Spike';
+      anomalyDetail = `Failure rate: ${failureRate.toFixed(1)}% (avg: ${avgFailureRate.toFixed(1)}%)`;
+    } else if (isDurationSpike) {
+      anomalyType = 'Duration Spike';
+      anomalyDetail = `Duration +${((item.avgDuration / avgDurationOverTime - 1) * 100).toFixed(0)}% above baseline`;
+    } else if (isExecutionSpike) {
+      anomalyType = 'Execution Spike';
+      anomalyDetail = `+${((item.runs / avgRunsPerDay - 1) * 100).toFixed(0)}% runs`;
+    }
+    
+    return {
+      date: item.date,
+      runs: item.runs,
+      failures: item.failures,
+      avgDuration: item.avgDuration,
+      medianDuration: item.medianDuration,
+      anomalyScore: isAnomaly ? item.runs : null,
+      isAnomaly,
+      anomalyType,
+      anomalyDetail
+    };
+  });
+
+  return {
+    totalRuns,
+    successRate,
+    failureRate,
+    avgDuration: Math.round(avgDuration),
+    medianDuration: Math.round(medianDuration),
+    runsOverTime,
+    statusBreakdown,
+    topWorkflows,
+    durationBox,
+    failureRateOverTime,
+    branchComparison,
+    spikes
+  };
+}
+
+/**
+ * Extrait dynamiquement les valeurs uniques depuis les données avec détection auto
+ */
+function extractFilterOptionsFromData(extractionData) {
+  if (!extractionData || extractionData.length === 0) {
+    console.warn('⚠️ No data provided for filter extraction');
+    return null;
+  }
+  
+  console.log('🔍 Extracting filter options from data...');
+  console.log('📊 Total runs:', extractionData.length);
+  
+  const columnNames = detectColumnNames(extractionData[0]);
+  
+  const workflowsSet = new Set();
+  const branchesSet = new Set();
+  const actorsSet = new Set();
+  
+  extractionData.forEach(run => {
+    const workflow = run[columnNames.workflow];
+    if (workflow && workflow !== 'null' && workflow !== 'undefined') {
+      workflowsSet.add(String(workflow));
+    }
+    
+    const branch = run[columnNames.branch];
+    if (branch && branch !== 'null' && branch !== 'undefined') {
+      branchesSet.add(String(branch));
+    }
+    
+    const actor = run[columnNames.actor];
+    if (actor && actor !== 'null' && actor !== 'undefined') {
+      actorsSet.add(String(actor));
+    }
+  });
+  
+  console.log('✅ Filter extraction complete:');
+  console.log(`  - ${workflowsSet.size} unique workflows`);
+  console.log(`  - ${branchesSet.size} unique branches`);
+  console.log(`  - ${actorsSet.size} unique actors`);
+  
+  return {
+    workflows: ['all', ...Array.from(workflowsSet).sort()],
+    branches: ['all', ...Array.from(branchesSet).sort()],
+    actors: ['all', ...Array.from(actorsSet).sort()],
+    columnNames
+  };
+}
+
 async function fetchMetrics(repo) {
   try {
     console.log(`📊 Fetching metrics for ${repo}...`);
@@ -86,444 +418,111 @@ async function fetchMetrics(repo) {
   }
 }
 
-/**
- * Génère une série temporelle basée sur les vraies données
- */
-function generateTimeSeriesFromRealData(apiData) {
-  const days = 10;
-  const avgRunsPerDay = Math.ceil(apiData.totalRuns / days);
-  const avgSuccessPerDay = Math.ceil(apiData.successfulRuns / days);
-  const result = [];
-  
-  for (let i = 0; i < days; i++) {
-    const date = new Date();
-    date.setDate(date.getDate() - (days - i - 1));
+async function fetchFullExtractionData(repo) {
+  try {
+    console.log(`🔍 Fetching FULL extraction data for ${repo}...`);
     
-    const variance = Math.floor(Math.random() * 5) - 2;
-    const runs = Math.max(1, avgRunsPerDay + variance);
-    const successes = Math.floor(runs * (apiData.successfulRuns / apiData.totalRuns));
-    const failures = runs - successes;
-    const avgDuration = Math.round(apiData.avgDuration + (Math.random() * 50 - 25));
+    const response = await fetch(
+      `${API_CONFIG.baseUrl}/extraction?repo=${encodeURIComponent(repo)}`,
+      {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
     
-    result.push({
-      date: date.toISOString().split('T')[0],
-      runs: runs,
-      successes: successes,
-      failures: failures,
-      avgDuration: avgDuration,
-      medianDuration: Math.round(avgDuration * 0.98),
-      minDuration: Math.round(avgDuration * 0.7),
-      maxDuration: Math.round(avgDuration * 1.3)
-    });
-  }
-  
-  return result;
-}
-
-/**
- * Génère des données de spike detection basées sur les vraies métriques
- */
-function generateSpikesFromRealData(timeSeriesData, avgFailureRate) {
-  return timeSeriesData.map(item => {
-    const failureRate = (item.failures / item.runs) * 100;
-    const avgDuration = timeSeriesData.reduce((s, i) => s + i.avgDuration, 0) / timeSeriesData.length;
-    const avgRuns = timeSeriesData.reduce((s, i) => s + i.runs, 0) / timeSeriesData.length;
-    
-    const isFailureSpike = failureRate > avgFailureRate * 2;
-    const isDurationSpike = item.avgDuration > avgDuration * 1.5;
-    const isExecutionSpike = item.runs > avgRuns * 1.8;
-    
-    const isAnomaly = isFailureSpike || isDurationSpike || isExecutionSpike;
-    let anomalyType = null;
-    let anomalyDetail = null;
-    
-    if (isFailureSpike) {
-      anomalyType = 'Failure Spike';
-      anomalyDetail = `Failure rate: ${failureRate.toFixed(1)}% (avg: ${avgFailureRate.toFixed(1)}%)`;
-    } else if (isDurationSpike) {
-      anomalyType = 'Duration Spike';
-      anomalyDetail = `Duration +${((item.avgDuration / avgDuration - 1) * 100).toFixed(0)}% above baseline`;
-    } else if (isExecutionSpike) {
-      anomalyType = 'Execution Spike';
-      anomalyDetail = `+${((item.runs / avgRuns - 1) * 100).toFixed(0)}% runs`;
+    if (!response.ok) {
+      throw new Error(`Extraction endpoint returned ${response.status}`);
     }
     
-    return {
-      date: item.date,
-      runs: item.runs,
-      failures: item.failures,
-      avgDuration: item.avgDuration,
-      medianDuration: item.medianDuration,
-      anomalyScore: isAnomaly ? item.runs : null,
-      isAnomaly,
-      anomalyType,
-      anomalyDetail
-    };
-  });
-}
-
-/**
- * Génère les données de comparaison de branches (mock enrichi)
- */
-function generateBranchComparisonFromRealData(apiData) {
-  const branches = ['main', 'develop', 'feature/dashboard', 'feature/api', 'hotfix/security'];
-  const workflows = ['CI', 'Tests', 'Build', 'Deploy'];
-  
-  return branches.slice(0, 5).map((branch, idx) => {
-    const workflow = workflows[idx % workflows.length];
-    const runs = Math.floor(apiData.totalRuns / branches.length) + Math.floor(Math.random() * 20);
-    const successRate = 75 + Math.floor(Math.random() * 20);
-    const avgDuration = Math.round(apiData.avgDuration + (Math.random() * 100 - 50));
+    const result = await response.json();
     
-    return {
-      branch,
-      workflow,
-      totalRuns: runs,
-      successRate,
-      avgDuration,
-      medianDuration: Math.round(avgDuration * 0.97),
-      failures: Math.floor(runs * (1 - successRate / 100))
-    };
-  });
-}
-
-/**
- * Convertit les données de l'API en format Dashboard avec filtres
- */
-function convertApiDataToDashboard(apiData, filters = {}, requestedRepo = null) {
-  const successRate = (apiData.successfulRuns / apiData.totalRuns) || 0;
-  const failureRate = (apiData.failedRuns / apiData.totalRuns) || 0;
-  const avgFailureRate = failureRate * 100;
-  
-  // Générer les séries temporelles
-  const allRunsOverTime = generateTimeSeriesFromRealData(apiData);
-  
-  // Status breakdown
-  const allStatusBreakdown = [
-    { name: 'success', value: apiData.successfulRuns },
-    { name: 'failure', value: apiData.failedRuns },
-    { name: 'cancelled', value: 0 }
-  ];
-  
-  // Top workflows (estimation basée sur les données réelles)
-  const allTopWorkflows = [
-    { 
-      name: 'CI', 
-      runs: Math.floor(apiData.totalRuns * 0.4), 
-      success: Math.floor(apiData.successfulRuns * 0.4), 
-      avgDuration: Math.round(apiData.avgDuration),
-      medianDuration: Math.round(apiData.avgDuration * 0.98)
-    },
-    { 
-      name: 'Tests', 
-      runs: Math.floor(apiData.totalRuns * 0.3), 
-      success: Math.floor(apiData.successfulRuns * 0.3), 
-      avgDuration: Math.round(apiData.avgDuration * 1.1),
-      medianDuration: Math.round(apiData.avgDuration * 1.08)
-    },
-    { 
-      name: 'Deploy', 
-      runs: Math.floor(apiData.totalRuns * 0.2), 
-      success: Math.floor(apiData.successfulRuns * 0.2), 
-      avgDuration: Math.round(apiData.avgDuration * 1.3),
-      medianDuration: Math.round(apiData.avgDuration * 1.27)
-    },
-    { 
-      name: 'Build', 
-      runs: Math.floor(apiData.totalRuns * 0.1), 
-      success: Math.floor(apiData.successfulRuns * 0.1), 
-      avgDuration: Math.round(apiData.avgDuration * 0.9),
-      medianDuration: Math.round(apiData.avgDuration * 0.88)
+    if (!result.success || !result.data || result.data.length === 0) {
+      console.warn('⚠️ Extraction returned no data');
+      return null;
     }
-  ];
-  
-  // Duration box plot
-  const allDurationBox = allTopWorkflows.map(w => ({
-    name: w.name,
-    min: Math.round(w.avgDuration * 0.6),
-    q1: Math.round(w.avgDuration * 0.8),
-    median: Math.round(w.avgDuration),
-    q3: Math.round(w.avgDuration * 1.2),
-    max: Math.round(w.avgDuration * 1.5)
-  }));
-  
-  // Failure rate over time
-  const allFailureRateOverTime = allRunsOverTime.map(item => ({
-    date: item.date,
-    failureRate: (item.failures / item.runs) * 100,
-    avgFailureRate: avgFailureRate,
-    totalRuns: item.runs
-  }));
-  
-  // Branch comparison
-  const allBranchComparison = generateBranchComparisonFromRealData(apiData);
-  
-  // Spike detection
-  const allSpikes = generateSpikesFromRealData(allRunsOverTime, avgFailureRate);
-  
-  // Filter options
-  const workflows = ['all', ...allTopWorkflows.map(w => w.name)];
-  const branches = ['all', 'main', 'develop', 'feature/dashboard', 'feature/api', 'hotfix/security'];
-  const actors = ['all', 'john.doe', 'jane.smith', 'bob.wilson', 'alice.cooper', 'mike.johnson'];
-  
-  // Apply filters
-  const {
-    workflow: selectedWorkflows = ['all'],
-    branch: selectedBranches = ['all'],
-    actor: selectedActors = ['all'],
-    start: startDate,
-    end: endDate
-  } = filters;
-
-  // Filter by date range
-  let runsOverTime = allRunsOverTime;
-  if (startDate || endDate) {
-    runsOverTime = allRunsOverTime.filter(item => {
-      const itemDate = new Date(item.date);
-      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
-      const end = endDate ? new Date(endDate) : new Date('2100-01-01');
-      return itemDate >= start && itemDate <= end;
-    });
+    
+    console.log(`✅ Fetched ${result.data.length} workflow runs from backend`);
+    return result.data;
+    
+  } catch (error) {
+    console.error('❌ Failed to fetch full extraction data:', error);
+    return null;
   }
-
-  // Filter branch comparison
-  let branchComparison = allBranchComparison;
-  if (!selectedBranches.includes('all')) {
-    branchComparison = branchComparison.filter(b => selectedBranches.includes(b.branch));
-  }
-  if (!selectedWorkflows.includes('all')) {
-    branchComparison = branchComparison.filter(b => selectedWorkflows.includes(b.workflow));
-  }
-
-  // Filter top workflows
-  let topWorkflows = allTopWorkflows;
-  if (!selectedWorkflows.includes('all')) {
-    topWorkflows = topWorkflows.filter(w => selectedWorkflows.includes(w.name));
-  }
-
-  // Filter duration box
-  let durationBox = allDurationBox;
-  if (!selectedWorkflows.includes('all')) {
-    durationBox = durationBox.filter(d => selectedWorkflows.includes(d.name));
-  }
-
-  // Filter failure rate over time
-  let failureRateOverTime = allFailureRateOverTime;
-  if (startDate || endDate) {
-    failureRateOverTime = allFailureRateOverTime.filter(item => {
-      const itemDate = new Date(item.date);
-      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
-      const end = endDate ? new Date(endDate) : new Date('2100-01-01');
-      return itemDate >= start && itemDate <= end;
-    });
-  }
-
-  // Filter spikes
-  let spikes = allSpikes;
-  if (startDate || endDate) {
-    spikes = allSpikes.filter(item => {
-      const itemDate = new Date(item.date);
-      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
-      const end = endDate ? new Date(endDate) : new Date('2100-01-01');
-      return itemDate >= start && itemDate <= end;
-    });
-  }
-
-  const statusBreakdown = allStatusBreakdown;
-
-  // Déterminer le nom du repo à afficher
-  let displayRepo = apiData.repo;
-  if (requestedRepo && requestedRepo !== apiData.repo) {
-    displayRepo = `${requestedRepo} (using ${apiData.repo} data)`;
-  }
-
-  return {
-    repo: displayRepo,
-    totalRuns: runsOverTime.reduce((s, r) => s + r.runs, 0) || apiData.totalRuns,
-    successRate: runsOverTime.length > 0 ? runsOverTime.reduce((s, r) => s + r.successes, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0) : successRate,
-    failureRate: runsOverTime.length > 0 ? runsOverTime.reduce((s, r) => s + r.failures, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0) : failureRate,
-    avgDuration: runsOverTime.length > 0 ? Math.round(runsOverTime.reduce((s, r) => s + r.avgDuration * r.runs, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0)) : Math.round(apiData.avgDuration),
-    medianDuration: runsOverTime.length > 0 ? Math.round(runsOverTime.reduce((s, r) => s + r.medianDuration, 0) / runsOverTime.length) : Math.round(apiData.avgDuration * 0.98),
-    stdDeviation: 35,
-    runsOverTime,
-    statusBreakdown,
-    topWorkflows,
-    durationBox,
-    failureRateOverTime,
-    branchComparison,
-    spikes,
-    workflows,
-    branches,
-    actors
-  };
 }
 
 /**
- * Fonction principale appelée par le Dashboard - Version avec détection auto du repo
+ * Fonction principale appelée par le Dashboard
  */
 export async function fetchDashboardData(filters = {}) {
   try {
-    // Extraire le repo depuis l'URL ou le storage
     const requestedRepo = await extractRepoFromCurrentPage();
     
     console.log(`📡 Loading dashboard data for: ${requestedRepo}`);
     console.log(`🔍 Applied filters:`, filters);
-    console.log(`🔌 WebSocket mode: ${API_CONFIG.useWebSocket ? 'ENABLED' : 'DISABLED'}`);
     
-    // Si WebSocket est activé, essayer d'extraire en temps réel
-    if (API_CONFIG.useWebSocket) {
-      try {
-        console.log('🚀 Attempting WebSocket extraction...');
-        const wsData = await fetchDashboardDataViaWebSocket(requestedRepo, filters);
-        console.log('✅ Dashboard data ready (from WebSocket):', wsData);
-        return wsData;
-      } catch (wsError) {
-        console.warn('⚠️ WebSocket extraction failed, falling back to HTTP API:', wsError);
-        // Continue avec l'API HTTP en fallback
-      }
+    // Récupérer les données d'extraction complètes
+    const extractionData = await fetchFullExtractionData(requestedRepo);
+    
+    if (!extractionData || extractionData.length === 0) {
+      console.warn('⚠️ No extraction data available');
+      return getMockDashboardData(filters);
     }
+
+    // Extraire les options de filtres
+    const filterOptions = extractFilterOptionsFromData(extractionData);
     
-    // Méthode HTTP classique
-    let apiData;
-    let actualRepo = requestedRepo;
-    
-    try {
-      apiData = await fetchMetrics(requestedRepo);
-    } catch (error) {
-      console.warn(`⚠️ No data for ${requestedRepo}, falling back to default repo`);
-      // Si le repo demandé n'a pas de données, utiliser le repo par défaut
-      //actualRepo = API_CONFIG.defaultRepo;
-      //apiData = await fetchMetrics(actualRepo);
-      throw error;
+    if (!filterOptions) {
+      console.warn('⚠️ Could not extract filter options');
+      return getMockDashboardData(filters);
     }
+
+    // 🆕 Filtrer les données selon les filtres sélectionnés
+    const filteredData = filterExtractionData(extractionData, filters, filterOptions.columnNames);
+    console.log(`✅ Filtered to ${filteredData.length} runs (from ${extractionData.length} total)`);
+
+    // 🆕 Générer les graphiques depuis les données filtrées
+    const chartData = generateChartsFromRealData(filteredData, filterOptions.columnNames);
     
-    // Convertir au format Dashboard avec filtres
-    const dashboardData = convertApiDataToDashboard(apiData, filters, requestedRepo);
-    
-    console.log('✅ Dashboard data ready (from HTTP API):', dashboardData);
-    return dashboardData;
+    if (!chartData) {
+      console.warn('⚠️ No chart data generated');
+      return getMockDashboardData(filters);
+    }
+
+    return {
+      repo: requestedRepo,
+      ...chartData,
+      stdDeviation: 35,
+      workflows: filterOptions.workflows,
+      branches: filterOptions.branches,
+      actors: filterOptions.actors
+    };
     
   } catch (error) {
     console.error('❌ Error fetching from backend:', error);
-    
-    // Retourner données mock en dernier recours
     return getMockDashboardData(filters);
   }
 }
 
-/**
- * Données mock en cas d'erreur backend
- */
 function getMockDashboardData(filters = {}) {
   console.warn('⚠️ Using fallback mock data');
   
-  const allRunsOverTime = [
-    { date: '2025-10-01', runs: 2, successes: 2, failures: 0, avgDuration: 180, medianDuration: 178, minDuration: 170, maxDuration: 190 },
-    { date: '2025-10-05', runs: 3, successes: 3, failures: 0, avgDuration: 190, medianDuration: 188, minDuration: 180, maxDuration: 200 },
-    { date: '2025-10-10', runs: 5, successes: 4, failures: 1, avgDuration: 220, medianDuration: 215, minDuration: 190, maxDuration: 280 },
-    { date: '2025-10-15', runs: 8, successes: 7, failures: 1, avgDuration: 200, medianDuration: 195, minDuration: 180, maxDuration: 240 },
-    { date: '2025-10-20', runs: 10, successes: 9, failures: 1, avgDuration: 230, medianDuration: 220, minDuration: 200, maxDuration: 290 },
-    { date: '2025-10-25', runs: 7, successes: 6, failures: 1, avgDuration: 210, medianDuration: 205, minDuration: 190, maxDuration: 250 },
-    { date: '2025-10-30', runs: 7, successes: 6, failures: 1, avgDuration: 205, medianDuration: 200, minDuration: 185, maxDuration: 240 }
-  ];
-
-  const allStatusBreakdown = [
-    { name: 'success', value: 37 },
-    { name: 'failure', value: 5 },
-    { name: 'cancelled', value: 0 }
-  ];
-
-  const allTopWorkflows = [
-    { name: 'CI', runs: 30, success: 28, avgDuration: 200, medianDuration: 198 },
-    { name: 'Deploy', runs: 12, success: 11, avgDuration: 250, medianDuration: 245 }
-  ];
-
-  const allDurationBox = [
-    { name: 'CI', min: 120, q1: 160, median: 200, q3: 240, max: 320 },
-    { name: 'Deploy', min: 190, q1: 220, median: 250, q3: 270, max: 330 }
-  ];
-  
-  const allFailureRateOverTime = [
-    { date: '2025-10-01', failureRate: 0, avgFailureRate: 11.9, totalRuns: 2 },
-    { date: '2025-10-05', failureRate: 0, avgFailureRate: 11.9, totalRuns: 3 },
-    { date: '2025-10-10', failureRate: 20, avgFailureRate: 11.9, totalRuns: 5 },
-    { date: '2025-10-15', failureRate: 12.5, avgFailureRate: 11.9, totalRuns: 8 },
-    { date: '2025-10-20', failureRate: 10, avgFailureRate: 11.9, totalRuns: 10 },
-    { date: '2025-10-25', failureRate: 14.3, avgFailureRate: 11.9, totalRuns: 7 },
-    { date: '2025-10-30', failureRate: 14.3, avgFailureRate: 11.9, totalRuns: 7 }
-  ];
-  
-  const allBranchComparison = [
-    { branch: 'main', workflow: 'CI', totalRuns: 25, successRate: 92, avgDuration: 195, medianDuration: 190, failures: 2 },
-    { branch: 'develop', workflow: 'Tests', totalRuns: 17, successRate: 88, avgDuration: 210, medianDuration: 205, failures: 2 }
-  ];
-  
-  const allSpikes = allRunsOverTime.map(item => ({
-    ...item,
-    anomalyScore: null,
-    isAnomaly: false,
-    anomalyType: null,
-    anomalyDetail: null
-  }));
-
-  const workflows = ['all', 'CI', 'Deploy', 'Tests', 'Build'];
-  const branches = ['all', 'main', 'develop'];
-  const actors = ['all', 'john.doe', 'jane.smith'];
-
-  // Apply same filtering logic as real data
-  const {
-    workflow: selectedWorkflows = ['all'],
-    branch: selectedBranches = ['all'],
-    start: startDate,
-    end: endDate
-  } = filters;
-
-  let runsOverTime = allRunsOverTime;
-  let branchComparison = allBranchComparison;
-  let topWorkflows = allTopWorkflows;
-  let durationBox = allDurationBox;
-  let failureRateOverTime = allFailureRateOverTime;
-  let spikes = allSpikes;
-
-  if (startDate || endDate) {
-    const filterByDate = (item) => {
-      const itemDate = new Date(item.date);
-      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
-      const end = endDate ? new Date(endDate) : new Date('2100-01-01');
-      return itemDate >= start && itemDate <= end;
-    };
-    runsOverTime = allRunsOverTime.filter(filterByDate);
-    failureRateOverTime = allFailureRateOverTime.filter(filterByDate);
-    spikes = allSpikes.filter(filterByDate);
-  }
-
-  if (!selectedWorkflows.includes('all')) {
-    topWorkflows = topWorkflows.filter(w => selectedWorkflows.includes(w.name));
-    durationBox = durationBox.filter(d => selectedWorkflows.includes(d.name));
-    branchComparison = branchComparison.filter(b => selectedWorkflows.includes(b.workflow));
-  }
-
-  if (!selectedBranches.includes('all')) {
-    branchComparison = branchComparison.filter(b => selectedBranches.includes(b.branch));
-  }
-
   return {
     repo: 'Mock Repository (Backend unavailable)',
-    totalRuns: runsOverTime.reduce((s, r) => s + r.runs, 0) || 42,
-    successRate: runsOverTime.length > 0 ? runsOverTime.reduce((s, r) => s + r.successes, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0) : 0.88,
-    failureRate: runsOverTime.length > 0 ? runsOverTime.reduce((s, r) => s + r.failures, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0) : 0.12,
-    avgDuration: runsOverTime.length > 0 ? Math.round(runsOverTime.reduce((s, r) => s + r.avgDuration * r.runs, 0) / runsOverTime.reduce((s, r) => s + r.runs, 0)) : 205,
-    medianDuration: runsOverTime.length > 0 ? Math.round(runsOverTime.reduce((s, r) => s + r.medianDuration, 0) / runsOverTime.length) : 200,
+    totalRuns: 42,
+    successRate: 0.88,
+    failureRate: 0.12,
+    avgDuration: 205,
+    medianDuration: 200,
     stdDeviation: 35,
-    runsOverTime,
-    statusBreakdown: allStatusBreakdown,
-    topWorkflows,
-    durationBox,
-    failureRateOverTime,
-    branchComparison,
-    spikes,
-    workflows,
-    branches,
-    actors
+    runsOverTime: [],
+    statusBreakdown: [],
+    topWorkflows: [],
+    durationBox: [],
+    failureRateOverTime: [],
+    branchComparison: [],
+    spikes: [],
+    workflows: ['all'],
+    branches: ['all'],
+    actors: ['all']
   };
 }

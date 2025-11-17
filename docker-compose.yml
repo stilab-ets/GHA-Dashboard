@@ -47,9 +47,10 @@ services:
     ports:
       - "3000:3000"
     volumes:
+      - ./backend/app.py:/app/app.py
       - ./backend/src:/app/src:ro
       - ./backend/extraction:/app/extraction:ro
-      #- ./backend/ghaminer:/app/ghaminer:ro
+      - ./backend/ghaminer:/app/ghaminer:ro
       - ./backend/builds_features.csv:/app/builds_features.csv
       #- ghaminer-tmp:/app/ghaminer/src/tmp
       #- ghaminer-repos:/app/ghaminer/src/repos

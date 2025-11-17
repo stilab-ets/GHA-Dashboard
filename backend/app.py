@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -12,6 +12,9 @@ from typing import cast
 from datetime import date
 import asyncio
 from flask_sock import Sock
+import threading
+import json
+import numpy as np
 
 # Initialisation de l'application Flask
 load_dotenv()
@@ -26,15 +29,31 @@ db.init_app(app)
 
 CSV_PATH = "builds_features.csv"
 
-#@app.route("/health")
-#def health():
-#    """Health check pour Docker et debugging"""
-#    return jsonify({
-#        "status": "ok",
-#        "service": "GHA Dashboard Backend",
-#        "csv_exists": os.path.exists(CSV_PATH),
-#        "github_token_set": bool(os.getenv("GITHUB_TOKEN"))
-#    }), 200 
+# ============================================
+# 🆕 Cache système pour l'extraction
+# ============================================
+_extraction_cache = {}
+_cache_lock = threading.Lock()
+
+def get_cached_extraction(repo, max_age_minutes=30):
+    """Récupère les données depuis le cache si elles sont récentes"""
+    with _cache_lock:
+        if repo in _extraction_cache:
+            cached_data, cached_time = _extraction_cache[repo]
+            age = datetime.now() - cached_time
+            if age < timedelta(minutes=max_age_minutes):
+                print(f"✅ Cache HIT for {repo} (age: {age.seconds}s)")
+                return cached_data
+            else:
+                print(f"⚠️ Cache EXPIRED for {repo} (age: {age.seconds}s)")
+        return None
+
+def set_cached_extraction(repo, data):
+    """Stocke les données dans le cache"""
+    with _cache_lock:
+        _extraction_cache[repo] = (data, datetime.now())
+        print(f"💾 Cached extraction for {repo} ({len(data.get('data', []))} runs)")
+
 # ============================================
 # Helpers ingestion 
 # ============================================
@@ -84,14 +103,23 @@ def health():
             }, 500
 
 # ============================================
-# Route extraction 
+# 🆕 Route extraction AMÉLIORÉE avec cache
 # ============================================
 @app.get("/api/extraction")
 def extraction_api():
-    # Extrait les données pour ?repo=owner/name et retourne le DataFrame en JSON
+    """
+    Extrait les données pour ?repo=owner/name et retourne le DataFrame en JSON
+    Avec système de cache pour éviter les extractions répétées
+    """
     repo = request.args.get("repo")
     if not repo:
         return jsonify({"error": "Paramètre 'repo' manquant"}), 400
+
+    # Vérifier le cache d'abord
+    cached_data = get_cached_extraction(repo)
+    if cached_data:
+        print(f"📦 Returning cached data for {repo}")
+        return jsonify(cached_data), 200
 
     # Utiliser la variable d'environnement Docker
     token = os.getenv("GITHUB_TOKEN")
@@ -101,13 +129,18 @@ def extraction_api():
             "help": "Vérifier le fichier .env"
         }), 500
     
+    print(f"🔍 Starting extraction for {repo}...")
+    start_time = datetime.now()
+    
     # Appel à la fonction d'extraction
     try:
         result = extract_data(repo, token, "2024-04-01", "2025-10-31")
     except Exception as e:
+        error_msg = str(e)
+        print(f"❌ Extraction error: {error_msg}")
         return jsonify({
             "error": "Erreur lors de l'extraction",
-            "detail": str(e)
+            "detail": error_msg
         }), 500
 
     # Gestion des retours 
@@ -116,14 +149,99 @@ def extraction_api():
         if error:
             return jsonify({"error": error}), 400
         else:
+            extraction_time = (datetime.now() - start_time).total_seconds()
+            print(f"✅ Extracted {len(df)} runs in {extraction_time:.2f}s")
+            
+            # 🆕 NETTOYER les NaN avant de convertir en JSON
+            # Remplacer NaN, inf, -inf par None
+            #df = df.replace([float('inf'), float('-inf')], None)
+            #df = df.where(pd.notnull(df), None)
+            
+            # Afficher les colonnes disponibles pour debug
+            columns = list(df.columns)
+            print(f"📋 Available columns ({len(columns)}): {columns}")
+            
+            # Afficher un échantillon de données
+            if len(df) > 0:
+                sample = df.iloc[0].to_dict()
+                print(f"📊 Sample row keys: {list(sample.keys())}")
+                print(f"📊 Sample values:")
+                for key, value in list(sample.items())[:5]:
+                    print(f"   - {key}: {value}")
+            
+            # Juste avant response_data = {...}
+                data_dict = df.to_dict(orient="records")
+            # Nettoyer les NaN dans le dict
+                for record in data_dict:
+                    for key, value in record.items():
+                        if pd.isna(value) or value != value:  # NaN check
+                            record[key] = None
             # Conversion DataFrame → JSON
-            return jsonify({
+            response_data = {
                 "success": True,
                 "repo": repo,
                 "runs_extracted": len(df),
-                "data": df.to_dict(orient="records")
-            }), 200
+                "columns": columns,
+                "extraction_time_seconds": round(extraction_time, 2),
+                "data": data_dict
+            }
+            
+            # Mettre en cache
+            set_cached_extraction(repo, response_data)
+            
+            return jsonify(response_data), 200
+            
     return jsonify({"error": "Format de retour inattendu"}), 500
+
+
+# ============================================
+# 🆕 Route pour vérifier le cache
+# ============================================
+@app.get("/api/extraction/cache-status")
+def cache_status():
+    """Vérifie l'état du cache pour un repo"""
+    repo = request.args.get("repo")
+    if not repo:
+        with _cache_lock:
+            return jsonify({
+                "cached_repos": list(_extraction_cache.keys()),
+                "count": len(_extraction_cache)
+            }), 200
+    
+    cached_data = get_cached_extraction(repo)
+    if cached_data:
+        return jsonify({
+            "cached": True,
+            "repo": repo,
+            "runs": cached_data.get("runs_extracted", 0),
+            "columns": cached_data.get("columns", [])
+        }), 200
+    else:
+        return jsonify({
+            "cached": False,
+            "repo": repo
+        }), 200
+
+
+# ============================================
+# Route pour vider le cache
+# ============================================
+@app.post("/api/extraction/clear-cache")
+def clear_cache():
+    """Vide le cache d'extraction (utile pour debug)"""
+    repo = request.args.get("repo")
+    
+    with _cache_lock:
+        if repo:
+            if repo in _extraction_cache:
+                del _extraction_cache[repo]
+                return jsonify({"success": True, "message": f"Cache cleared for {repo}"}), 200
+            else:
+                return jsonify({"success": False, "message": f"No cache for {repo}"}), 404
+        else:
+            count = len(_extraction_cache)
+            _extraction_cache.clear()
+            return jsonify({"success": True, "message": f"Cleared {count} cached repos"}), 200
 
 
 # ============================================
@@ -180,7 +298,7 @@ def github_metrics():
             "failedRuns": failed_runs,
             "successRate": success_rate,
             "avgDuration": avg_duration,
-            "changePercentage": 0  # TODO: calculer le changement par rapport à la période précédente
+            "changePercentage": 0
         }
         return jsonify(result)
     except Exception as e:
@@ -225,6 +343,9 @@ def websocket_data(ws, repositoryName: str):
 @app.route("/api/debug")
 def debug():
     """Informations de debug pour Docker"""
+    with _cache_lock:
+        cached_repos = list(_extraction_cache.keys())
+    
     return jsonify({
         "environment": {
             "FLASK_ENV": os.getenv("FLASK_ENV"),
@@ -235,6 +356,10 @@ def debug():
         "files": {
             "csv_exists": os.path.exists(CSV_PATH),
             "csv_path": os.path.abspath(CSV_PATH)
+        },
+        "cache": {
+            "cached_repos": cached_repos,
+            "count": len(cached_repos)
         },
         "working_directory": os.getcwd(),
         "python_version": os.sys.version
@@ -338,8 +463,9 @@ if __name__ == "__main__":
     port = int(os.getenv("FLASK_RUN_PORT", 3000))
     debug = os.getenv("FLASK_DEBUG", "1") == "1"
 
-    print(f"Starting GHA Dashboard Backend on port {port}")
-    print(f"CSV Path: {os.path.abspath(CSV_PATH)}")
-    print(f"GitHub Token configured: {bool(os.getenv('GITHUB_TOKEN'))}")
+    print(f"🚀 Starting GHA Dashboard Backend on port {port}")
+    print(f"📁 CSV Path: {os.path.abspath(CSV_PATH)}")
+    print(f"🔑 GitHub Token configured: {bool(os.getenv('GITHUB_TOKEN'))}")
+    print(f"💾 Cache system: ENABLED")
 
     app.run(host="0.0.0.0", port=port, debug=debug)
