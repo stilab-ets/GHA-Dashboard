@@ -34,7 +34,7 @@ services:
       FLASK_ENV: ${FLASK_ENV:-development}
       FLASK_DEBUG: 1
 
-      # Database (ce que ton app.py lit)
+      # Database
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/gha_dashboard
       DB_HOST: postgres
       DB_PORT: 5432
@@ -49,8 +49,10 @@ services:
     volumes:
       - ./backend/src:/app/src:ro
       - ./backend/extraction:/app/extraction:ro
-      - ./backend/ghaminer:/app/ghaminer:ro
+      #- ./backend/ghaminer:/app/ghaminer:ro
       - ./backend/builds_features.csv:/app/builds_features.csv
+      #- ghaminer-tmp:/app/ghaminer/src/tmp
+      #- ghaminer-repos:/app/ghaminer/src/repos
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,4 +88,8 @@ volumes:
   postgres-data:
     driver: local
   pgadmin-data:
+    driver: local
+  ghaminer-tmp:
+    driver: local
+  ghaminer-repos:
     driver: local
