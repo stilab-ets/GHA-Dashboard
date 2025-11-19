@@ -103,7 +103,7 @@ def health():
             }, 500
 
 # ============================================
-# 🆕 Route extraction AMÉLIORÉE avec cache
+# Route extraction avec cache
 # ============================================
 @app.get("/api/extraction")
 def extraction_api():
@@ -152,11 +152,6 @@ def extraction_api():
             extraction_time = (datetime.now() - start_time).total_seconds()
             print(f"✅ Extracted {len(df)} runs in {extraction_time:.2f}s")
             
-            # 🆕 NETTOYER les NaN avant de convertir en JSON
-            # Remplacer NaN, inf, -inf par None
-            #df = df.replace([float('inf'), float('-inf')], None)
-            #df = df.where(pd.notnull(df), None)
-            
             # Afficher les colonnes disponibles pour debug
             columns = list(df.columns)
             print(f"📋 Available columns ({len(columns)}): {columns}")
@@ -195,7 +190,7 @@ def extraction_api():
 
 
 # ============================================
-# 🆕 Route pour vérifier le cache
+# Route pour vérifier le cache
 # ============================================
 @app.get("/api/extraction/cache-status")
 def cache_status():

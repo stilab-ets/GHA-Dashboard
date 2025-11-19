@@ -80,7 +80,7 @@ function detectColumnNames(sampleRow) {
 }
 
 /**
- * 🆕 Filtre les données extraites selon les filtres sélectionnés
+ * Filtre les données extraites selon les filtres sélectionnés
  */
 function filterExtractionData(data, filters, columnNames) {
   const {
@@ -122,7 +122,7 @@ function filterExtractionData(data, filters, columnNames) {
 }
 
 /**
- * 🆕 Génère les données de graphiques depuis les vraies données filtrées
+ * Génère les données de graphiques depuis les vraies données filtrées
  */
 function generateChartsFromRealData(filteredData, columnNames) {
   if (!filteredData || filteredData.length === 0) {
