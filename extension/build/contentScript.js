@@ -1,3 +1,4 @@
+import { triggerExtraction } from "../dashboard/api.js";
 (function() {
   'use strict';
 
@@ -6,6 +7,15 @@
   let originalContent = null; // Store original page content
   let previousUrl = null; // Track URL before showing dashboard
   let isDashboardActive = false; // Track if dashboard is currently shown
+
+  function detectAndStoreRepo() {
+  const match = window.location.pathname.match(/^\/([^\/]+)\/([^\/]+)/);
+  if (match) {
+    const repo = `${match[1]}/${match[2]}`;
+    chrome.storage.local.set({ currentRepo: repo });
+    console.log("📌 Repo détecté et stocké :", repo);
+  }
+}
 
   // Check if we're on a GitHub repository page
   const isGitHubRepoPage = () => { 
@@ -19,10 +29,11 @@
     const existingButton = document.querySelector('#gha-dashboard-nav-button');
     if (existingButton) return;
 
-    const nav = document.querySelector('nav[aria-label="Repository"]') || 
-                 document.querySelector('.UnderlineNav-body') ||
-                 document.querySelector('[data-pjax-container] nav ul');
-    
+      const nav = document.querySelector('nav[aria-label="Repository"]')
+      || document.querySelector('nav.UnderlineNav') 
+      || document.querySelector('nav')   // fallback
+      || document.querySelector('.pagehead-actions'); // ancien GitHub
+      console.log("🔍 Found nav:", nav);
     if (!nav) {
       console.log('[GHA Dashboard] Navigation bar not found, retrying...');
       setTimeout(injectDashboardButton, 100);
@@ -95,7 +106,7 @@
   };
 
   // Show dashboard and hide original content
-  const showDashboard = () => {
+  const showDashboard = async () => {
     previousUrl = window.location.pathname;
     isDashboardActive = true;
     
@@ -115,6 +126,20 @@
       dashboardButton.setAttribute('aria-current', 'page');
       dashboardButton.classList.add('selected');
     }
+    const repo = await new Promise(resolve => {
+        chrome.storage.local.get(["currentRepo"], r => resolve(r.currentRepo));
+    });
+
+    console.log("📦 Launching extraction for dashboard:", repo);
+
+    const extractionResult = await triggerExtraction(repo);
+
+    if (!extractionResult || !extractionResult.success) {
+        alert("❌ Extraction failed. Check backend logs.");
+        return;
+    }
+
+    console.log("📊 Extraction done, loading dashboard...");
     
     createDashboard();
   };
@@ -285,6 +310,8 @@
   const initialize = () => {
     if (isGitHubRepoPage()) {
       injectDashboardButton();
+      detectAndStoreRepo();
+
     }
   };
 
@@ -311,8 +338,13 @@
         dashboardButton = null;
         
         if (isGitHubRepoPage()) {
-          setTimeout(injectDashboardButton, 100);
+          setTimeout(injectDashboardButton, 800); // instead of 100
         }
+
+        if (isGitHubRepoPage()) {
+          detectAndStoreRepo();
+        }
+
       }
     }).observe(document.body, { subtree: true, childList: true });
   };

@@ -1,8 +1,10 @@
 import { fetchDashboardDataViaWebSocket } from './websocket.js';
 
+
+
 const API_CONFIG = {
   baseUrl: 'http://localhost:3000/api',
-  defaultRepo: 'facebook/react',
+  defaultRepo: null,
   useWebSocket: false
 };
 
@@ -10,30 +12,25 @@ const API_CONFIG = {
  * Extraire le repo depuis l'URL de la page GitHub actuelle
  */
 function extractRepoFromCurrentPage() {
-  try {
-    return new Promise((resolve) => {
-      if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.get(['currentRepo'], (result) => {
-          if (result.currentRepo) {
-            console.log(`📌 Using repo from storage: ${result.currentRepo}`);
-            resolve(result.currentRepo);
-          } else {
-            const repo = extractRepoFromURL(window.location.href);
-            console.log(`📌 Extracted repo from URL: ${repo || API_CONFIG.defaultRepo}`);
-            resolve(repo || API_CONFIG.defaultRepo);
-          }
-        });
-      } else {
-        const repo = extractRepoFromURL(window.location.href);
-        console.log(`📌 Extracted repo from URL: ${repo || API_CONFIG.defaultRepo}`);
-        resolve(repo || API_CONFIG.defaultRepo);
-      }
-    });
-  } catch (error) {
-    console.error('Error extracting repo:', error);
-    return Promise.resolve(API_CONFIG.defaultRepo);
-  }
+  return new Promise((resolve) => {
+    try {
+      // 🔥 IMPORTANT : dashboard.html n’a PAS accès à l’URL GitHub !
+      chrome.storage.local.get(['currentRepo'], (result) => {
+        if (result.currentRepo) {
+          console.log('📌 Repo from storage:', result.currentRepo);
+          resolve(result.currentRepo);
+        } else {
+          console.warn('⚠️ No repo stored yet');
+          resolve(null);
+        }
+      });
+    } catch (e) {
+      console.error('❌ Cannot read currentRepo:', e);
+      resolve(null);
+    }
+  });
 }
+
 
 function extractRepoFromURL(url) {
   try {
@@ -80,7 +77,7 @@ function detectColumnNames(sampleRow) {
 }
 
 /**
- * 🆕 Filtre les données extraites selon les filtres sélectionnés
+ * Filtre les données extraites selon les filtres sélectionnés
  */
 function filterExtractionData(data, filters, columnNames) {
   const {
@@ -122,7 +119,7 @@ function filterExtractionData(data, filters, columnNames) {
 }
 
 /**
- * 🆕 Génère les données de graphiques depuis les vraies données filtrées
+ * Génère les données de graphiques depuis les vraies données filtrées
  */
 function generateChartsFromRealData(filteredData, columnNames) {
   if (!filteredData || filteredData.length === 0) {
