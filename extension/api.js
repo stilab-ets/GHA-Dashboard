@@ -2,38 +2,34 @@ import { fetchDashboardDataViaWebSocket } from './websocket.js';
 
 const API_CONFIG = {
   baseUrl: 'http://localhost:3000/api',
-  defaultRepo: 'facebook/react',
   useWebSocket: false
 };
+
 
 /**
  * Extraire le repo depuis l'URL de la page GitHub actuelle
  */
-function extractRepoFromCurrentPage() {
-  try {
-    return new Promise((resolve) => {
-      if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.get(['currentRepo'], (result) => {
-          if (result.currentRepo) {
-            console.log(`📌 Using repo from storage: ${result.currentRepo}`);
-            resolve(result.currentRepo);
-          } else {
-            const repo = extractRepoFromURL(window.location.href);
-            console.log(`📌 Extracted repo from URL: ${repo || API_CONFIG.defaultRepo}`);
-            resolve(repo || API_CONFIG.defaultRepo);
-          }
-        });
-      } else {
-        const repo = extractRepoFromURL(window.location.href);
-        console.log(`📌 Extracted repo from URL: ${repo || API_CONFIG.defaultRepo}`);
-        resolve(repo || API_CONFIG.defaultRepo);
-      }
-    });
-  } catch (error) {
-    console.error('Error extracting repo:', error);
-    return Promise.resolve(API_CONFIG.defaultRepo);
-  }
+
+export function extractRepoFromCurrentPage() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get(['currentRepo'], (result) => {
+        if (result.currentRepo) {
+          console.log(`📌 Using repo from storage: ${result.currentRepo}`);
+          resolve(result.currentRepo);
+        } else {
+          const repo = extractRepoFromURL(window.location.href);
+          console.log(`📌 Repo extracted from URL: ${repo}`);
+          resolve(repo); // ⚠️ PAS DE DEFAULT REPO
+        }
+      });
+    } catch (error) {
+      console.error('Error extracting repo:', error);
+      resolve(null);
+    }
+  });
 }
+
 
 function extractRepoFromURL(url) {
   try {
@@ -526,3 +522,5 @@ function getMockDashboardData(filters = {}) {
     actors: ['all']
   };
 }
+window.triggerExtraction = triggerExtraction;
+window.extractRepoFromCurrentPage = extractRepoFromCurrentPage;

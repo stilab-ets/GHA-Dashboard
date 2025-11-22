@@ -1,3 +1,5 @@
+//import { extractRepoFromCurrentPage, triggerExtraction } from "../dashboard/api.js";
+
 (function() {
   'use strict';
 
@@ -95,29 +97,49 @@
   };
 
   // Show dashboard and hide original content
-  const showDashboard = () => {
-    previousUrl = window.location.pathname;
-    isDashboardActive = true;
-    
-    // Deselect all other nav items with multiple approaches
-    const navContainer = document.querySelector('nav[aria-label="Repository"]');
-    if (navContainer) {
-      const allNavItems = navContainer.querySelectorAll('a[role="tab"], .UnderlineNav-item');
-      allNavItems.forEach(item => {
-        item.setAttribute('aria-selected', 'false');
-        item.removeAttribute('aria-current');
-        item.classList.remove('selected');
-      });
-    }
-    
-    if (dashboardButton) {
-      dashboardButton.setAttribute('aria-selected', 'true');
-      dashboardButton.setAttribute('aria-current', 'page');
-      dashboardButton.classList.add('selected');
-    }
-    
-    createDashboard();
-  };
+  const showDashboard = async () => {
+  previousUrl = window.location.pathname;
+  isDashboardActive = true;
+
+  // Sélection visuelle
+  const navContainer = document.querySelector('nav[aria-label="Repository"]');
+  if (navContainer) {
+    const allNavItems = navContainer.querySelectorAll('a[role="tab"], .UnderlineNav-item');
+    allNavItems.forEach(item => {
+      item.setAttribute('aria-selected', 'false');
+      item.classList.remove('selected');
+    });
+  }
+
+  if (dashboardButton) {
+    dashboardButton.setAttribute('aria-selected', 'true');
+    dashboardButton.setAttribute('aria-current', 'page');
+    dashboardButton.classList.add('selected');
+  }
+
+  // 1️⃣ Récupérer le repo
+  const repo = await window.extractRepoFromCurrentPage();
+  if (!repo) {
+    alert("⚠️ Impossible de détecter le repo !");
+    return;
+  }
+
+  console.log("📦 Starting extraction for:", repo);
+
+  // 2️⃣ Lancer extraction
+  const extractionResult = await window.triggerExtraction(repo);
+
+  if (!extraction || !extraction.success) {
+    alert("❌ Extraction failed. Check backend logs.");
+    return;
+  }
+
+  console.log("✅ Extraction done, opening dashboard...");
+
+  // 3️⃣ Créer dashboard SEULEMENT après extraction
+  createDashboard();
+};
+
 
   // Hide dashboard and restore original content
   const hideDashboard = () => {
