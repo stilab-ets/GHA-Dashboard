@@ -31,7 +31,30 @@ function extractRepoFromCurrentPage() {
   });
 }
 
+export async function triggerExtraction(repo) {
+  console.log("🚀 Starting extraction for:", repo);
 
+  try {
+    const response = await fetch(
+      `http://localhost:3000/api/extraction?repo=${encodeURIComponent(repo)}`,
+      { method: "GET" }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("❌ Extraction failed:", data);
+      return null;
+    }
+
+    console.log("✅ Extraction finished:", data);
+    return data;
+
+  } catch (error) {
+    console.error("❌ Error during extraction:", error);
+    return null;
+  }
+}
 function extractRepoFromURL(url) {
   try {
     const urlObj = new URL(url);

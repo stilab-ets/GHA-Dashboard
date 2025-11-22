@@ -25,76 +25,43 @@ import { triggerExtraction } from "../dashboard/api.js";
   };
 
   // Create and inject the dashboard button into GitHub's navigation bar
-  const injectDashboardButton = () => {
-    const existingButton = document.querySelector('#gha-dashboard-nav-button');
-    if (existingButton) return;
+ const injectDashboardButton = () => {
+  if (document.querySelector('#gha-dashboard-nav-button')) return;
 
-      const nav = document.querySelector('nav[aria-label="Repository"]')
-      || document.querySelector('nav.UnderlineNav') 
-      || document.querySelector('nav')   // fallback
-      || document.querySelector('.pagehead-actions'); // ancien GitHub
-      console.log("🔍 Found nav:", nav);
-    if (!nav) {
-      console.log('[GHA Dashboard] Navigation bar not found, retrying...');
-      setTimeout(injectDashboardButton, 100);
-      return;
-    }
+  // Trouver la UL qui contient les tabs GitHub
+  const navList =
+    document.querySelector('nav[aria-label="Repository"] ul.UnderlineNav-body') ||
+    document.querySelector('nav.UnderlineNav ul.UnderlineNav-body') ||
+    document.querySelector('nav .UnderlineNav-body');
 
-    const navItem = document.createElement('li');
-    navItem.id = 'gha-dashboard-nav-button';
-    navItem.className = 'd-flex';
+  console.log("🔍 navList found:", navList);
 
-    const button = document.createElement('a');
-    button.href = '#';
-    button.className = 'UnderlineNav-item';
-    button.setAttribute('role', 'tab');
-    button.setAttribute('aria-selected', 'false');
-    button.innerHTML = `
-      <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" style="fill: currentColor; margin-right: 4px;">
-        <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"></path>
-      </svg>
-      Actions Dashboard
-    `;
-    button.style.cssText = 'cursor: pointer; text-decoration: none;';
-    
-    button.addEventListener('click', (e) => {
-      e.preventDefault();
-      toggleDashboard();
-    });
+  if (!navList) {
+    console.log("⏳ Retry injectDashboardButton...");
+    setTimeout(injectDashboardButton, 300);
+    return;
+  }
 
-    navItem.appendChild(button);
-    
-    const navList = nav.querySelector('ul.UnderlineNav-body');
-    
-    if (navList) {
-      navList.appendChild(navItem);
-    } else {
-      nav.appendChild(navItem);
-    }
-    
-    dashboardButton = button;
+  const navItem = document.createElement('li');
+  navItem.id = 'gha-dashboard-nav-button';
+  navItem.classList.add('UnderlineNav-item');
 
-    // Add listeners to other nav items to close dashboard when clicked
-    const allNavItems = nav.querySelectorAll('.UnderlineNav-item:not(#gha-dashboard-nav-button .UnderlineNav-item)');
-    allNavItems.forEach(item => {
-      item.addEventListener('click', (e) => {
-        if (dashboardContainer && isDashboardActive) {
-          // Check if clicking the same URL we were on before dashboard
-          const clickedUrl = item.getAttribute('href');
-          if (clickedUrl && previousUrl && clickedUrl === previousUrl) {
-            // Same section - force page reload to avoid issues
-            e.preventDefault();
-            console.log('[GHA Dashboard] Reloading page to avoid state issues');
-            window.location.reload();
-            return;
-          }
-          hideDashboard();
-        }
-      });
-    });
+  navItem.innerHTML = `
+      <a role="tab" class="UnderlineNav-item" style="cursor:pointer;">
+        📊 Actions Dashboard
+      </a>
+  `;
 
-    console.log('[GHA Dashboard] Button injected into navigation bar');
-  };
+  navList.appendChild(navItem);
+
+  navItem.querySelector('a').addEventListener('click', e => {
+    e.preventDefault();
+    toggleDashboard();
+  });
+
+  console.log("✅ Dashboard button injected!");
+};
+
 
   // Toggle dashboard panel visibility
   const toggleDashboard = () => {
