@@ -38,15 +38,19 @@ function extractRepoFromCurrentPage() {
 function extractRepoFromURL(url) {
   try {
     const urlObj = new URL(url);
-    if (urlObj.hostname === 'github.com') {
-      const pathParts = urlObj.pathname.split('/').filter(p => p);
-      if (pathParts.length >= 2) {
-        return `${pathParts[0]}/${pathParts[1]}`;
-      }
+    if (urlObj.hostname !== "github.com") return null;
+
+    const parts = urlObj.pathname.split("/").filter(Boolean);
+
+    // On prend TOUJOURS uniquement owner/repo
+    if (parts.length >= 2) {
+      return `${parts[0]}/${parts[1]}`;
     }
+
   } catch (e) {
-    console.error('[GHA Dashboard] Failed parsing URL in content script:', e);
+    console.error("Error parsing URL:", e);
   }
+
   return null;
 }
 

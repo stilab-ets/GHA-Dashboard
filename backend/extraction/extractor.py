@@ -1,3 +1,4 @@
+import logging
 from sqlalchemy import BigInteger, select
 from sqlalchemy.orm import joinedload
 from models import WorkflowRun, Workflow, Repository, db

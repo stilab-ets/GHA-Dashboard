@@ -6,7 +6,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import text
 from models import db, Repository, Workflow, WorkflowRun, AggregationPeriod
-from extraction.extractor import extract_data
+from extraction.extractor import extract_data, run_ghaminer
 from analysis.endpoint import AggregationFilters, send_data
 from typing import cast
 from datetime import date
@@ -15,6 +15,11 @@ from flask_sock import Sock
 import threading
 import json
 import numpy as np
+
+import sys
+import os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "ghaminer", "src"))
 
 # Initialisation de l'application Flask
 load_dotenv()
@@ -382,6 +387,11 @@ def sync_repo():
         return jsonify({"error": "GITHUB_TOKEN manquant dans .env"}), 400
 
     # 1) Extraction
+    # 1) Lancer GHAMiner avant tout
+    success = run_ghaminer(repo, token)
+    if not success:
+        return jsonify({"error": "Échec extraction GHAMiner"}), 500
+
     df, error = extract_data(repo, token, "2024-04-01", "2025-10-31")
     if error:
         return jsonify({"error": error}), 400
