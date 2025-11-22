@@ -1,363 +1,221 @@
-(function() {
+(function () {
   'use strict';
 
+  /* ---------------------------------------------------------
+   *  FIX 1 : always define extractRepoFromURL BEFORE usage
+   * --------------------------------------------------------- */
+  function extractRepoFromURL(url) {
+    try {
+      const urlObj = new URL(url);
+      if (urlObj.hostname === 'github.com') {
+        const parts = urlObj.pathname.split('/').filter(Boolean);
+        if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+      }
+    } catch (err) {
+      console.error("[GHA Dashboard] URL parse error:", err);
+    }
+    return null;
+  }
+
+  /* ---------------------------------------------------------
+   *  FIX 2 : detect repo at first load
+   * --------------------------------------------------------- */
+  (function detectRepoOnGitHub() {
+    if (location.hostname !== "github.com") return;
+
+    const repo = extractRepoFromURL(location.href);
+    console.log("📌 [ContentScript] Detected repo:", repo);
+
+    if (repo && chrome.runtime) {
+      chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });
+    }
+  })();
+
+  /* ---------------------------------------------------------
+   *  Internal state
+   * --------------------------------------------------------- */
   let dashboardContainer = null;
   let dashboardButton = null;
-  let originalContent = null; // Store original page content
-  let previousUrl = null; // Track URL before showing dashboard
-  let isDashboardActive = false; // Track if dashboard is currently shown
+  let originalContent = null;
+  let previousUrl = null;
+  let isDashboardActive = false;
 
-  // Check if we're on a GitHub repository page
-  const isGitHubRepoPage = () => { 
-    const pathParts = window.location.pathname.split('/').filter(p => p);
-    // Check if we have at least owner/repo structure
-    return pathParts.length >= 2 && window.location.hostname === 'github.com';
+  /* ---------------------------------------------------------
+   * helper to check repo page
+   * --------------------------------------------------------- */
+  const isGitHubRepoPage = () => {
+    const parts = location.pathname.split('/').filter(Boolean);
+    return parts.length >= 2 && location.hostname === "github.com";
   };
 
-  // Create and inject the dashboard button into GitHub's navigation bar
+  /* ---------------------------------------------------------
+   * Create Dashboard Button
+   * --------------------------------------------------------- */
   const injectDashboardButton = () => {
-    const existingButton = document.querySelector('#gha-dashboard-nav-button');
-    if (existingButton) return;
+    if (document.querySelector("#gha-dashboard-nav-button")) return;
 
-    const nav = document.querySelector('nav[aria-label="Repository"]') || 
-                 document.querySelector('.UnderlineNav-body') ||
-                 document.querySelector('[data-pjax-container] nav ul');
-    
+    const nav =
+      document.querySelector('nav[aria-label="Repository"]') ||
+      document.querySelector('.UnderlineNav-body') ||
+      document.querySelector('[data-pjax-container] nav ul');
+
     if (!nav) {
-      console.log('[GHA Dashboard] Navigation bar not found, retrying...');
+      console.log("[GHA Dashboard] nav not found, retrying...");
       setTimeout(injectDashboardButton, 100);
       return;
     }
 
-    const navItem = document.createElement('li');
-    navItem.id = 'gha-dashboard-nav-button';
-    navItem.className = 'd-flex';
+    const li = document.createElement("li");
+    li.id = "gha-dashboard-nav-button";
+    li.className = "d-flex";
 
-    const button = document.createElement('a');
-    button.href = '#';
-    button.className = 'UnderlineNav-item';
-    button.setAttribute('role', 'tab');
-    button.setAttribute('aria-selected', 'false');
-    button.innerHTML = `
-      <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" style="fill: currentColor; margin-right: 4px;">
-        <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"></path>
+    const btn = document.createElement("a");
+    btn.href = "#";
+    btn.className = "UnderlineNav-item";
+    btn.setAttribute("role", "tab");
+    btn.innerHTML = `
+      <svg aria-hidden="true" height="16" width="16" viewBox="0 0 16 16" style="fill: currentColor;margin-right:4px">
+        <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354Z"></path>
       </svg>
       Actions Dashboard
     `;
-    button.style.cssText = 'cursor: pointer; text-decoration: none;';
-    
-    button.addEventListener('click', (e) => {
+
+    btn.addEventListener("click", (e) => {
       e.preventDefault();
       toggleDashboard();
     });
 
-    navItem.appendChild(button);
-    
-    const navList = nav.querySelector('ul.UnderlineNav-body');
-    
-    if (navList) {
-      navList.appendChild(navItem);
-    } else {
-      nav.appendChild(navItem);
-    }
-    
-    dashboardButton = button;
+    li.appendChild(btn);
 
-    // Add listeners to other nav items to close dashboard when clicked
-    const allNavItems = nav.querySelectorAll('.UnderlineNav-item:not(#gha-dashboard-nav-button .UnderlineNav-item)');
-    allNavItems.forEach(item => {
-      item.addEventListener('click', (e) => {
-        if (dashboardContainer && isDashboardActive) {
-          // Check if clicking the same URL we were on before dashboard
-          const clickedUrl = item.getAttribute('href');
-          if (clickedUrl && previousUrl && clickedUrl === previousUrl) {
-            // Same section - force page reload to avoid issues
-            e.preventDefault();
-            console.log('[GHA Dashboard] Reloading page to avoid state issues');
-            window.location.reload();
-            return;
-          }
-          hideDashboard();
-        }
-      });
-    });
+    const ul = nav.querySelector("ul.UnderlineNav-body");
 
-    console.log('[GHA Dashboard] Button injected into navigation bar');
+    if (ul) ul.appendChild(li);
+    else nav.appendChild(li);
+
+    dashboardButton = btn;
+    console.log("[GHA Dashboard] Button injected");
   };
 
-  // Toggle dashboard panel visibility
+  /* ---------------------------------------------------------
+   * Toggle Dashboard
+   * --------------------------------------------------------- */
   const toggleDashboard = () => {
-    if (dashboardContainer && dashboardContainer.parentNode) {
-      hideDashboard();
-    } else {
-      showDashboard();
-    }
+    if (dashboardContainer) hideDashboard();
+    else showDashboard();
   };
 
-  // Show dashboard and hide original content
   const showDashboard = () => {
-    previousUrl = window.location.pathname;
+    previousUrl = location.pathname;
     isDashboardActive = true;
-    
-    // Deselect all other nav items with multiple approaches
-    const navContainer = document.querySelector('nav[aria-label="Repository"]');
-    if (navContainer) {
-      const allNavItems = navContainer.querySelectorAll('a[role="tab"], .UnderlineNav-item');
-      allNavItems.forEach(item => {
-        item.setAttribute('aria-selected', 'false');
-        item.removeAttribute('aria-current');
-        item.classList.remove('selected');
-      });
-    }
-    
+
     if (dashboardButton) {
-      dashboardButton.setAttribute('aria-selected', 'true');
-      dashboardButton.setAttribute('aria-current', 'page');
-      dashboardButton.classList.add('selected');
+      dashboardButton.classList.add("selected");
+      dashboardButton.setAttribute("aria-current", "page");
     }
-    
+
     createDashboard();
   };
 
-  // Hide dashboard and restore original content
   const hideDashboard = () => {
     isDashboardActive = false;
-    
-    // Clean up interval timer if it exists
-    if (dashboardContainer) {
-      const iframe = dashboardContainer.querySelector('#gha-dashboard-iframe');
-      if (iframe && iframe.dataset.intervalId) {
-        clearInterval(parseInt(iframe.dataset.intervalId));
-      }
-    }
-    
-    if (dashboardContainer && dashboardContainer.parentNode) {
-      dashboardContainer.parentNode.removeChild(dashboardContainer);
-      dashboardContainer = null;
-    }
-    
-    if (originalContent && originalContent.parentNode) {
-      originalContent.style.display = '';
+
+    if (dashboardContainer) dashboardContainer.remove();
+    dashboardContainer = null;
+
+    if (originalContent) {
+      originalContent.style.display = "";
       originalContent = null;
     }
-    
+
     if (dashboardButton) {
-      dashboardButton.setAttribute('aria-selected', 'false');
-      dashboardButton.removeAttribute('aria-current');
-      dashboardButton.classList.remove('selected');
+      dashboardButton.classList.remove("selected");
+      dashboardButton.removeAttribute("aria-current");
     }
   };
 
-  // Create the inline dashboard container with iframe
+  /* ---------------------------------------------------------
+   * Create Dashboard iframe
+   * --------------------------------------------------------- */
   const createDashboard = () => {
-    if (dashboardContainer && dashboardContainer.parentNode) {
-      dashboardContainer.parentNode.removeChild(dashboardContainer);
-    }
-
-    const turboFrame = document.querySelector('turbo-frame#repo-content-turbo-frame');
-    const mainContent = turboFrame || 
-                        document.querySelector('#js-repo-pjax-container') || 
-                        document.querySelector('main') ||
-                        document.querySelector('[data-turbo-frame="repo-content-turbo-frame"]');
-
-    if (!mainContent) {
-      console.error('[GHA Dashboard] Could not find main content area');
+    if (!chrome.runtime || !chrome.runtime.getURL) {
+      console.error("[GHA Dashboard] chrome.runtime.getURL NOT AVAILABLE");
       return;
     }
 
-    // Store reference to original content and hide it
-    originalContent = mainContent;
-    originalContent.style.display = 'none';
+    const turboFrame = document.querySelector("turbo-frame#repo-content-turbo-frame");
+    const main = document.querySelector('#js-repo-pjax-container') ||
+                  document.querySelector('#repository-container-header') || 
+                  document.querySelector('main') || 
+                  document.body;
 
-    // Create container that matches GitHub's layout exactly
-    const container = document.createElement('div');
+    if (!main) {
+      console.error("[GHA Dashboard] main content not found");
+      return;
+    }
+
+    originalContent = main;
+    originalContent.style.display = "none";
+
+    const container = document.createElement("div");
     container.id = 'gha-dashboard-container';
-    container.style.cssText = `
-      width: 100%;
-      max-width: 100%;
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    `;
+    container.style.position = 'relative';
+    container.style.width = '100%';
+    container.style.maxWidth = '100%';
+    container.style.margin = '0';
+    container.style.padding = '0';
+    container.style.background = '#0d1117';
 
-    // Create iframe with seamless integration
-    const iframe = document.createElement('iframe');
-    iframe.id = 'gha-dashboard-iframe';
-    iframe.style.cssText = `
-      width: 100%;
-      height: 1000px;
-      border: none;
-      display: block;
-      margin: 0;
-      padding: 0;
-    `;
-    iframe.setAttribute('scrolling', 'no');
-    
-    const dashboardUrl = chrome.runtime.getURL('dashboard.html');
-    iframe.src = dashboardUrl;
+    const iframe = document.createElement("iframe");
+    iframe.id = "gha-dashboard-iframe";
+    iframe.style.width = '100vw';
+    iframe.style.maxWidth = '100%';
+    iframe.style.height = '1000px';
+    iframe.style.display = 'block';
+    iframe.style.border = 'none';
+    iframe.style.margin = '0';
+    iframe.style.padding = '0';
 
-    // Dynamically resize iframe to fit content and remove all scrollbars
-    iframe.onload = () => {
-      if (!iframe.parentNode || !dashboardContainer || !dashboardContainer.parentNode) {
-        return;
-      }
-      
-      try {
-        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-        const iframeWin = iframe.contentWindow;
-        
-        if (!iframeWin || !iframeDoc) {
-          return;
-        }
-        
-        // Force overflow visible on all elements
-        const style = iframeDoc.createElement('style');
-        style.textContent = `
-          html, body, #root {
-            overflow: visible !important;
-            height: auto !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
-          }
-        `;
-        iframeDoc.head.appendChild(style);
-        
-        // Function to resize iframe based on content
-        const resizeIframe = () => {
-          if (!iframe.parentNode || !dashboardContainer || !dashboardContainer.parentNode) {
-            return;
-          }
-          
-          try {
-            const root = iframeDoc.getElementById('root');
-            if (!root) return;
-
-            const height = Math.max(
-              iframeDoc.body.scrollHeight,
-              iframeDoc.documentElement.scrollHeight,
-              root.scrollHeight
-            );
-            
-            iframe.style.height = (height + 50) + 'px';
-          } catch (e) {
-            // Silent fail - element likely removed
-          }
-        };
-        
-        // Initial resize after short delay for React to render
-        setTimeout(resizeIframe, 500);
-        
-        // Watch for content changes
-        const observer = new MutationObserver(resizeIframe);
-        const root = iframeDoc.getElementById('root');
-        if (root) {
-          observer.observe(root, {
-            childList: true,
-            subtree: true
-          });
-        }
-        
-        // Resize on window resize
-        window.addEventListener('resize', resizeIframe);
-        
-        // Periodic check
-        const intervalId = setInterval(resizeIframe, 500);
-        iframe.dataset.intervalId = intervalId;
-        
-      } catch (e) {
-        // Silent fail - likely CORS or element removed
-        iframe.style.height = '3000px';
-      }
-    };
+    iframe.src = chrome.runtime.getURL("dashboard.html");
 
     container.appendChild(iframe);
-    
-    // Insert the dashboard right after the original content
-    mainContent.parentNode.insertBefore(container, mainContent.nextSibling);
-    
+    main.parentNode.insertBefore(container, main.nextSibling);
+
     dashboardContainer = container;
 
-    console.log('[GHA Dashboard] Dashboard container created');
+    console.log("[GHA Dashboard] Dashboard created");
   };
 
-  // Initialize when DOM is ready
-  const initialize = () => {
-    if (isGitHubRepoPage()) {
-      injectDashboardButton();
-    }
-  };
-
-  // Watch for navigation changes (GitHub uses PJAX/Turbo)
-  
+  /* ---------------------------------------------------------
+   * Observe GitHub navigation (PJAX / Turbo)
+   * --------------------------------------------------------- */
   const observeNavigation = () => {
-  let lastUrl = location.href;
+    let lastUrl = location.href;
 
-  new MutationObserver(() => {
-    const url = location.href;
+    new MutationObserver(() => {
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        console.log("[GHA Dashboard] Navigation detected:", lastUrl);
 
-    if (url !== lastUrl) {
-      lastUrl = url;
+        const repo = extractRepoFromURL(lastUrl);
+        if (repo && chrome.runtime) {
+          chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });
+        }
 
-      console.log("[GHA Dashboard] Navigation detected:", url);
+        if (dashboardContainer) hideDashboard();
 
-      // 🔥 IMPORTANT : redétecter le repo après navigation GitHub (PJAX/Turbo)
-      const repo = extractRepoFromURL(url);
-      if (repo) {
-        console.log("📌 [ContentScript] Repo updated after navigation:", repo);
-        chrome.runtime.sendMessage({
-          type: "UPDATE_REPO",
-          repo
-        });
+        const btn = document.querySelector("#gha-dashboard-nav-button");
+        if (btn) btn.remove();
+
+        if (isGitHubRepoPage()) setTimeout(injectDashboardButton, 120);
       }
+    }).observe(document.body, { subtree: true, childList: true });
+  };
 
-      // Supprimer l'ancien bouton + dashboard
-      const existingBtn = document.querySelector('#gha-dashboard-nav-button');
-      if (existingBtn) existingBtn.remove();
-
-      if (dashboardContainer && dashboardContainer.parentNode) {
-        dashboardContainer.remove();
-        dashboardContainer = null;
-      }
-
-      if (originalContent) {
-        originalContent.style.display = '';
-        originalContent = null;
-      }
-
-      dashboardButton = null;
-
-      if (isGitHubRepoPage()) {
-        setTimeout(injectDashboardButton, 100);
-      }
-    }
-  }).observe(document.body, { subtree: true, childList: true });
-};
-
-
-  // Run initialization
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
-  } else {
-    initialize();
-  }
-
-  (function detectRepoOnGitHub() {
-  if (location.hostname !== "github.com") return;
-
-  const repo = extractRepoFromURL(location.href);
-  console.log("📌 [ContentScript] Detected repo:", repo);
-
-  if (repo) {
-    chrome.runtime.sendMessage({
-      type: "UPDATE_REPO",
-      repo
-    });
-  }
-})();
-
-
+  /* ---------------------------------------------------------
+   * Init
+   * --------------------------------------------------------- */
+  if (document.readyState !== "loading") injectDashboardButton();
+  else document.addEventListener("DOMContentLoaded", injectDashboardButton);
 
   observeNavigation();
 })();
-
