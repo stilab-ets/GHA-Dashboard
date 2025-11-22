@@ -19,19 +19,19 @@ function extractRepoFromCurrentPage() {
             resolve(result.currentRepo);
           } else {
             const repo = extractRepoFromURL(window.location.href);
-            console.log(`📌 Extracted repo from URL: ${repo || API_CONFIG.defaultRepo}`);
-            resolve(repo || API_CONFIG.defaultRepo);
+            console.log(`📌 Extracted repo from URL: ${repo}`);
+            resolve(repo); // ❌ PAS DE DEFAULT REPO ICI
           }
         });
       } else {
         const repo = extractRepoFromURL(window.location.href);
-        console.log(`📌 Extracted repo from URL: ${repo || API_CONFIG.defaultRepo}`);
-        resolve(repo || API_CONFIG.defaultRepo);
+        console.log(`📌 Extracted repo from URL (no chrome): ${repo}`);
+        resolve(repo); // ❌ PAS DE DEFAULT ICI NON PLUS
       }
     });
   } catch (error) {
     console.error('Error extracting repo:', error);
-    return Promise.resolve(API_CONFIG.defaultRepo);
+    return Promise.resolve(null);
   }
 }
 
@@ -45,10 +45,11 @@ function extractRepoFromURL(url) {
       }
     }
   } catch (e) {
-    console.error('Error parsing URL:', e);
+    console.error('[GHA Dashboard] Failed parsing URL in content script:', e);
   }
   return null;
 }
+
 
 /**
  * Fonction intelligente pour trouver le bon nom de colonne
@@ -80,7 +81,7 @@ function detectColumnNames(sampleRow) {
 }
 
 /**
- * 🆕 Filtre les données extraites selon les filtres sélectionnés
+ * Filtre les données extraites selon les filtres sélectionnés
  */
 function filterExtractionData(data, filters, columnNames) {
   const {
@@ -122,7 +123,7 @@ function filterExtractionData(data, filters, columnNames) {
 }
 
 /**
- * 🆕 Génère les données de graphiques depuis les vraies données filtrées
+ * Génère les données de graphiques depuis les vraies données filtrées
  */
 function generateChartsFromRealData(filteredData, columnNames) {
   if (!filteredData || filteredData.length === 0) {

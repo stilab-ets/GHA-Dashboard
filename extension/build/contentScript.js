@@ -289,33 +289,51 @@
   };
 
   // Watch for navigation changes (GitHub uses PJAX/Turbo)
+  
   const observeNavigation = () => {
-    let lastUrl = location.href;
-    new MutationObserver(() => {
-      const url = location.href;
-      if (url !== lastUrl) {
-        lastUrl = url;
-        // Remove existing button and dashboard on navigation
-        const existingBtn = document.querySelector('#gha-dashboard-nav-button');
-        if (existingBtn) {
-          existingBtn.remove();
-        }
-        if (dashboardContainer && dashboardContainer.parentNode) {
-          dashboardContainer.parentNode.removeChild(dashboardContainer);
-          dashboardContainer = null;
-        }
-        if (originalContent && originalContent.parentNode) {
-          originalContent.style.display = '';
-          originalContent = null;
-        }
-        dashboardButton = null;
-        
-        if (isGitHubRepoPage()) {
-          setTimeout(injectDashboardButton, 100);
-        }
+  let lastUrl = location.href;
+
+  new MutationObserver(() => {
+    const url = location.href;
+
+    if (url !== lastUrl) {
+      lastUrl = url;
+
+      console.log("[GHA Dashboard] Navigation detected:", url);
+
+      // 🔥 IMPORTANT : redétecter le repo après navigation GitHub (PJAX/Turbo)
+      const repo = extractRepoFromURL(url);
+      if (repo) {
+        console.log("📌 [ContentScript] Repo updated after navigation:", repo);
+        chrome.runtime.sendMessage({
+          type: "UPDATE_REPO",
+          repo
+        });
       }
-    }).observe(document.body, { subtree: true, childList: true });
-  };
+
+      // Supprimer l'ancien bouton + dashboard
+      const existingBtn = document.querySelector('#gha-dashboard-nav-button');
+      if (existingBtn) existingBtn.remove();
+
+      if (dashboardContainer && dashboardContainer.parentNode) {
+        dashboardContainer.remove();
+        dashboardContainer = null;
+      }
+
+      if (originalContent) {
+        originalContent.style.display = '';
+        originalContent = null;
+      }
+
+      dashboardButton = null;
+
+      if (isGitHubRepoPage()) {
+        setTimeout(injectDashboardButton, 100);
+      }
+    }
+  }).observe(document.body, { subtree: true, childList: true });
+};
+
 
   // Run initialization
   if (document.readyState === 'loading') {
@@ -324,5 +342,22 @@
     initialize();
   }
 
+  (function detectRepoOnGitHub() {
+  if (location.hostname !== "github.com") return;
+
+  const repo = extractRepoFromURL(location.href);
+  console.log("📌 [ContentScript] Detected repo:", repo);
+
+  if (repo) {
+    chrome.runtime.sendMessage({
+      type: "UPDATE_REPO",
+      repo
+    });
+  }
+})();
+
+
+
   observeNavigation();
 })();
+

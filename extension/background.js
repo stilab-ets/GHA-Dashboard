@@ -6,3 +6,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
   }
 });
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "UPDATE_REPO") {
+    chrome.storage.local.set({ currentRepo: msg.repo });
+  }
+});
