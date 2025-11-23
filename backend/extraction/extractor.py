@@ -4,7 +4,7 @@ from sqlalchemy import BigInteger, select
 from sqlalchemy.orm import joinedload
 from models import WorkflowRun, Workflow, Repository, db
 from core.utils.sync import async_tail
-
+import requests
 import pandas as pd
 
 import subprocess
@@ -208,6 +208,49 @@ async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.
             yield run
 
         gha_miner.kill()
+
+
+
+def fetch_all_github_runs(repo, token, max_pages=200):
+    """
+    Récupère *tous* les workflow runs via l’API GitHub Actions (REST v3)
+    avec pagination automatique.
+    """
+    owner, repo_name = repo.split("/")
+    url = f"https://api.github.com/repos/{owner}/{repo_name}/actions/runs"
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json"
+    }
+
+    all_runs = []
+    page = 1
+
+    while page <= max_pages:
+        print(f"📄 Fetching page {page}...")
+
+        params = {
+            "per_page": 100,
+            "page": page
+        }
+
+        r = requests.get(url, headers=headers, params=params)
+        
+        if r.status_code != 200:
+            raise Exception(f"GitHub API error: {r.status_code} → {r.text}")
+
+        data = r.json()
+
+        if "workflow_runs" not in data or len(data["workflow_runs"]) == 0:
+            print("✅ Plus de pages → extraction terminée")
+            break
+
+        all_runs.extend(data["workflow_runs"])
+        page += 1
+
+    print(f"🎉 Récupéré {len(all_runs)} workflow runs pour {repo}")
+    return pd.DataFrame(all_runs)
 
 def _generate_models_from_series(line: str) -> WorkflowRun:
     """

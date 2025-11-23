@@ -6,7 +6,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import text
 from models import db, Repository, Workflow, WorkflowRun, AggregationPeriod
-from extraction.extractor import BUILD_FEATURES_PATH, extract_data, needs_refresh, run_ghaminer
+from extraction.extractor import BUILD_FEATURES_PATH, extract_data, needs_refresh, run_ghaminer,fetch_all_github_runs
 from analysis.endpoint import AggregationFilters, send_data
 from typing import cast
 from datetime import date
@@ -15,6 +15,7 @@ from flask_sock import Sock
 import threading
 import json
 import numpy as np
+
 
 import sys
 import os
@@ -118,95 +119,51 @@ def health():
 # ============================================
 @app.get("/api/extraction")
 def extraction_api():
-    """
-    Extrait les données pour ?repo=owner/name et retourne le DataFrame en JSON
-    Avec système de cache pour éviter les extractions répétées
-    """
     repo = request.args.get("repo")
     if not repo:
-        return jsonify({"error": "Paramètre 'repo' manquant"}), 400
+        return jsonify({"error": "repo manquant"}), 400
 
-    # Lancer GHAminer si le CSV est vieux ou absent
-    if needs_refresh(BUILD_FEATURES_PATH):
-        print("🔄 CSV trop vieux ou absent — lancement de GHAminer...")
-        ok = run_ghaminer(repo, token)
-        if not ok:
-            return jsonify({"error": "GHAminer a échoué"}), 500
-
-
-    # Vérifier le cache d'abord
-    cached_data = get_cached_extraction(repo)
-    if cached_data:
-        print(f"📦 Returning cached data for {repo}")
-        return jsonify(cached_data), 200
-
-    # Utiliser la variable d'environnement Docker
     token = os.getenv("GITHUB_TOKEN")
-    if not token:
-        return jsonify({
-            "error": "GITHUB_TOKEN non configuré",
-            "help": "Vérifier le fichier .env"
-        }), 500
-    
-    print(f"🔍 Starting extraction for {repo}...")
-    start_time = datetime.now()
-    
-    # Appel à la fonction d'extraction
-    try:
-        result = extract_data(repo, token, "2024-04-01", "2025-10-31")
-    except Exception as e:
-        error_msg = str(e)
-        print(f"❌ Extraction error: {error_msg}")
-        return jsonify({
-            "error": "Erreur lors de l'extraction",
-            "detail": error_msg
-        }), 500
 
-    # Gestion des retours 
-    if isinstance(result, tuple):
-        df, error = result
-        if error:
-            return jsonify({"error": error}), 400
-        else:
-            extraction_time = (datetime.now() - start_time).total_seconds()
-            print(f"✅ Extracted {len(df)} runs in {extraction_time:.2f}s")
-            
-            # Afficher les colonnes disponibles pour debug
-            columns = list(df.columns)
-            print(f"📋 Available columns ({len(columns)}): {columns}")
-            
-            # Afficher un échantillon de données
-            if len(df) > 0:
-                sample = df.iloc[0].to_dict()
-                print(f"📊 Sample row keys: {list(sample.keys())}")
-                print(f"📊 Sample values:")
-                for key, value in list(sample.items())[:5]:
-                    print(f"   - {key}: {value}")
-            
-            # Juste avant response_data = {...}
-                data_dict = df.to_dict(orient="records")
-            # Nettoyer les NaN dans le dict
-                for record in data_dict:
-                    for key, value in record.items():
-                        if pd.isna(value) or value != value:  # NaN check
-                            record[key] = None
-            # Conversion DataFrame → JSON
-            response_data = {
-                "success": True,
-                "repo": repo,
-                "runs_extracted": len(df),
-                "columns": columns,
-                "extraction_time_seconds": round(extraction_time, 2),
-                "data": data_dict
-            }
-            
-            # Mettre en cache
-            set_cached_extraction(repo, response_data)
-            
-            return jsonify(response_data), 200
-            
-    return jsonify({"error": "Format de retour inattendu"}), 500
+    df = fetch_all_github_runs(repo, token)
 
+    # Nettoyage
+    df = df[[
+        "id",
+        "name",
+        "event",
+        "status",
+        "conclusion",
+        "created_at",
+        "updated_at",
+        "run_number",
+        "actor",
+        "display_title",
+        "head_branch",
+        "path",
+        "run_attempt",
+        "workflow_id"
+    ]]
+
+    df.rename(columns={
+        "id": "id_build",
+        "name": "workflow_name",
+        "head_branch": "branch",
+    }, inplace=True)
+
+    # Convertir timestamps
+    df["created_at"] = pd.to_datetime(df["created_at"])
+    df["updated_at"] = pd.to_datetime(df["updated_at"])
+
+    data_dict = df.to_dict(orient="records")
+
+    return jsonify({
+        "success": True,
+        "repo": repo,
+        "runs_extracted": len(df),
+        "columns": list(df.columns),
+        "data": data_dict
+    }), 200
 
 # ============================================
 # Route pour vérifier le cache
@@ -400,12 +357,11 @@ def sync_repo():
     if not token:
         return jsonify({"error": "GITHUB_TOKEN manquant dans .env"}), 400
 
-    # Assurer que le CSV est frais avant sync
-    if needs_refresh(BUILD_FEATURES_PATH):
-        print("🔄 Mise à jour CSV nécessaire — lancement de GHAminer...")
-        ok = run_ghaminer(repo, token)
-        if not ok:
-            return jsonify({"error": "GHAminer a échoué"}), 500
+    print("🔄 Lancement automatique de GHAminer...")
+    ok = run_ghaminer(repo, token)
+    if not ok:
+        return jsonify({"error": "GHAminer a échoué"}), 500
+    
 
     # 1) Extraction
    
