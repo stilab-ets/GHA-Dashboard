@@ -36,7 +36,7 @@ db.init_app(app)
 CSV_PATH = "builds_features.csv"
 
 # ============================================
-# 🆕 Cache système pour l'extraction
+# Cache système pour l'extraction
 # ============================================
 _extraction_cache = {}
 _cache_lock = threading.Lock()
@@ -48,10 +48,10 @@ def get_cached_extraction(repo, max_age_minutes=30):
             cached_data, cached_time = _extraction_cache[repo]
             age = datetime.now() - cached_time
             if age < timedelta(minutes=max_age_minutes):
-                print(f"✅ Cache HIT for {repo} (age: {age.seconds}s)")
+                print(f" Cache HIT for {repo} (age: {age.seconds}s)")
                 return cached_data
             else:
-                print(f"⚠️ Cache EXPIRED for {repo} (age: {age.seconds}s)")
+                print(f" Cache EXPIRED for {repo} (age: {age.seconds}s)")
         return None
 
 def set_cached_extraction(repo, data):
@@ -357,7 +357,7 @@ def sync_repo():
     if not token:
         return jsonify({"error": "GITHUB_TOKEN manquant dans .env"}), 400
 
-    print("🔄 Lancement automatique de GHAminer...")
+    print(" Lancement automatique de GHAminer...")
     ok = run_ghaminer(repo, token)
     if not ok:
         return jsonify({"error": "GHAminer a échoué"}), 500
@@ -446,9 +446,9 @@ if __name__ == "__main__":
     port = int(os.getenv("FLASK_RUN_PORT", 3000))
     debug = os.getenv("FLASK_DEBUG", "1") == "1"
 
-    print(f"🚀 Starting GHA Dashboard Backend on port {port}")
-    print(f"📁 CSV Path: {os.path.abspath(CSV_PATH)}")
-    print(f"🔑 GitHub Token configured: {bool(os.getenv('GITHUB_TOKEN'))}")
-    print(f"💾 Cache system: ENABLED")
+    print(f" Starting GHA Dashboard Backend on port {port}")
+    print(f" CSV Path: {os.path.abspath(CSV_PATH)}")
+    print(f" GitHub Token configured: {bool(os.getenv('GITHUB_TOKEN'))}")
+    print(f" Cache system: ENABLED")
 
     app.run(host="0.0.0.0", port=port, debug=debug)

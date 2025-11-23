@@ -15,18 +15,18 @@ function extractRepoFromCurrentPage() {
       if (typeof chrome !== 'undefined' && chrome.storage) {
         chrome.storage.local.get(['currentRepo'], (result) => {
           if (result.currentRepo) {
-            console.log(`📌 Using repo from storage: ${result.currentRepo}`);
+            console.log(` Using repo from storage: ${result.currentRepo}`);
             resolve(result.currentRepo);
           } else {
             const repo = extractRepoFromURL(window.location.href);
-            console.log(`📌 Extracted repo from URL: ${repo}`);
-            resolve(repo); // ❌ PAS DE DEFAULT REPO ICI
+            console.log(` Extracted repo from URL: ${repo}`);
+            resolve(repo); 
           }
         });
       } else {
         const repo = extractRepoFromURL(window.location.href);
-        console.log(`📌 Extracted repo from URL (no chrome): ${repo}`);
-        resolve(repo); // ❌ PAS DE DEFAULT ICI NON PLUS
+        console.log(` Extracted repo from URL (no chrome): ${repo}`);
+        resolve(repo); 
       }
     });
   } catch (error) {
@@ -51,8 +51,7 @@ function extractRepoFromURL(url) {
       const owner = parts[0];
       const repo = parts[1];
 
-      // sécurité : GitHub ajoute parfois "actions", "dashboard", etc
-      // mais owner/repo restent TOUJOURS en position 0 et 1
+      
       return `${owner}/${repo}`;
     }
 
@@ -89,7 +88,7 @@ function detectColumnNames(sampleRow) {
     build_duration: findColumnName(sampleRow, ['build_duration', 'buildDuration', 'duration'])
   };
   
-  console.log('🔍 Auto-detected column names:', detected);
+  console.log(' Auto-detected column names:', detected);
   return detected;
 }
 
@@ -370,12 +369,12 @@ function generateChartsFromRealData(filteredData, columnNames) {
  */
 function extractFilterOptionsFromData(extractionData) {
   if (!extractionData || extractionData.length === 0) {
-    console.warn('⚠️ No data provided for filter extraction');
+    console.warn(' No data provided for filter extraction');
     return null;
   }
   
-  console.log('🔍 Extracting filter options from data...');
-  console.log('📊 Total runs:', extractionData.length);
+  console.log(' Extracting filter options from data...');
+  console.log(' Total runs:', extractionData.length);
   
   const columnNames = detectColumnNames(extractionData[0]);
   
@@ -400,7 +399,7 @@ function extractFilterOptionsFromData(extractionData) {
     }
   });
   
-  console.log('✅ Filter extraction complete:');
+  console.log(' Filter extraction complete:');
   console.log(`  - ${workflowsSet.size} unique workflows`);
   console.log(`  - ${branchesSet.size} unique branches`);
   console.log(`  - ${actorsSet.size} unique actors`);
@@ -415,7 +414,7 @@ function extractFilterOptionsFromData(extractionData) {
 
 async function fetchMetrics(repo) {
   try {
-    console.log(`📊 Fetching metrics for ${repo}...`);
+    console.log(` Fetching metrics for ${repo}...`);
     
     const response = await fetch(
       `${API_CONFIG.baseUrl}/github-metrics?repo=${encodeURIComponent(repo)}`,
@@ -431,18 +430,18 @@ async function fetchMetrics(repo) {
     }
     
     const data = await response.json();
-    console.log('✅ Metrics fetched from backend:', data);
+    console.log(' Metrics fetched from backend:', data);
     return data;
     
   } catch (error) {
-    console.error('❌ Failed to fetch metrics from backend:', error);
+    console.error(' Failed to fetch metrics from backend:', error);
     throw error;
   }
 }
 
 async function fetchFullExtractionData(repo) {
   try {
-    console.log(`🔍 Fetching FULL extraction data for ${repo}...`);
+    console.log(` Fetching FULL extraction data for ${repo}...`);
     
     const response = await fetch(
       `${API_CONFIG.baseUrl}/extraction?repo=${encodeURIComponent(repo)}`,
@@ -459,15 +458,15 @@ async function fetchFullExtractionData(repo) {
     const result = await response.json();
     
     if (!result.success || !result.data || result.data.length === 0) {
-      console.warn('⚠️ Extraction returned no data');
+      console.warn(' Extraction returned no data');
       return null;
     }
     
-    console.log(`✅ Fetched ${result.data.length} workflow runs from backend`);
+    console.log(` Fetched ${result.data.length} workflow runs from backend`);
     return result.data;
     
   } catch (error) {
-    console.error('❌ Failed to fetch full extraction data:', error);
+    console.error(' Failed to fetch full extraction data:', error);
     return null;
   }
 }
@@ -479,14 +478,14 @@ export async function fetchDashboardData(filters = {}) {
   try {
     const requestedRepo = await getRepoFromStorage();
     
-    console.log(`📡 Loading dashboard data for: ${requestedRepo}`);
-    console.log(`🔍 Applied filters:`, filters);
+    console.log(` Loading dashboard data for: ${requestedRepo}`);
+    console.log(`Applied filters:`, filters);
     
     // Récupérer les données d'extraction complètes
     const extractionData = await fetchFullExtractionData(requestedRepo);
     
     if (!extractionData || extractionData.length === 0) {
-      console.warn('⚠️ No extraction data available');
+      console.warn(' No extraction data available');
       return getMockDashboardData(filters);
     }
 
@@ -494,19 +493,19 @@ export async function fetchDashboardData(filters = {}) {
     const filterOptions = extractFilterOptionsFromData(extractionData);
     
     if (!filterOptions) {
-      console.warn('⚠️ Could not extract filter options');
+      console.warn(' Could not extract filter options');
       return getMockDashboardData(filters);
     }
 
-    // 🆕 Filtrer les données selon les filtres sélectionnés
+    //  Filtrer les données selon les filtres sélectionnés
     const filteredData = filterExtractionData(extractionData, filters, filterOptions.columnNames);
-    console.log(`✅ Filtered to ${filteredData.length} runs (from ${extractionData.length} total)`);
+    console.log(` Filtered to ${filteredData.length} runs (from ${extractionData.length} total)`);
 
-    // 🆕 Générer les graphiques depuis les données filtrées
+    //  Générer les graphiques depuis les données filtrées
     const chartData = generateChartsFromRealData(filteredData, filterOptions.columnNames);
     
     if (!chartData) {
-      console.warn('⚠️ No chart data generated');
+      console.warn(' No chart data generated');
       return getMockDashboardData(filters);
     }
 
@@ -520,13 +519,13 @@ export async function fetchDashboardData(filters = {}) {
     };
     
   } catch (error) {
-    console.error('❌ Error fetching from backend:', error);
+    console.error(' Error fetching from backend:', error);
     return getMockDashboardData(filters);
   }
 }
 
 function getMockDashboardData(filters = {}) {
-  console.warn('⚠️ Using fallback mock data');
+  console.warn(' Using fallback mock data');
   
   return {
     repo: extractRepoFromURL(window.location.href),

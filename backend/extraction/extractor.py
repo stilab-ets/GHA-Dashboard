@@ -47,7 +47,7 @@ def run_ghaminer(repo_url, token):
         return True
 
     except subprocess.CalledProcessError as e:
-        print("❌ GHAminer FAILED")
+        print(" GHAminer FAILED")
         print("STDOUT:", e.stdout)
         print("STDERR:", e.stderr)
         return False
@@ -67,7 +67,7 @@ def extract_data(repo_url, token, from_date, to_date):
     if repo_df.empty:
         return None, f"Aucune donnée trouvée pour le dépôt {repo_url}"
 
-    # ✅ Nettoyer les mauvaises valeurs avant conversion
+    # Nettoyer les mauvaises valeurs avant conversion
     repo_df = repo_df[repo_df["created_at"].astype(str).str.match(r"^\d{4}-\d{2}-\d{2}", na=False)]
 
     # Conversion + suppression du fuseau horaire si présent
@@ -78,7 +78,7 @@ def extract_data(repo_url, token, from_date, to_date):
     start_date = pd.to_datetime(from_date)
     end_date = pd.to_datetime(to_date)
 
-    # ✅ Comparaison sûre
+    #  Comparaison sûre
     repo_df = repo_df[
         (repo_df["created_at"] >= start_date) &
         (repo_df["created_at"] <= end_date)
@@ -243,13 +243,13 @@ def fetch_all_github_runs(repo, token, max_pages=200):
         data = r.json()
 
         if "workflow_runs" not in data or len(data["workflow_runs"]) == 0:
-            print("✅ Plus de pages → extraction terminée")
+            print(" Plus de pages → extraction terminée")
             break
 
         all_runs.extend(data["workflow_runs"])
         page += 1
 
-    print(f"🎉 Récupéré {len(all_runs)} workflow runs pour {repo}")
+    print(f" Récupéré {len(all_runs)} workflow runs pour {repo}")
     return pd.DataFrame(all_runs)
 
 def _generate_models_from_series(line: str) -> WorkflowRun:
