@@ -469,7 +469,7 @@ async function fetchFullExtractionData(repo) {
  */
 export async function fetchDashboardData(filters = {}) {
   try {
-    const requestedRepo = await extractRepoFromCurrentPage();
+    const requestedRepo = await getRepoFromStorage();
     
     console.log(`📡 Loading dashboard data for: ${requestedRepo}`);
     console.log(`🔍 Applied filters:`, filters);

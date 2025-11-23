@@ -18,6 +18,20 @@ import {
   ComposedChart
 } from 'recharts';
 
+async function getRepoFromStorage() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["currentRepo"], (result) => {
+      if (result.currentRepo) {
+        console.log("📌 Repo from storage:", result.currentRepo);
+        resolve(result.currentRepo);
+      } else {
+        console.warn("⚠️ No repo found in storage");
+        resolve(null);
+      }
+    });
+  });
+}
+
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3'];
 
 // Helper : format YYYY-MM-DDTHH:MM
@@ -33,12 +47,14 @@ function formatDateForInput(d) {
 
 export default function Dashboard() {
 
+  
+
   // 🔥 EXTRACTION BUTTON FUNCTION (PLACED CORRECTLY)
   async function handleExtract() {
-    const repo = data?.repo;
+    const repo = await getRepoFromStorage();
 
     if (!repo) {
-      alert("❌ Aucun repo détecté.");
+      alert("❌ Aucun repo détecté dans l’URL.");
       return;
     }
 
@@ -46,7 +62,7 @@ export default function Dashboard() {
 
     try {
       const res = await fetch(
-        `http://localhost:3000/api/sync?repo=${repo}`,
+        `http://localhost:3000/api/sync?repo=${encodeURIComponent(repo)}`,
         { method: "POST" }
       );
 
@@ -57,8 +73,8 @@ export default function Dashboard() {
         alert("❌ Erreur: " + json.error);
       } else {
         alert(`✅ Extraction terminée !
-Insertions: ${json.inserted}
-Ignorés: ${json.skipped}`);
+        Insertions: ${json.inserted}
+        Ignorés: ${json.skipped}`);
       }
 
     } catch (err) {
@@ -66,6 +82,7 @@ Ignorés: ${json.skipped}`);
       alert("❌ Erreur backend (voir console)");
     }
   }
+
 
   const getCurrentDefaults = () => {
     const now = new Date();
@@ -149,6 +166,7 @@ Ignorés: ${json.skipped}`);
     ...b,
     displayBranch: b.workflow ? `${b.workflow}/${b.branch}` : b.branch
   }));
+
 
   // 🔧 Toggle checkboxes inside dropdowns
   function toggleCheckbox(type, value, checked) {

@@ -39,7 +39,7 @@ def run_ghaminer(repo_url, token):
             "python", "ghaminer/src/GHAMetrics.py",
             "-t", token,
             "-s", f"https://github.com/{repo_url}",
-            "-fd", "2024-04-03",
+            "-fd", "2022-04-03",
             "-td", "2025-10-31"
         ], capture_output=True, text=True, check=True)
 
