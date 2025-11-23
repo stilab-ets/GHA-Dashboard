@@ -1,4 +1,5 @@
 import logging
+import sys
 from sqlalchemy import BigInteger, select
 from sqlalchemy.orm import joinedload
 from models import WorkflowRun, Workflow, Repository, db
@@ -32,39 +33,25 @@ def needs_refresh(csv_path, max_age_days=1):
 
 # --- Lance GHAminer si besoin ---
 def run_ghaminer(repo_url, token):
-    """
-    Lancement direct du script GHAMetrics.py comme module Python.
-    Compatible Docker et imports internes.
-    """
     try:
-        print(f"🚀 Importation du module GHAMiner...")
-
-        # Ajouter ghaminer/src au PYTHONPATH
-        ghaminer_path = os.path.join(os.path.dirname(__file__), "..", "ghaminer", "src")
-        ghaminer_path = os.path.abspath(ghaminer_path)
-        sys.path.append(ghaminer_path)
-
-        # Importer GHAMetrics.py
-        import GHAMetrics
-
-        print(f"🔧 Exécution GHAMiner pour {repo_url}...")
-
-        # Simulation appel CLI : GHAMetrics.parse_args + main()
-        args = GHAMetrics.parse_args([
+        print(f" Lancement GHAminer pour {repo_url}...")
+        result = subprocess.run([
+            "python", "ghaminer/src/GHAMetrics.py",
             "-t", token,
             "-s", f"https://github.com/{repo_url}",
-            "-fd", "2024-04-01",
+            "-fd", "2024-04-03",
             "-td", "2025-10-31"
-        ])
+        ], capture_output=True, text=True, check=True)
 
-        GHAMetrics.main(args)
-
-        print("✅ GHAMiner exécuté avec succès")
+        print(" GHAminer terminé :", result.stdout)
         return True
 
-    except Exception as e:
-        print("❌ Erreur run_ghaminer:", e)
+    except subprocess.CalledProcessError as e:
+        print("❌ GHAminer FAILED")
+        print("STDOUT:", e.stdout)
+        print("STDERR:", e.stderr)
         return False
+
 
 def extract_data(repo_url, token, from_date, to_date):
     if not os.path.exists(BUILD_FEATURES_PATH):

@@ -150,6 +150,38 @@ Ignorés: ${json.skipped}`);
     displayBranch: b.workflow ? `${b.workflow}/${b.branch}` : b.branch
   }));
 
+  // 🔧 Toggle checkboxes inside dropdowns
+  function toggleCheckbox(type, value, checked) {
+    setFilters(prev => {
+      let list = [...prev[type]];
+
+      if (value === "all") {
+        return { ...prev, [type]: ["all"] };
+      }
+
+      // Si on sélectionne autre chose, enlever "all"
+      list = list.filter(v => v !== "all");
+
+      if (checked) {
+        list.push(value);
+      } else {
+        list = list.filter(v => v !== value);
+      }
+
+      if (list.length === 0) list = ["all"];
+
+      return { ...prev, [type]: list };
+    });
+  }
+
+  // 🔧 Update period start/end or other direct values
+  function handleFilterChange(key, value) {
+    setFilters(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  }
+
   return (
     <div className="dashboard dark">
       <div className="container">

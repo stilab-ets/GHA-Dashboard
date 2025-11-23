@@ -2,9 +2,9 @@ import { fetchDashboardDataViaWebSocket } from './websocket.js';
 
 const API_CONFIG = {
   baseUrl: 'http://localhost:3000/api',
-  defaultRepo: 'facebook/react',
   useWebSocket: false
 };
+
 
 /**
  * Extraire le repo depuis l'URL de la page GitHub actuelle
@@ -38,20 +38,29 @@ function extractRepoFromCurrentPage() {
 function extractRepoFromURL(url) {
   try {
     const urlObj = new URL(url);
-    if (urlObj.hostname !== "github.com") return null;
 
-    const parts = urlObj.pathname.split("/").filter(Boolean);
+    // pas sur github.com → pas de repo
+    if (!urlObj.hostname.includes("github.com")) return null;
 
-    // On prend TOUJOURS uniquement owner/repo
+    const parts = urlObj.pathname
+      .split("/")
+      .filter(Boolean); // retire les éléments vides
+
+    // cas normal : github.com/owner/repo/...
     if (parts.length >= 2) {
-      return `${parts[0]}/${parts[1]}`;
+      const owner = parts[0];
+      const repo = parts[1];
+
+      // sécurité : GitHub ajoute parfois "actions", "dashboard", etc
+      // mais owner/repo restent TOUJOURS en position 0 et 1
+      return `${owner}/${repo}`;
     }
 
+    return null;
   } catch (e) {
     console.error("Error parsing URL:", e);
+    return null;
   }
-
-  return null;
 }
 
 
@@ -512,7 +521,7 @@ function getMockDashboardData(filters = {}) {
   console.warn('⚠️ Using fallback mock data');
   
   return {
-    repo: 'Mock Repository (Backend unavailable)',
+    repo: extractRepoFromURL(window.location.href),
     totalRuns: 42,
     successRate: 0.88,
     failureRate: 0.12,

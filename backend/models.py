@@ -21,7 +21,8 @@ class Repository(db.Model):
 class Workflow(db.Model):
     __tablename__ = "workflows"
     id = db.Column(db.Integer, primary_key=True)
-    workflow_id = db.Column(db.BigInteger, unique=True, nullable=False)
+    workflow_id = db.Column(db.BigInteger, nullable=True)
+
     workflow_name = db.Column(db.String(255), nullable=False)
     repository_id = db.Column(db.Integer, db.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
     created_at = db.Column(db.DateTime)

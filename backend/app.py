@@ -387,11 +387,8 @@ def sync_repo():
         return jsonify({"error": "GITHUB_TOKEN manquant dans .env"}), 400
 
     # 1) Extraction
-    # 1) Lancer GHAMiner avant tout
-    success = run_ghaminer(repo, token)
-    if not success:
-        return jsonify({"error": "Échec extraction GHAMiner"}), 500
-
+   
+    success = True
     df, error = extract_data(repo, token, "2024-04-01", "2025-10-31")
     if error:
         return jsonify({"error": error}), 400
@@ -406,46 +403,50 @@ def sync_repo():
 
     # 3) Ingestion BD
     try:
-        ids = [int(x) for x in df["id_build"].tolist() if pd.notnull(x)]
-        existing_ids = {
-        x[0]
-        for x in db.session.query(WorkflowRun.id_build)
-                       .filter(WorkflowRun.id_build.in_(ids))
-                       .all()
-        }
-        
+        # Charger TOUS les id_build existants d'un coup
+        existing_ids = set(
+            db.session.query(WorkflowRun.id_build).with_entities(WorkflowRun.id_build).all()
+        )
+        existing_ids = {row[0] for row in existing_ids}
+
         owner_name = repo.split("/")[0] if "/" in repo else "unknown"
         repo_obj = _get_or_create_repo(repo_name=repo, owner=owner_name)
+
         inserted, skipped = 0, 0
 
-        for _, row in df.iterrows():
-            try:
+        # IMPORTANT : désactiver l'autoflush
+        with db.session.no_autoflush:
+
+            for _, row in df.iterrows():
+
                 run_id = int(row["id_build"])
-            except Exception:
-                continue
 
-            if run_id in existing_ids:
-                skipped += 1
-                continue
+                # --- SKIP si existe déjà ---
+                if run_id in existing_ids:
+                    skipped += 1
+                    continue
 
-            wf_name = str(row.get("workflow_name") or row.get("workflow") or ".github/workflows/ci.yml")
-            wf_obj = _get_or_create_workflow(repo_obj.id, wf_name)
+                # Assurer un workflow
+                wf_name = str(row.get("workflow_name") or row.get("workflow") or ".github/workflows/ci.yml")
+                wf_obj = _get_or_create_workflow(repo_obj.id, wf_name)
 
-            wr = WorkflowRun(
-            id_build=run_id,
-            workflow_id=wf_obj.id,
-            repository_id=repo_obj.id,
-            status=str(row.get("status") or "completed"),
-            conclusion=str(row.get("conclusion") or "unknown"),
-            created_at=_iso_dt(row.get("created_at")) or datetime.utcnow(),
-            updated_at=_iso_dt(row.get("updated_at")),
-            build_duration=float(row.get("build_duration") or 0),
-            branch=str(row.get("branch") or "unknown"),
-            issuer_name=str(row.get("issuer_name") or None),
-            workflow_event_trigger=str(row.get("event") or row.get("workflow_event_trigger") or None),
-            )
-            db.session.add(wr)
-            inserted += 1
+                # Créer le workflow_run
+                wr = WorkflowRun(
+                    id_build=run_id,
+                    workflow_id=wf_obj.id,
+                    repository_id=repo_obj.id,
+                    status=str(row.get("status") or "completed"),
+                    conclusion=str(row.get("conclusion") or "unknown"),
+                    created_at=_iso_dt(row.get("created_at")) or datetime.utcnow(),
+                    updated_at=_iso_dt(row.get("updated_at")),
+                    build_duration=float(row.get("build_duration") or 0),
+                    branch=str(row.get("branch") or "unknown"),
+                    issuer_name=str(row.get("issuer_name") or None),
+                    workflow_event_trigger=str(row.get("event") or row.get("workflow_event_trigger") or None),
+                )
+
+                db.session.add(wr)
+                inserted += 1
 
         db.session.commit()
 
@@ -460,7 +461,7 @@ def sync_repo():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-    
+
 # ============================================
 # Démarrage de l'Application
 # ============================================
