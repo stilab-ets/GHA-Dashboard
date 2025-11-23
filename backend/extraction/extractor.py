@@ -258,14 +258,20 @@ def _generate_models_from_series(line: str) -> WorkflowRun:
         db.session.commit()
 
     workflow_name = line_values[WORKFLOW_NAME]
-    workflow: Workflow | None = Workflow.query.filter_by(workflow_name=workflow_name).one_or_none()
-    if workflow == None:
-        workflow = Workflow()
-        workflow.workflow_name = workflow_name
-        workflow.workflow_id = line_values[WORKFLOW_ID]
-        workflow.repository_id = repo.id
-        workflow.created_at = datetime.datetime.now();
-        workflow.updated_at = datetime.datetime.now();
+
+    # On ignore workflow_id qui n’est pas fiable dans GHAMiner
+    workflow = Workflow.query.filter_by(workflow_name=workflow_name,
+                                        repository_id=repo.id).one_or_none()
+
+    if workflow is None:
+        workflow = Workflow(
+            workflow_name=workflow_name,
+            repository_id=repo.id,
+            created_at=datetime.datetime.now(),
+            updated_at=datetime.datetime.now()
+        )
+    
+
 
         db.session.add(workflow)
         db.session.commit()

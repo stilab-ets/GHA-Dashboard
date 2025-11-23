@@ -2,7 +2,8 @@ from flask_sqlalchemy import SQLAlchemy
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal, ClassVar
+from typing import Literal, ClassVar, TypeAlias
+
 
 db = SQLAlchemy()
 
@@ -21,8 +22,6 @@ class Repository(db.Model):
 class Workflow(db.Model):
     __tablename__ = "workflows"
     id = db.Column(db.Integer, primary_key=True)
-    workflow_id = db.Column(db.BigInteger, nullable=True)
-
     workflow_name = db.Column(db.String(255), nullable=False)
     repository_id = db.Column(db.Integer, db.ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
     created_at = db.Column(db.DateTime)
@@ -88,7 +87,7 @@ class WorkflowRun(db.Model):
     git_num_committers = db.Column(db.Integer)
     git_commits = db.Column(db.Integer)
 
-type AggregationPeriod = Literal["day", "month", "week"]
+AggregationPeriod: TypeAlias = Literal["day", "month", "week"]
 
 @dataclass
 class TimeInfo:

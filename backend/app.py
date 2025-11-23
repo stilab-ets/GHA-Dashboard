@@ -6,7 +6,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import text
 from models import db, Repository, Workflow, WorkflowRun, AggregationPeriod
-from extraction.extractor import extract_data, run_ghaminer
+from extraction.extractor import BUILD_FEATURES_PATH, extract_data, needs_refresh, run_ghaminer
 from analysis.endpoint import AggregationFilters, send_data
 from typing import cast
 from datetime import date
@@ -82,10 +82,16 @@ def _get_or_create_repo(repo_name: str, owner: str = "unknown") -> Repository:
 def _get_or_create_workflow(repo_id: int, wf_name: str) -> Workflow:
     wf = db.session.query(Workflow).filter_by(repository_id=repo_id, workflow_name=wf_name).one_or_none()
     if not wf:
-        wf = Workflow(repository_id=repo_id, workflow_name=wf_name)
+        wf = Workflow(
+            workflow_name=wf_name,
+            repository_id=repo_id,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
         db.session.add(wf)
         db.session.flush()
     return wf
+
 
 # ============================================
 # Health (BD + API) 
@@ -119,6 +125,14 @@ def extraction_api():
     repo = request.args.get("repo")
     if not repo:
         return jsonify({"error": "Paramètre 'repo' manquant"}), 400
+
+    # Lancer GHAminer si le CSV est vieux ou absent
+    if needs_refresh(BUILD_FEATURES_PATH):
+        print("🔄 CSV trop vieux ou absent — lancement de GHAminer...")
+        ok = run_ghaminer(repo, token)
+        if not ok:
+            return jsonify({"error": "GHAminer a échoué"}), 500
+
 
     # Vérifier le cache d'abord
     cached_data = get_cached_extraction(repo)
@@ -385,6 +399,13 @@ def sync_repo():
     token = os.getenv("GITHUB_TOKEN")
     if not token:
         return jsonify({"error": "GITHUB_TOKEN manquant dans .env"}), 400
+
+    # Assurer que le CSV est frais avant sync
+    if needs_refresh(BUILD_FEATURES_PATH):
+        print("🔄 Mise à jour CSV nécessaire — lancement de GHAminer...")
+        ok = run_ghaminer(repo, token)
+        if not ok:
+            return jsonify({"error": "GHAminer a échoué"}), 500
 
     # 1) Extraction
    

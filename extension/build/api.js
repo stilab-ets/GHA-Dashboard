@@ -135,6 +135,14 @@ function filterExtractionData(data, filters, columnNames) {
   });
 }
 
+export function getRepoFromStorage() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['currentRepo'], (result) => {
+        resolve(result.currentRepo || null);
+    });
+  });
+}
+
 /**
  * Génère les données de graphiques depuis les vraies données filtrées
  */
