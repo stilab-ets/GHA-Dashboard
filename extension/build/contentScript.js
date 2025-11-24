@@ -24,7 +24,7 @@
     if (location.hostname !== "github.com") return;
 
     const repo = extractRepoFromURL(location.href);
-    console.log("📌 [ContentScript] Detected repo:", repo);
+    console.log(" [ContentScript] Detected repo:", repo);
 
     if (repo && chrome.runtime) {
       chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });

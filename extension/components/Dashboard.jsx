@@ -206,23 +206,7 @@ export default function Dashboard() {
 
         <h2 style={{ marginTop: 0 }}>GitHub Actions Dashboard</h2>
 
-        {/* ⭐ BUTTON PLACED HERE ⭐ */}
-        <button
-          onClick={handleExtract}
-          style={{
-            backgroundColor: "#238636",
-            color: "white",
-            padding: "10px 20px",
-            borderRadius: "6px",
-            cursor: "pointer",
-            marginBottom: "20px",
-            border: "none",
-            fontSize: "15px",
-            fontWeight: "600"
-          }}
-        >
-          🔄 Extract Data (Sync)
-        </button>
+        
 
         {/* === FILTER PANEL === */}
         <div className="filter-panel card">
