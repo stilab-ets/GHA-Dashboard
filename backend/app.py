@@ -5,6 +5,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import text
+from extraction.extractor_github_api import fetch_github_runs
 from models import db, Repository, Workflow, WorkflowRun, AggregationPeriod
 from extraction.extractor import BUILD_FEATURES_PATH, extract_data, needs_refresh, run_ghaminer,fetch_all_github_runs
 from analysis.endpoint import AggregationFilters, send_data
@@ -124,11 +125,22 @@ def extraction_api():
         return jsonify({"error": "repo manquant"}), 400
 
     token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        return jsonify({"error": "GITHUB_TOKEN manquant"}), 400
 
-    df = fetch_all_github_runs(repo, token)
+    owner, name = repo.split("/")
 
-    # Nettoyage
-    df = df[[
+    # --- Extraire via GitHub API ---
+    runs = fetch_github_runs(owner, name, token)
+
+    if not runs:
+        return jsonify({"error": "Aucun workflow run trouvé"}), 404
+
+    # --- Convertir en DataFrame ---
+    df = pd.DataFrame(runs)
+
+    # Colonnes disponibles dans GitHub API
+    possible_cols = [
         "id",
         "name",
         "event",
@@ -143,19 +155,35 @@ def extraction_api():
         "path",
         "run_attempt",
         "workflow_id"
-    ]]
+    ]
 
-    df.rename(columns={
+    # On garde seulement les colonnes réellement présentes
+    columns_to_keep = [c for c in possible_cols if c in df.columns]
+    df = df[columns_to_keep]
+
+    # --- Renommage ---
+    rename_map = {
         "id": "id_build",
         "name": "workflow_name",
-        "head_branch": "branch",
-    }, inplace=True)
+        "head_branch": "branch"
+    }
+    df.rename(columns=rename_map, inplace=True)
 
-    # Convertir timestamps
-    df["created_at"] = pd.to_datetime(df["created_at"])
-    df["updated_at"] = pd.to_datetime(df["updated_at"])
+    # --- Nettoyage actor ---
+    if "actor" in df.columns:
+        df["actor"] = df["actor"].apply(
+            lambda a: a.get("login") if isinstance(a, dict) else a
+        )
 
+    # --- Conversion timestamps ---
+    for col in ["created_at", "updated_at"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    # --- JSON final ---
     data_dict = df.to_dict(orient="records")
+
+    print(f"✅ Extracted {len(df)} workflow runs for {repo}")
 
     return jsonify({
         "success": True,
