@@ -80,7 +80,7 @@ function detectColumnNames(sampleRow) {
 }
 
 /**
- * 🆕 Filtre les données extraites selon les filtres sélectionnés
+ * Filtre les données extraites selon les filtres sélectionnés
  */
 function filterExtractionData(data, filters, columnNames) {
   const {
@@ -122,7 +122,7 @@ function filterExtractionData(data, filters, columnNames) {
 }
 
 /**
- * 🆕 Génère les données de graphiques depuis les vraies données filtrées
+ * Génère les données de graphiques depuis les vraies données filtrées
  */
 function generateChartsFromRealData(filteredData, columnNames) {
   if (!filteredData || filteredData.length === 0) {
@@ -174,18 +174,27 @@ function generateChartsFromRealData(filteredData, columnNames) {
 
   const runsOverTime = Object.entries(runsByDate)
     .sort(([a], [b]) => new Date(a) - new Date(b))
-    .map(([date, stats]) => ({
-      date,
-      runs: stats.total,
-      successes: stats.successes,
-      failures: stats.failures,
-      avgDuration: stats.durations.length > 0 
-        ? Math.round(stats.durations.reduce((a, b) => a + b, 0) / stats.durations.length)
-        : 0,
-      medianDuration: stats.durations.length > 0
-        ? Math.round(stats.durations.sort((a, b) => a - b)[Math.floor(stats.durations.length / 2)])
-        : 0
-    }));
+    .map(([date, stats]) => {
+      const sortedDurations = stats.durations.sort((a, b) => a - b);
+      return {
+        date,
+        runs: stats.total,
+        successes: stats.successes,
+        failures: stats.failures,
+        avgDuration: sortedDurations.length > 0 
+          ? Math.round(sortedDurations.reduce((a, b) => a + b, 0) / sortedDurations.length)
+          : 0,
+        medianDuration: sortedDurations.length > 0
+          ? Math.round(sortedDurations[Math.floor(sortedDurations.length / 2)])
+          : 0,
+        minDuration: sortedDurations.length > 0
+          ? Math.round(sortedDurations[0])
+          : 0,
+        maxDuration: sortedDurations.length > 0
+          ? Math.round(sortedDurations[sortedDurations.length - 1])
+          : 0
+      };
+    });
 
   // 4. Top workflows
   const workflowStats = {};
@@ -294,8 +303,8 @@ function generateChartsFromRealData(filteredData, columnNames) {
     : 0;
 
   const spikes = runsOverTime.map(item => {
-    const failureRate = item.runs > 0 ? (item.failures / item.runs) * 100 : 0;
-    const isFailureSpike = failureRate > avgFailureRate * 2;
+    const failureRateVal = item.runs > 0 ? (item.failures / item.runs) * 100 : 0;
+    const isFailureSpike = failureRateVal > avgFailureRate * 2;
     const isDurationSpike = item.avgDuration > avgDurationOverTime * 1.5;
     const isExecutionSpike = item.runs > avgRunsPerDay * 1.8;
     
@@ -305,7 +314,7 @@ function generateChartsFromRealData(filteredData, columnNames) {
     
     if (isFailureSpike) {
       anomalyType = 'Failure Spike';
-      anomalyDetail = `Failure rate: ${failureRate.toFixed(1)}% (avg: ${avgFailureRate.toFixed(1)}%)`;
+      anomalyDetail = `Failure rate: ${failureRateVal.toFixed(1)}% (avg: ${avgFailureRate.toFixed(1)}%)`;
     } else if (isDurationSpike) {
       anomalyType = 'Duration Spike';
       anomalyDetail = `Duration +${((item.avgDuration / avgDurationOverTime - 1) * 100).toFixed(0)}% above baseline`;
@@ -320,6 +329,8 @@ function generateChartsFromRealData(filteredData, columnNames) {
       failures: item.failures,
       avgDuration: item.avgDuration,
       medianDuration: item.medianDuration,
+      minDuration: item.minDuration,
+      maxDuration: item.maxDuration,
       anomalyScore: isAnomaly ? item.runs : null,
       isAnomaly,
       anomalyType,
@@ -464,8 +475,33 @@ export async function fetchDashboardData(filters = {}) {
     const extractionData = await fetchFullExtractionData(requestedRepo);
     
     if (!extractionData || extractionData.length === 0) {
-      console.warn('⚠️ No extraction data available');
-      return getMockDashboardData(filters);
+      console.warn(`⚠️ No extraction data available for ${requestedRepo}`);
+      console.log('💡 Trying to extract data from backend...');
+      
+      // Essayer de déclencher l'extraction
+      try {
+        const extractResponse = await fetch(
+          `${API_CONFIG.baseUrl}/extraction?repo=${encodeURIComponent(requestedRepo)}`,
+          { method: 'GET', headers: { 'Content-Type': 'application/json' } }
+        );
+        
+        if (extractResponse.ok) {
+          const extractResult = await extractResponse.json();
+          if (extractResult.success && extractResult.data && extractResult.data.length > 0) {
+            console.log(`✅ Successfully extracted ${extractResult.data.length} runs`);
+            // Réessayer avec les nouvelles données
+            return fetchDashboardData(filters);
+          }
+        } else {
+          const error = await extractResponse.json();
+          console.error('❌ Extraction failed:', error);
+          return getNoDataMessage(requestedRepo, error);
+        }
+      } catch (extractError) {
+        console.error('❌ Could not trigger extraction:', extractError);
+      }
+      
+      return getNoDataMessage(requestedRepo);
     }
 
     // Extraire les options de filtres
@@ -476,11 +512,11 @@ export async function fetchDashboardData(filters = {}) {
       return getMockDashboardData(filters);
     }
 
-    // 🆕 Filtrer les données selon les filtres sélectionnés
+    // Filtrer les données selon les filtres sélectionnés
     const filteredData = filterExtractionData(extractionData, filters, filterOptions.columnNames);
     console.log(`✅ Filtered to ${filteredData.length} runs (from ${extractionData.length} total)`);
 
-    // 🆕 Générer les graphiques depuis les données filtrées
+    // Générer les graphiques depuis les données filtrées
     const chartData = generateChartsFromRealData(filteredData, filterOptions.columnNames);
     
     if (!chartData) {
@@ -514,6 +550,35 @@ function getMockDashboardData(filters = {}) {
     avgDuration: 205,
     medianDuration: 200,
     stdDeviation: 35,
+    runsOverTime: [],
+    statusBreakdown: [],
+    topWorkflows: [],
+    durationBox: [],
+    failureRateOverTime: [],
+    branchComparison: [],
+    spikes: [],
+    workflows: ['all'],
+    branches: ['all'],
+    actors: ['all']
+  };
+}
+
+function getNoDataMessage(repo, error = null) {
+  console.warn(`⚠️ No data available for ${repo}`);
+  
+  const errorDetail = error?.error || error?.detail || 'No data extracted yet';
+  
+  return {
+    repo: `${repo} - ⚠️ No Data Available`,
+    error: true,
+    errorMessage: errorDetail,
+    suggestion: `This repository hasn't been analyzed yet. The extraction might take 30-60 seconds for large repos.`,
+    totalRuns: 0,
+    successRate: 0,
+    failureRate: 0,
+    avgDuration: 0,
+    medianDuration: 0,
+    stdDeviation: 0,
     runsOverTime: [],
     statusBreakdown: [],
     topWorkflows: [],

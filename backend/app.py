@@ -30,7 +30,7 @@ db.init_app(app)
 CSV_PATH = "builds_features.csv"
 
 # ============================================
-# 🆕 Cache système pour l'extraction
+# Cache système pour l'extraction
 # ============================================
 _extraction_cache = {}
 _cache_lock = threading.Lock()
