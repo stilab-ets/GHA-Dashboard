@@ -1,6 +1,0 @@
-{
-    "python.analysis.extraPaths": [
-        "./backend/ghaminer/src",
-        "./backend/extraction"
-    ]
-}

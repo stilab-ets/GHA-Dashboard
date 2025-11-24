@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     container_name: gha-postgres
     environment:
       POSTGRES_DB: ${DB_NAME:-gha_dashboard}
