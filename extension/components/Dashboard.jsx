@@ -18,23 +18,9 @@ import {
   ComposedChart
 } from 'recharts';
 
-async function getRepoFromStorage() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(["currentRepo"], (result) => {
-      if (result.currentRepo) {
-        console.log("📌 Repo from storage:", result.currentRepo);
-        resolve(result.currentRepo);
-      } else {
-        console.warn("⚠️ No repo found in storage");
-        resolve(null);
-      }
-    });
-  });
-}
-
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3'];
 
-// Helper : format YYYY-MM-DDTHH:MM
+// helper to format JS Date for <input type="datetime-local"> (YYYY-MM-DDTHH:MM)
 function formatDateForInput(d) {
   const pad = (n) => String(n).padStart(2, '0');
   const year = d.getFullYear();
@@ -47,47 +33,11 @@ function formatDateForInput(d) {
 
 export default function Dashboard() {
 
-  
-
-  // 🔥 EXTRACTION BUTTON FUNCTION (PLACED CORRECTLY)
-  async function handleExtract() {
-    const repo = await getRepoFromStorage();
-
-    if (!repo) {
-      alert("❌ Aucun repo détecté dans l’URL.");
-      return;
-    }
-
-    alert("⏳ Extraction en cours pour : " + repo);
-
-    try {
-      const res = await fetch(
-        `http://localhost:3000/api/sync?repo=${encodeURIComponent(repo)}`,
-        { method: "POST" }
-      );
-
-      const json = await res.json();
-      console.log("Extraction result:", json);
-
-      if (json.error) {
-        alert("❌ Erreur: " + json.error);
-      } else {
-        alert(`✅ Extraction terminée !
-        Insertions: ${json.inserted}
-        Ignorés: ${json.skipped}`);
-      }
-
-    } catch (err) {
-      console.error(err);
-      alert("❌ Erreur backend (voir console)");
-    }
-  }
-
 
   const getCurrentDefaults = () => {
     const now = new Date();
     const defaultEnd = formatDateForInput(now);
-    const defaultStart = formatDateForInput(new Date(now.getTime() - 30 * 86400000));
+    const defaultStart = formatDateForInput(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000));
     return { defaultStart, defaultEnd };
   };
 
@@ -96,27 +46,33 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
+  
+  // UC-02: Filter state
   const [filters, setFilters] = useState({
+    // store multi-selects as arrays; use ['all'] as sentinel meaning no filter
     workflow: ['all'],
     branch: ['all'],
     actor: ['all'],
+    // ISO-like local strings for datetime-local inputs
     start: defaultStart,
     end: defaultEnd
   });
 
+  // UC-02: Dropdown open/close state
   const [openDropdowns, setOpenDropdowns] = useState({
     workflow: false,
     branch: false,
     actor: false
   });
 
+  // Refs for dropdown containers to detect clicks outside
   const dropdownRefs = {
     workflow: useRef(null),
     branch: useRef(null),
     actor: useRef(null)
   };
 
+  // Handle clicks outside dropdowns to close them
   useEffect(() => {
     const handleClickOutside = (event) => {
       Object.keys(dropdownRefs).forEach(key => {
@@ -127,7 +83,9 @@ export default function Dashboard() {
     };
 
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
 
   useEffect(() => {
@@ -147,67 +105,83 @@ export default function Dashboard() {
   if (error) return <div className="dashboard dark container" style={{ color: 'var(--accent)' }}>{error}</div>;
   if (!data) return null;
 
-  const {
-    runsOverTime = [],
-    statusBreakdown = [],
+  const { 
+    runsOverTime = [], 
+    statusBreakdown = [], 
     branchComparison = [],
     workflows = [],
     branches = [],
     actors = []
   } = data;
-
+  // compute percent for status breakdown so we can show it in the legend
   const totalStatus = statusBreakdown.reduce((sum, s) => sum + (s.value || 0), 0);
   const statusData = statusBreakdown.map(s => ({
     ...s,
     percent: totalStatus ? Math.round((s.value / totalStatus) * 100) : 0
   }));
-
+  
+  // prepare branch comparison data with workflow information
   const branchData = branchComparison.map(b => ({
     ...b,
     displayBranch: b.workflow ? `${b.workflow}/${b.branch}` : b.branch
   }));
+  
+  // UC-02: Filter handlers
+  const handleFilterChange = (filterType, value) => {
+    // For start/end we sanitize to ensure start <= end and neither is in the future
+    if (filterType === 'start' || filterType === 'end') {
+      const currentDefaults = getCurrentDefaults();
+      const nowStr = currentDefaults.defaultEnd; // formatted 'now' (updated in real-time)
+      let newStart = filterType === 'start' ? value : filters.start;
+      let newEnd = filterType === 'end' ? value : filters.end;
 
+      // clamp to now
+      if (newStart > nowStr) newStart = nowStr;
+      if (newEnd > nowStr) newEnd = nowStr;
 
-  // 🔧 Toggle checkboxes inside dropdowns
-  function toggleCheckbox(type, value, checked) {
+      // ensure start <= end
+      if (newStart > newEnd) {
+        // if user changed start to after end, move end forward to match start
+        newEnd = newStart;
+      } else if (newEnd < newStart) {
+        // if user changed end to before start, move start back to match end
+        newStart = newEnd;
+      }
+
+      setFilters(prev => ({ ...prev, start: newStart, end: newEnd }));
+      return;
+    }
+
+    setFilters(prev => ({ ...prev, [filterType]: value }));
+  };
+
+  // checkbox-based multi-select toggler
+  const toggleCheckbox = (filterType, value, checked) => {
     setFilters(prev => {
-      let list = [...prev[type]];
+      const prevVals = Array.isArray(prev[filterType]) ? prev[filterType] : ['all'];
 
-      if (value === "all") {
-        return { ...prev, [type]: ["all"] };
-      }
-
-      // Si on sélectionne autre chose, enlever "all"
-      list = list.filter(v => v !== "all");
-
-      if (checked) {
-        list.push(value);
+      let newVals = [];
+      if (value === 'all') {
+        newVals = checked ? ['all'] : [];
       } else {
-        list = list.filter(v => v !== value);
+        if (checked) {
+          // add value, ensure 'all' removed
+          newVals = Array.from(new Set([...prevVals.filter(v => v !== 'all'), value]));
+        } else {
+          // remove value
+          newVals = prevVals.filter(v => v !== value && v !== 'all');
+        }
       }
 
-      if (list.length === 0) list = ["all"];
-
-      return { ...prev, [type]: list };
+      if (!newVals || newVals.length === 0) newVals = ['all'];
+      return { ...prev, [filterType]: newVals };
     });
-  }
-
-  // 🔧 Update period start/end or other direct values
-  function handleFilterChange(key, value) {
-    setFilters(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  }
+  };
 
   return (
     <div className="dashboard dark">
       <div className="container">
-
         <h2 style={{ marginTop: 0 }}>GitHub Actions Dashboard</h2>
-
-        
-
         {/* === FILTER PANEL === */}
         <div className="filter-panel card">
           <div className="filter-row">
@@ -226,7 +200,6 @@ export default function Dashboard() {
                   {filters.workflow.includes('all') ? 'All workflows' : `${filters.workflow.length} selected`}
                   <span className="dropdown-arrow">▼</span>
                 </button>
-
                 {openDropdowns.workflow && (
                   <div className="dropdown-menu">
                     <label className="dropdown-item">
@@ -237,7 +210,6 @@ export default function Dashboard() {
                       />
                       <span>All workflows</span>
                     </label>
-
                     {workflows.map(w => (
                       <label key={w} className="dropdown-item">
                         <input
@@ -268,7 +240,6 @@ export default function Dashboard() {
                   {filters.branch.includes('all') ? 'All branches' : `${filters.branch.length} selected`}
                   <span className="dropdown-arrow">▼</span>
                 </button>
-
                 {openDropdowns.branch && (
                   <div className="dropdown-menu">
                     <label className="dropdown-item">
@@ -279,7 +250,6 @@ export default function Dashboard() {
                       />
                       <span>All branches</span>
                     </label>
-
                     {branches.map(b => (
                       <label key={b} className="dropdown-item">
                         <input
@@ -310,7 +280,6 @@ export default function Dashboard() {
                   {filters.actor.includes('all') ? 'All actors' : `${filters.actor.length} selected`}
                   <span className="dropdown-arrow">▼</span>
                 </button>
-
                 {openDropdowns.actor && (
                   <div className="dropdown-menu">
                     <label className="dropdown-item">
@@ -321,7 +290,6 @@ export default function Dashboard() {
                       />
                       <span>All actors</span>
                     </label>
-
                     {actors.map(a => (
                       <label key={a} className="dropdown-item">
                         <input
@@ -343,19 +311,20 @@ export default function Dashboard() {
               <input
                 type="datetime-local"
                 value={filters.start}
+                max={filters.end || defaultEnd}
                 onChange={(e) => handleFilterChange('start', e.target.value)}
               />
             </div>
-
             <div className="filter-group">
               <label>Period end</label>
               <input
                 type="datetime-local"
                 value={filters.end}
+                min={filters.start}
+                max={defaultEnd}
                 onChange={(e) => handleFilterChange('end', e.target.value)}
               />
             </div>
-
           </div>
         </div>
 
@@ -390,27 +359,45 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
-                  data={statusData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={90}
-                >
+                    data={statusData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={90}
+                    // custom label: large percent with small sublabel for name
+                    label={(entry) => {
+                      try {
+                        const x = entry.x || entry.cx;
+                        const y = entry.y || entry.cy;
+                        const pct = (entry.payload && typeof entry.payload.percent === 'number') ? entry.payload.percent : entry.percent * 100;
+                        const pctText = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(pct) + '%';
+                        return (
+                          <text x={x} y={y} textAnchor="middle" fill="#fff">
+                            <tspan fontSize={12} fontWeight={700}>{pctText}</tspan>
+                            <tspan x={x} dy={14} fontSize={10} fill="#9aa">{entry.payload && entry.payload.name}</tspan>
+                          </text>
+                        );
+                      } catch (e) {
+                        return null;
+                      }
+                    }}
+                  >
                   {statusData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={COLORS[index % COLORS.length]}
-                    />
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Legend />
-                <Tooltip />
+                <Legend formatter={(value, entry) => {
+                  const pct = entry && entry.payload && typeof entry.payload.percent === 'number' ? entry.payload.percent : null;
+                  const pctText = pct !== null ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(pct)}%` : '';
+                  return `${value}: ${pctText}`;
+                }} />
+                <Tooltip/>
               </PieChart>
             </ResponsiveContainer>
           </div>
 
-          {/* === BRANCH TABLE === */}
+          {/* UC-03: Branch statistics table */}
           <div className="card">
             <h3>Branch statistics details</h3>
             <div className="table-wrapper">
@@ -427,13 +414,15 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {branchData.map(b => (
-                    <tr key={`${b.workflow}-${b.branch}`}>
-                      <td>{b.workflow}</td>
-                      <td>{b.branch}</td>
+                    <tr key={`${b.workflow || 'unknown'}-${b.branch}`}>
+                      <td className="workflow-name">{b.workflow || 'Unknown'}</td>
+                      <td className="branch-name">{b.branch}</td>
                       <td>{b.totalRuns}</td>
-                      <td>{b.successRate}%</td>
+                      <td className={b.successRate > 90 ? 'success-high' : b.successRate > 70 ? 'success-medium' : 'success-low'}>
+                        {b.successRate}%
+                      </td>
                       <td>{b.medianDuration}s</td>
-                      <td>{b.failures}</td>
+                      <td className={b.failures > 5 ? 'failures-high' : ''}>{b.failures}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -441,59 +430,103 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* === BRANCH BAR CHART === */}
+          {/* UC-03: Branch comparison chart */}
           <div className="card card-span-2">
             <h3>Branch performance comparison</h3>
+            <p className="chart-description">Success rate and median duration by branch</p>
             <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={branchData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="displayBranch" angle={-15} textAnchor="end" height={70} />
-                <YAxis yAxisId="left" />
-                <YAxis yAxisId="right" orientation="right" />
+              <BarChart data={branchData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                <XAxis dataKey="displayBranch" stroke="#bcd" angle={-15} textAnchor="end" height={80} />
+                <YAxis yAxisId="left" stroke="#bcd" label={{ value: 'Success %', angle: -90, position: 'insideLeft' }} />
+                <YAxis yAxisId="right" orientation="right" stroke="#bcd" label={{ value: 'Duration (s)', angle: 90, position: 'insideRight' }} />
                 <Tooltip />
                 <Legend />
-                <Bar yAxisId="left" dataKey="successRate" fill="#4caf50" />
-                <Bar yAxisId="right" dataKey="medianDuration" fill="#2196f3" />
+                <Bar yAxisId="left" dataKey="successRate" fill="#4caf50" name="Success rate %" />
+                <Bar yAxisId="right" dataKey="medianDuration" fill="#2196f3" name="Median duration (s)" />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
-          {/* === RUNS OVER TIME === */}
+          {/* UC-01: Daily runs breakdown */}
           <div className="card">
             <h3>Daily runs breakdown</h3>
+            <p className="chart-description">Successful and failed runs over time</p>
             <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={runsOverTime}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
+              <LineChart data={runsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                <XAxis dataKey="date" stroke="#bcd" />
+                <YAxis stroke="#bcd" />
+                <Tooltip content={<RunsBreakdownTooltip />} />
                 <Legend />
-                <Line dataKey="successes" stroke="#4caf50" strokeWidth={3} />
-                <Line dataKey="failures" stroke="#f44336" strokeWidth={3} />
+                <Line type="monotone" dataKey="successes" stroke="#4caf50" strokeWidth={3} dot={{ r: 4 }} name="Successful runs" />
+                <Line type="monotone" dataKey="failures" stroke="#f44336" strokeWidth={3} dot={{ r: 4 }} name="Failed runs" />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
-          {/* === DURATION OVER TIME === */}
+          {/* UC-06: Duration chart */}
           <div className="card">
             <h3>Duration variability over time</h3>
+            <p className="chart-description">Median duration with min/max range visualization</p>
             <ResponsiveContainer width="100%" height={320}>
-              <ComposedChart data={runsOverTime}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
+              <ComposedChart data={runsOverTime} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                <XAxis dataKey="date" stroke="#bcd" />
+                <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
+                <Tooltip content={<DurationTooltip />} />
                 <Legend />
-                <Line dataKey="maxDuration" stroke="#ff9800" />
-                <Line dataKey="minDuration" stroke="#4caf50" />
-                <Line dataKey="medianDuration" stroke="#2196f3" strokeWidth={3} />
-                <Line dataKey="avgDuration" stroke="#9c27b0" strokeWidth={2} strokeDasharray="5 5" />
+                {/* High-low lines (min to max) */}
+                <Line type="monotone" dataKey="maxDuration" stroke="#ff9800" strokeWidth={1} dot={false} name="Max duration" />
+                <Line type="monotone" dataKey="minDuration" stroke="#4caf50" strokeWidth={1} dot={false} name="Min duration" />
+                {/* Median duration line */}
+                <Line type="monotone" dataKey="medianDuration" stroke="#2196f3" strokeWidth={3} dot={{ r: 4 }} name="Median duration" />
+                {/* Average duration as reference */}
+                <Line type="monotone" dataKey="avgDuration" stroke="#9c27b0" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Average duration" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-
         </div>
       </div>
     </div>
   );
+}
+
+function RunsBreakdownTooltip({ active, payload, label }) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    const totalRuns = data.runs || (data.successes + data.failures);
+    const successes = data.successes || 0;
+    const failures = data.failures || 0;
+    
+    return (
+      <div className="custom-tooltip">
+        <p className="label">{`Date: ${label}`}</p>
+        <p>{`Total runs: ${totalRuns}`}</p>
+        <p style={{ color: '#4caf50' }}>{`Successful: ${successes}`}</p>
+        <p style={{ color: '#f44336' }}>{`Failed: ${failures}`}</p>
+      </div>
+    );
+  }
+  return null;
+}
+
+function DurationTooltip({ active, payload, label }) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    
+    return (
+      <div className="custom-tooltip">
+        <p className="label">{`Date: ${label}`}</p>
+        <p style={{ color: '#2196f3', fontWeight: 'bold' }}>{`Median: ${data.medianDuration}s`}</p>
+        <p style={{ color: '#9c27b0' }}>{`Average: ${data.avgDuration}s`}</p>
+        <p style={{ color: '#ff9800' }}>{`Maximum: ${data.maxDuration}s`}</p>
+        <p style={{ color: '#4caf50' }}>{`Minimum: ${data.minDuration}s`}</p>
+        <p style={{ color: '#666', fontSize: '12px' }}>
+          Range: {(data.maxDuration - data.minDuration).toFixed(1)}s
+        </p>
+      </div>
+    );
+  }
+  return null;
 }
