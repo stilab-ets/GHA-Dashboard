@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { fetchDashboardData } from '../api';
 import '../styles/dashboardStyles.css';
 import {
@@ -14,18 +14,124 @@ import {
   Cell,
   BarChart,
   Bar,
-  Legend
+  Legend,
+  ComposedChart
 } from 'recharts';
+
+async function getRepoFromStorage() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["currentRepo"], (result) => {
+      if (result.currentRepo) {
+        console.log("📌 Repo from storage:", result.currentRepo);
+        resolve(result.currentRepo);
+      } else {
+        console.warn("⚠️ No repo found in storage");
+        resolve(null);
+      }
+    });
+  });
+}
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3'];
 
+// Helper : format YYYY-MM-DDTHH:MM
+function formatDateForInput(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 export default function Dashboard() {
+
+  
+
+  // 🔥 EXTRACTION BUTTON FUNCTION (PLACED CORRECTLY)
+  async function handleExtract() {
+    const repo = await getRepoFromStorage();
+
+    if (!repo) {
+      alert("❌ Aucun repo détecté dans l’URL.");
+      return;
+    }
+
+    alert("⏳ Extraction en cours pour : " + repo);
+
+    try {
+      const res = await fetch(
+        `http://localhost:3000/api/sync?repo=${encodeURIComponent(repo)}`,
+        { method: "POST" }
+      );
+
+      const json = await res.json();
+      console.log("Extraction result:", json);
+
+      if (json.error) {
+        alert("❌ Erreur: " + json.error);
+      } else {
+        alert(`✅ Extraction terminée !
+        Insertions: ${json.inserted}
+        Ignorés: ${json.skipped}`);
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert("❌ Erreur backend (voir console)");
+    }
+  }
+
+
+  const getCurrentDefaults = () => {
+    const now = new Date();
+    const defaultEnd = formatDateForInput(now);
+    const defaultStart = formatDateForInput(new Date(now.getTime() - 30 * 86400000));
+    return { defaultStart, defaultEnd };
+  };
+
+  const { defaultStart, defaultEnd } = getCurrentDefaults();
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const [filters, setFilters] = useState({
+    workflow: ['all'],
+    branch: ['all'],
+    actor: ['all'],
+    start: defaultStart,
+    end: defaultEnd
+  });
+
+  const [openDropdowns, setOpenDropdowns] = useState({
+    workflow: false,
+    branch: false,
+    actor: false
+  });
+
+  const dropdownRefs = {
+    workflow: useRef(null),
+    branch: useRef(null),
+    actor: useRef(null)
+  };
+
   useEffect(() => {
-    fetchDashboardData()
+    const handleClickOutside = (event) => {
+      Object.keys(dropdownRefs).forEach(key => {
+        if (dropdownRefs[key].current && !dropdownRefs[key].current.contains(event.target)) {
+          setOpenDropdowns(prev => ({ ...prev, [key]: false }));
+        }
+      });
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    fetchDashboardData(filters)
       .then((d) => {
         setData(d);
         setLoading(false);
@@ -35,19 +141,225 @@ export default function Dashboard() {
         setError('Error loading data.');
         setLoading(false);
       });
-  }, []);
+  }, [filters]);
 
   if (loading) return <div className="dashboard dark container">Loading...</div>;
   if (error) return <div className="dashboard dark container" style={{ color: 'var(--accent)' }}>{error}</div>;
   if (!data) return null;
 
-  const { runsOverTime = [], statusBreakdown = [], topWorkflows = [], durationBox = [] } = data;
+  const {
+    runsOverTime = [],
+    statusBreakdown = [],
+    branchComparison = [],
+    workflows = [],
+    branches = [],
+    actors = []
+  } = data;
+
+  const totalStatus = statusBreakdown.reduce((sum, s) => sum + (s.value || 0), 0);
+  const statusData = statusBreakdown.map(s => ({
+    ...s,
+    percent: totalStatus ? Math.round((s.value / totalStatus) * 100) : 0
+  }));
+
+  const branchData = branchComparison.map(b => ({
+    ...b,
+    displayBranch: b.workflow ? `${b.workflow}/${b.branch}` : b.branch
+  }));
+
+
+  // 🔧 Toggle checkboxes inside dropdowns
+  function toggleCheckbox(type, value, checked) {
+    setFilters(prev => {
+      let list = [...prev[type]];
+
+      if (value === "all") {
+        return { ...prev, [type]: ["all"] };
+      }
+
+      // Si on sélectionne autre chose, enlever "all"
+      list = list.filter(v => v !== "all");
+
+      if (checked) {
+        list.push(value);
+      } else {
+        list = list.filter(v => v !== value);
+      }
+
+      if (list.length === 0) list = ["all"];
+
+      return { ...prev, [type]: list };
+    });
+  }
+
+  // 🔧 Update period start/end or other direct values
+  function handleFilterChange(key, value) {
+    setFilters(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  }
 
   return (
     <div className="dashboard dark">
       <div className="container">
+
         <h2 style={{ marginTop: 0 }}>GitHub Actions Dashboard</h2>
 
+        
+
+        {/* === FILTER PANEL === */}
+        <div className="filter-panel card">
+          <div className="filter-row">
+            {/* WORKFLOW DROPDOWN */}
+            <div className="filter-group">
+              <label>Workflow</label>
+              <div className="dropdown-container" ref={dropdownRefs.workflow}>
+                <button
+                  className="dropdown-toggle"
+                  onClick={() => setOpenDropdowns(prev => ({
+                    workflow: !prev.workflow,
+                    branch: false,
+                    actor: false
+                  }))}
+                >
+                  {filters.workflow.includes('all') ? 'All workflows' : `${filters.workflow.length} selected`}
+                  <span className="dropdown-arrow">▼</span>
+                </button>
+
+                {openDropdowns.workflow && (
+                  <div className="dropdown-menu">
+                    <label className="dropdown-item">
+                      <input
+                        type="checkbox"
+                        checked={filters.workflow.includes('all')}
+                        onChange={(e) => toggleCheckbox('workflow', 'all', e.target.checked)}
+                      />
+                      <span>All workflows</span>
+                    </label>
+
+                    {workflows.map(w => (
+                      <label key={w} className="dropdown-item">
+                        <input
+                          type="checkbox"
+                          checked={filters.workflow.includes(w)}
+                          onChange={(e) => toggleCheckbox('workflow', w, e.target.checked)}
+                        />
+                        <span>{w}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* BRANCH DROPDOWN */}
+            <div className="filter-group">
+              <label>Branch</label>
+              <div className="dropdown-container" ref={dropdownRefs.branch}>
+                <button
+                  className="dropdown-toggle"
+                  onClick={() => setOpenDropdowns(prev => ({
+                    workflow: false,
+                    branch: !prev.branch,
+                    actor: false
+                  }))}
+                >
+                  {filters.branch.includes('all') ? 'All branches' : `${filters.branch.length} selected`}
+                  <span className="dropdown-arrow">▼</span>
+                </button>
+
+                {openDropdowns.branch && (
+                  <div className="dropdown-menu">
+                    <label className="dropdown-item">
+                      <input
+                        type="checkbox"
+                        checked={filters.branch.includes('all')}
+                        onChange={(e) => toggleCheckbox('branch', 'all', e.target.checked)}
+                      />
+                      <span>All branches</span>
+                    </label>
+
+                    {branches.map(b => (
+                      <label key={b} className="dropdown-item">
+                        <input
+                          type="checkbox"
+                          checked={filters.branch.includes(b)}
+                          onChange={(e) => toggleCheckbox('branch', b, e.target.checked)}
+                        />
+                        <span>{b}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ACTOR DROPDOWN */}
+            <div className="filter-group">
+              <label>Actor</label>
+              <div className="dropdown-container" ref={dropdownRefs.actor}>
+                <button
+                  className="dropdown-toggle"
+                  onClick={() => setOpenDropdowns(prev => ({
+                    workflow: false,
+                    branch: false,
+                    actor: !prev.actor
+                  }))}
+                >
+                  {filters.actor.includes('all') ? 'All actors' : `${filters.actor.length} selected`}
+                  <span className="dropdown-arrow">▼</span>
+                </button>
+
+                {openDropdowns.actor && (
+                  <div className="dropdown-menu">
+                    <label className="dropdown-item">
+                      <input
+                        type="checkbox"
+                        checked={filters.actor.includes('all')}
+                        onChange={(e) => toggleCheckbox('actor', 'all', e.target.checked)}
+                      />
+                      <span>All actors</span>
+                    </label>
+
+                    {actors.map(a => (
+                      <label key={a} className="dropdown-item">
+                        <input
+                          type="checkbox"
+                          checked={filters.actor.includes(a)}
+                          onChange={(e) => toggleCheckbox('actor', a, e.target.checked)}
+                        />
+                        <span>{a}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* DATE PICKERS */}
+            <div className="filter-group">
+              <label>Period start</label>
+              <input
+                type="datetime-local"
+                value={filters.start}
+                onChange={(e) => handleFilterChange('start', e.target.value)}
+              />
+            </div>
+
+            <div className="filter-group">
+              <label>Period end</label>
+              <input
+                type="datetime-local"
+                value={filters.end}
+                onChange={(e) => handleFilterChange('end', e.target.value)}
+              />
+            </div>
+
+          </div>
+        </div>
+
+        {/* === CORE STATS === */}
         <div className="stats-row">
           <div className="stat-card card">
             <div className="title">Repository</div>
@@ -62,32 +374,34 @@ export default function Dashboard() {
             <div className="value">{`${(data.successRate * 100).toFixed(1)}%`}</div>
           </div>
           <div className="stat-card card">
-            <div className="title">Avg duration</div>
-            <div className="value">{`${data.avgDuration} s`}</div>
+            <div className="title">Median duration</div>
+            <div className="value">{`${data.medianDuration} s`}</div>
+          </div>
+          <div className="stat-card card">
+            <div className="title">Std deviation</div>
+            <div className="value">{`${data.stdDeviation} s`}</div>
           </div>
         </div>
 
-        <div className="layout-grid">
-          <div className="card">
-            <h3>Runs over time</h3>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={runsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis dataKey="date" stroke="#bcd" />
-                <YAxis stroke="#bcd" />
-                <Tooltip />
-                <Line type="monotone" dataKey="runs" stroke="#60a5fa" strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
+        {/* === STATUS PIE === */}
+        <div className="dashboard-grid">
           <div className="card">
             <h3>Status breakdown</h3>
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={280}>
               <PieChart>
-                <Pie data={statusBreakdown} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                  {statusBreakdown.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                <Pie
+                  data={statusData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                >
+                  {statusData.map((entry, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={COLORS[index % COLORS.length]}
+                    />
                   ))}
                 </Pie>
                 <Legend />
@@ -95,112 +409,91 @@ export default function Dashboard() {
               </PieChart>
             </ResponsiveContainer>
           </div>
-        </div>
 
-        <div className="layout-grid-2">
+          {/* === BRANCH TABLE === */}
           <div className="card">
-            <h3>Top workflows (runs)</h3>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={topWorkflows} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis type="number" stroke="#bcd" />
-                <YAxis dataKey="name" type="category" stroke="#bcd" />
+            <h3>Branch statistics details</h3>
+            <div className="table-wrapper">
+              <table className="branch-table">
+                <thead>
+                  <tr>
+                    <th>Workflow</th>
+                    <th>Branch</th>
+                    <th>Runs</th>
+                    <th>Success</th>
+                    <th>Duration</th>
+                    <th>Failures</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchData.map(b => (
+                    <tr key={`${b.workflow}-${b.branch}`}>
+                      <td>{b.workflow}</td>
+                      <td>{b.branch}</td>
+                      <td>{b.totalRuns}</td>
+                      <td>{b.successRate}%</td>
+                      <td>{b.medianDuration}s</td>
+                      <td>{b.failures}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* === BRANCH BAR CHART === */}
+          <div className="card card-span-2">
+            <h3>Branch performance comparison</h3>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={branchData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="displayBranch" angle={-15} textAnchor="end" height={70} />
+                <YAxis yAxisId="left" />
+                <YAxis yAxisId="right" orientation="right" />
                 <Tooltip />
-                <Bar dataKey="runs" fill="#34d399" />
+                <Legend />
+                <Bar yAxisId="left" dataKey="successRate" fill="#4caf50" />
+                <Bar yAxisId="right" dataKey="medianDuration" fill="#2196f3" />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
+          {/* === RUNS OVER TIME === */}
           <div className="card">
-            <h3>Workflow durations</h3>
-            <div className="box-plot-wrapper">
-              <BoxPlot data={durationBox} height={200} />
-            </div>
+            <h3>Daily runs breakdown</h3>
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={runsOverTime}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line dataKey="successes" stroke="#4caf50" strokeWidth={3} />
+                <Line dataKey="failures" stroke="#f44336" strokeWidth={3} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
+
+          {/* === DURATION OVER TIME === */}
+          <div className="card">
+            <h3>Duration variability over time</h3>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={runsOverTime}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line dataKey="maxDuration" stroke="#ff9800" />
+                <Line dataKey="minDuration" stroke="#4caf50" />
+                <Line dataKey="medianDuration" stroke="#2196f3" strokeWidth={3} />
+                <Line dataKey="avgDuration" stroke="#9c27b0" strokeWidth={2} strokeDasharray="5 5" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
         </div>
       </div>
     </div>
-  );
-}
-
-function StatCard({ title, value }) {
-  return (
-    <div style={{ background: '#fff', padding: 12, borderRadius: 8, minWidth: 160, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-      <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: 18, fontWeight: 600 }}>{value}</div>
-    </div>
-  );
-}
-
-function BoxPlot({ data = [], height = 200 }) {
-  if (!data || data.length === 0) return <div style={{ color: '#666' }}>No duration data</div>;
-
-  // Flatten values to compute global domain
-  const values = data.reduce((acc, d) => acc.concat([d.min, d.q1, d.median, d.q3, d.max]), []);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
-
-  const padding = { left: 80, right: 24, top: 12, bottom: 12 };
-  const innerWidth = 600; // we'll use viewBox to scale horizontally
-  const w = padding.left + innerWidth + padding.right;
-  const h = Math.max(height, data.length * 40) + padding.top + padding.bottom;
-
-  const rowHeight = (h - padding.top - padding.bottom) / data.length;
-  const boxHeight = Math.min(18, rowHeight * 0.6);
-
-  const xFor = (v) => {
-    if (maxVal === minVal) return padding.left + innerWidth / 2;
-    return padding.left + ((v - minVal) / (maxVal - minVal)) * innerWidth;
-  };
-
-  return (
-    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMinYMin meet">
-      {/* labels on left */}
-      {data.map((d, i) => {
-        const y = padding.top + i * rowHeight + rowHeight / 2;
-        const minX = xFor(d.min);
-        const q1X = xFor(d.q1);
-        const medX = xFor(d.median);
-        const q3X = xFor(d.q3);
-        const maxX = xFor(d.max);
-
-        return (
-          <g key={d.name}>
-            {/* workflow name */}
-            <text x={12} y={y + 5} fontSize={12} fill="#222">{d.name}</text>
-
-            {/* whisker line */}
-            <line x1={minX} x2={maxX} y1={y} y2={y} stroke="#888" strokeWidth={2} />
-
-            {/* caps */}
-            <line x1={minX} x2={minX} y1={y - 8} y2={y + 8} stroke="#888" strokeWidth={2} />
-            <line x1={maxX} x2={maxX} y1={y - 8} y2={y + 8} stroke="#888" strokeWidth={2} />
-
-            {/* box */}
-            <rect x={q1X} y={y - boxHeight / 2} width={Math.max(2, q3X - q1X)} height={boxHeight} fill="#2196f3" fillOpacity={0.15} stroke="#2196f3" />
-
-            {/* median */}
-            <line x1={medX} x2={medX} y1={y - boxHeight / 2} y2={y + boxHeight / 2} stroke="#2196f3" strokeWidth={2} />
-
-            {/* numeric labels on right */}
-            <text x={w - padding.right + 4} y={y + 5} fontSize={11} fill="#444">{d.median}s</text>
-          </g>
-        );
-      })}
-
-      {/* x-axis ticks */}
-      <g>
-        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-          const v = minVal + t * (maxVal - minVal);
-          const x = xFor(v);
-          return (
-            <g key={t}>
-              <line x1={x} x2={x} y1={h - padding.bottom} y2={h - padding.bottom + 6} stroke="#ccc" />
-              <text x={x} y={h - padding.bottom + 20} fontSize={11} textAnchor="middle" fill="#666">{Math.round(v)}</text>
-            </g>
-          );
-        })}
-      </g>
-    </svg>
   );
 }

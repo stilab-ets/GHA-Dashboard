@@ -1,4 +1,4 @@
-# Conception de l'API (v0.0.1)
+# Conception de l'API (v0.0.3)
 ## Tables des matières
 
 - **[Introduction](#introduction)**
@@ -120,7 +120,7 @@ Voir: [`AggregationData`](#aggregationdata).
 #### `AggregationData`
 ```ts
 {
-    runInfo: RunInfo
+    runsInfo: RunInfo
     aggregationPeriod: "day" | "month" | "week",
     periodStart: date,
     runs: int,
@@ -134,18 +134,19 @@ Voir: [`RunInfo`](#runinfo), [`StatusInfo`](#runinfo), [`TimeInfo`](#timeinfo).
 ```ts
 {
     repositoryName: string,
-    workflowName: string,
-    branch: string,
-    author: string,
+    workflowNames: string[],
+    branches: string[],
+    authors: string[],
 }
 ```
 
 ### `StatusInfo`
 ```ts
 {
-    sucesses: int,
+    numRuns: int,
+    successes: int,
     failures: int,
-    cancelled: int,
+    cancelled: int
 }
 ```
 

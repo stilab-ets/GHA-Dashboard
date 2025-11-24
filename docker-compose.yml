@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: gha-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-gha_dashboard}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/scripts/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gha-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gha-backend
+    environment:
+      # Flask
+      FLASK_APP: app.py
+      FLASK_RUN_HOST: 0.0.0.0
+      FLASK_RUN_PORT: 3000
+      FLASK_ENV: ${FLASK_ENV:-development}
+      FLASK_DEBUG: 1
+
+      # Database
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/gha_dashboard
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-gha_dashboard}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+
+      # GitHub
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend/app.py:/app/app.py
+      - ./backend/src:/app/src:ro
+      - ./backend/extraction:/app/extraction:ro
+      - ./backend/ghaminer:/app/ghaminer:ro
+      - ./backend/builds_features.csv:/app/builds_features.csv
+      #- ghaminer-tmp:/app/ghaminer/src/tmp
+      #- ghaminer-repos:/app/ghaminer/src/repos
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - gha-network
+    restart: unless-stopped
+    command: flask run --host=0.0.0.0 --port=3000
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: gha-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@gha.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - gha-network
+    profiles:
+      - dev
+
+networks:
+  gha-network:
+    driver: bridge
+    name: gha-network
+
+volumes:
+  postgres-data:
+    driver: local
+  pgadmin-data:
+    driver: local
+  ghaminer-tmp:
+    driver: local
+  ghaminer-repos:
+    driver: local
