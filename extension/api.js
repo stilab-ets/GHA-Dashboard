@@ -119,7 +119,8 @@ function filterExtractionData(data, filters, columnNames) {
 
     // Filtre actor
     if (!selectedActors.includes('all')) {
-      const actor = run[columnNames.actor];
+      const actorObj = run[columnNames.actor];
+      const actor = typeof actorObj === 'object' && actorObj !== null ? actorObj.login : actorObj;
       if (!selectedActors.includes(actor)) return false;
     }
 
@@ -393,11 +394,12 @@ function extractFilterOptionsFromData(extractionData) {
       branchesSet.add(String(branch));
     }
     
-    const actor = run[columnNames.actor];
-    if (actor && actor !== 'null' && actor !== 'undefined') {
-      actorsSet.add(String(actor));
-    }
-  });
+    const actorObj = run[columnNames.actor];
+      const actor = typeof actorObj === 'object' && actorObj !== null ? actorObj.login : actorObj;
+      if (actor && actor !== 'null' && actor !== 'undefined') {
+        actorsSet.add(String(actor));
+      }
+    });
   
   console.log(' Filter extraction complete:');
   console.log(`  - ${workflowsSet.size} unique workflows`);
