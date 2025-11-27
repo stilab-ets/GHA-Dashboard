@@ -4,8 +4,8 @@
   "description": "Dashboard for monitoring GitHub Actions workflows metrics.",
   "manifest_version": 3,
 
-  "permissions": ["storage", "tabs", "scripting"],
-  "host_permissions": ["https://github.com/*"],
+  "permissions": ["storage", "tabs", "scripting", "webRequest", "webRequestBlocking"],
+  "host_permissions": ["https://github.com/*", "http://localhost:3000/*"],
 
   "background": {
     "service_worker": "background.js"

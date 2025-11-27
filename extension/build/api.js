@@ -481,48 +481,31 @@ export async function fetchDashboardData(filters = {}) {
     console.log(` Loading dashboard data for: ${requestedRepo}`);
     console.log(`Applied filters:`, filters);
     
-    // Récupérer les données d'extraction complètes
-    const extractionData = await fetchFullExtractionData(requestedRepo);
-    
-    if (!extractionData || extractionData.length === 0) {
-      console.warn(' No extraction data available');
-      return getMockDashboardData(filters);
-    }
+       // 1) Sync server BD with latest GitHub runs
+    console.log(` [Sync] Running /api/sync for ${requestedRepo}...`);
+    await fetch(
+      `http://localhost:3000/api/sync?repo=${encodeURIComponent(requestedRepo)}`,
+      { method: "POST" }
+    );
 
-    // Extraire les options de filtres
-    const filterOptions = extractFilterOptionsFromData(extractionData);
-    
-    if (!filterOptions) {
-      console.warn(' Could not extract filter options');
-      return getMockDashboardData(filters);
-    }
+    // 2) Open WebSocket to get aggregated data
+    console.log("Opening WebSocket...");
+    const wsData = await fetchDashboardDataViaWebSocket(requestedRepo, filters);
 
-    //  Filtrer les données selon les filtres sélectionnés
-    const filteredData = filterExtractionData(extractionData, filters, filterOptions.columnNames);
-    console.log(` Filtered to ${filteredData.length} runs (from ${extractionData.length} total)`);
-
-    //  Générer les graphiques depuis les données filtrées
-    const chartData = generateChartsFromRealData(filteredData, filterOptions.columnNames);
-    
-    if (!chartData) {
-      console.warn(' No chart data generated');
-      return getMockDashboardData(filters);
-    }
+    console.log("WebSocket dashboard data received:", wsData);
 
     return {
       repo: requestedRepo,
-      ...chartData,
-      stdDeviation: 35,
-      workflows: filterOptions.workflows,
-      branches: filterOptions.branches,
-      actors: filterOptions.actors
+      ...wsData,
+      stdDeviation: wsData.stdDeviation ?? 35
     };
-    
+
   } catch (error) {
-    console.error(' Error fetching from backend:', error);
+    console.error(" Dashboard error:", error);
     return getMockDashboardData(filters);
   }
 }
+  
 
 function getMockDashboardData(filters = {}) {
   console.warn(' Using fallback mock data');
