@@ -27,7 +27,12 @@
     console.log(" [ContentScript] Detected repo:", repo);
 
     if (repo && chrome.runtime) {
-      chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });
+      try {
+        chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });
+      } catch (e) {
+        console.error("[GHA Dashboard] Extension context invalidated:", e);
+        window.location.reload();
+      }
     }
   })();
 
@@ -233,7 +238,15 @@
     `;
     iframe.setAttribute('scrolling', 'no');
     
-    const dashboardUrl = chrome.runtime.getURL('dashboard.html');
+    let dashboardUrl;
+    try {
+      dashboardUrl = chrome.runtime.getURL('dashboard.html');
+    } catch (e) {
+      console.error("[GHA Dashboard] Extension context invalidated:", e);
+      // Force a hard refresh like F5
+      window.location.reload();
+      return;
+    }
     iframe.src = dashboardUrl;
 
     // Dynamically resize iframe to fit content and remove all scrollbars

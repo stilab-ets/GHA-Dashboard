@@ -348,6 +348,67 @@ function generateChartsFromRealData(filteredData, columnNames) {
     };
   });
 
+  // 9. Cumulative failed durations over time
+  let cumulativeFailedDuration = 0;
+  const failedDurationsOverTime = runsOverTime.map(day => {
+    const failedRuns = filteredData.filter(r => new Date(r[columnNames.created_at]).toISOString().split('T')[0] === day.date && r[columnNames.conclusion] === 'failure');
+    const failedDuration = failedRuns.reduce((sum, r) => sum + (parseFloat(r[columnNames.build_duration]) || 0), 0);
+    cumulativeFailedDuration += failedDuration;
+    return {
+      date: day.date,
+      cumulativeFailedDuration: Math.round(cumulativeFailedDuration)
+    };
+  });
+
+  // 10. Workflow success failure
+  const workflowSuccessFailure = topWorkflows.map(w => ({
+    workflow: w.name,
+    successes: w.success,
+    failures: w.runs - w.success
+  }));
+
+  // 11. Individual durations for scatter plot
+  const individualDurations = filteredData.map(run => ({
+    date: new Date(run[columnNames.created_at]).toISOString().split('T')[0],
+    duration: parseFloat(run[columnNames.build_duration]) || 0,
+    workflow: run[columnNames.workflow],
+    conclusion: run[columnNames.conclusion]
+  })).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // 12. Top failed workflows (now includes cancelled as issues)
+  const failedWorkflowStats = {};
+  filteredData.forEach(run => {
+    // Check for various failure/issue-related conclusion values
+    const conclusion = run[columnNames.conclusion];
+    const isIssue = conclusion === 'failure' || conclusion === 'failed' || conclusion === 'error' || 
+                   conclusion === 'timed_out' || conclusion === 'action_required' || conclusion === 'cancelled';
+    
+    if (isIssue) {
+      const workflow = run[columnNames.workflow];
+      if (!failedWorkflowStats[workflow]) {
+        failedWorkflowStats[workflow] = { failures: 0, totalRuns: 0 };
+      }
+      failedWorkflowStats[workflow].failures++;
+    }
+    // Count total runs for failure rate calculation
+    const workflow = run[columnNames.workflow];
+    if (!failedWorkflowStats[workflow]) {
+      failedWorkflowStats[workflow] = { failures: 0, totalRuns: 0 };
+    }
+    failedWorkflowStats[workflow].totalRuns++;
+  });
+
+  const topFailedWorkflows = Object.entries(failedWorkflowStats)
+    .filter(([, stats]) => stats.failures > 0) // Only include workflows with issues
+    .sort(([, a], [, b]) => b.failures - a.failures)
+    .slice(0, 10)
+    .map(([name, stats]) => ({
+      name,
+      failures: stats.failures,
+      totalRuns: stats.totalRuns,
+      failureRate: stats.totalRuns > 0 ? parseFloat(((stats.failures / stats.totalRuns) * 100).toFixed(2)) : 0
+    }));
+
   return {
     totalRuns,
     successRate,
@@ -360,7 +421,11 @@ function generateChartsFromRealData(filteredData, columnNames) {
     durationBox,
     failureRateOverTime,
     branchComparison,
-    spikes
+    spikes,
+    failedDurationsOverTime,
+    workflowSuccessFailure,
+    individualDurations,
+    topFailedWorkflows
   };
 }
 
@@ -546,6 +611,8 @@ function getMockDashboardData(filters = {}) {
     failureRateOverTime: [],
     branchComparison: [],
     spikes: [],
+    failedDurationsOverTime: [],
+    workflowSuccessFailure: [],
     workflows: ['all'],
     branches: ['all'],
     actors: ['all']
