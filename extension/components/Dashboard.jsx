@@ -13,7 +13,11 @@ import {
   Pie,
   Cell,
   Legend,
-  ComposedChart
+  ComposedChart,
+  BarChart,
+  Bar,
+  ScatterChart,
+  Scatter
 } from 'recharts';
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3'];
@@ -111,6 +115,10 @@ export default function Dashboard() {
     runsOverTime = [], 
     statusBreakdown = [], 
     branchComparison = [],
+    durationBox = [],
+    failedDurationsOverTime = [],
+    workflowSuccessFailure = [],
+    individualDurations = [],
     workflows = [],
     branches = [],
     actors = []
@@ -449,25 +457,67 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* UC-06: Duration chart */}
+          {/* UC-06: Duration variability chart */}
           <div className="card">
             <h3>Duration variability over time</h3>
-            <p className="chart-description">Median duration with min/max range visualization</p>
+            <p className="chart-description">Individual run durations over time</p>
             <ResponsiveContainer width="100%" height={320}>
-              <ComposedChart data={runsOverTime} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <ScatterChart data={individualDurations} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#122" />
                 <XAxis dataKey="date" stroke="#bcd" />
                 <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
-                <Tooltip content={<DurationTooltip />} />
+                <Tooltip content={<IndividualDurationTooltip />} />
+                <Scatter dataKey="duration" fill="#2196f3" />
+              </ScatterChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Workflow durations boxplot */}
+          <div className="card">
+            <h3>Workflow Durations</h3>
+            <p className="chart-description">Median duration for each workflow</p>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={durationBox} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                <XAxis dataKey="name" stroke="#bcd" />
+                <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
+                <Tooltip />
                 <Legend />
-                {/* High-low lines (min to max) */}
-                <Line type="monotone" dataKey="maxDuration" stroke="#ff9800" strokeWidth={1} dot={false} name="Max duration" />
-                <Line type="monotone" dataKey="minDuration" stroke="#4caf50" strokeWidth={1} dot={false} name="Min duration" />
-                {/* Median duration line */}
-                <Line type="monotone" dataKey="medianDuration" stroke="#2196f3" strokeWidth={3} dot={{ r: 4 }} name="Median duration" />
-                {/* Average duration as reference */}
-                <Line type="monotone" dataKey="avgDuration" stroke="#9c27b0" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Average duration" />
-              </ComposedChart>
+                <Bar dataKey="median" fill="#2196f3" name="Median duration" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Cumulative failed durations */}
+          <div className="card">
+            <h3>Cumulative Failed Durations</h3>
+            <p className="chart-description">Accumulated duration of failed runs over time</p>
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={failedDurationsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                <XAxis dataKey="date" stroke="#bcd" />
+                <YAxis stroke="#bcd" label={{ value: 'Cumulative Duration (s)', angle: -90, position: 'insideLeft' }} />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="cumulativeFailedDuration" stroke="#f44336" strokeWidth={3} dot={{ r: 4 }} name="Cumulative failed duration" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Success/Failure per workflow */}
+          <div className="card">
+            <h3>Workflow Success/Failure</h3>
+            <p className="chart-description">Number of successes and failures for each workflow</p>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={workflowSuccessFailure} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                <XAxis dataKey="workflow" stroke="#bcd" />
+                <YAxis stroke="#bcd" />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="successes" fill="#4caf50" name="Successes" />
+                <Bar dataKey="failures" fill="#f44336" name="Failures" />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
@@ -509,6 +559,22 @@ function DurationTooltip({ active, payload, label }) {
         <p style={{ color: '#666', fontSize: '12px' }}>
           Range: {(data.maxDuration - data.minDuration).toFixed(1)}s
         </p>
+      </div>
+    );
+  }
+  return null;
+}
+
+function IndividualDurationTooltip({ active, payload, label }) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    
+    return (
+      <div className="custom-tooltip">
+        <p className="label">{`Date: ${data.date}`}</p>
+        <p style={{ color: '#2196f3', fontWeight: 'bold' }}>{`Duration: ${data.duration}s`}</p>
+        <p>{`Workflow: ${data.workflow}`}</p>
+        <p style={{ color: data.conclusion === 'success' ? '#4caf50' : '#f44336' }}>{`Status: ${data.conclusion}`}</p>
       </div>
     );
   }

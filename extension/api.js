@@ -348,6 +348,33 @@ function generateChartsFromRealData(filteredData, columnNames) {
     };
   });
 
+  // 9. Cumulative failed durations over time
+  let cumulativeFailedDuration = 0;
+  const failedDurationsOverTime = runsOverTime.map(day => {
+    const failedRuns = filteredData.filter(r => new Date(r[columnNames.created_at]).toISOString().split('T')[0] === day.date && r[columnNames.conclusion] === 'failure');
+    const failedDuration = failedRuns.reduce((sum, r) => sum + (parseFloat(r[columnNames.build_duration]) || 0), 0);
+    cumulativeFailedDuration += failedDuration;
+    return {
+      date: day.date,
+      cumulativeFailedDuration: Math.round(cumulativeFailedDuration)
+    };
+  });
+
+  // 10. Workflow success failure
+  const workflowSuccessFailure = topWorkflows.map(w => ({
+    workflow: w.name,
+    successes: w.success,
+    failures: w.runs - w.success
+  }));
+
+  // 11. Individual durations for scatter plot
+  const individualDurations = filteredData.map(run => ({
+    date: new Date(run[columnNames.created_at]).toISOString().split('T')[0],
+    duration: parseFloat(run[columnNames.build_duration]) || 0,
+    workflow: run[columnNames.workflow],
+    conclusion: run[columnNames.conclusion]
+  })).sort((a, b) => new Date(a.date) - new Date(b.date));
+
   return {
     totalRuns,
     successRate,
@@ -360,7 +387,10 @@ function generateChartsFromRealData(filteredData, columnNames) {
     durationBox,
     failureRateOverTime,
     branchComparison,
-    spikes
+    spikes,
+    failedDurationsOverTime,
+    workflowSuccessFailure,
+    individualDurations
   };
 }
 
@@ -546,6 +576,8 @@ function getMockDashboardData(filters = {}) {
     failureRateOverTime: [],
     branchComparison: [],
     spikes: [],
+    failedDurationsOverTime: [],
+    workflowSuccessFailure: [],
     workflows: ['all'],
     branches: ['all'],
     actors: ['all']
