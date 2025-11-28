@@ -2,7 +2,7 @@ import { fetchDashboardDataViaWebSocket } from './websocket.js';
 
 const API_CONFIG = {
   baseUrl: 'http://localhost:3000/api',
-  useWebSocket: false
+  useWebSocket: true
 };
 
 
@@ -95,7 +95,7 @@ function detectColumnNames(sampleRow) {
 /**
  * Filtre les données extraites selon les filtres sélectionnés
  */
-function filterExtractionData(data, filters, columnNames) {
+export function filterExtractionData(data, filters, columnNames) {
   const {
     workflow: selectedWorkflows = ['all'],
     branch: selectedBranches = ['all'],
@@ -146,7 +146,7 @@ export function getRepoFromStorage() {
 /**
  * Génère les données de graphiques depuis les vraies données filtrées
  */
-function generateChartsFromRealData(filteredData, columnNames) {
+export function generateChartsFromRealData(filteredData, columnNames) {
   if (!filteredData || filteredData.length === 0) {
     return null;
   }
@@ -368,7 +368,7 @@ function generateChartsFromRealData(filteredData, columnNames) {
 /**
  * Extrait dynamiquement les valeurs uniques depuis les données avec détection auto
  */
-function extractFilterOptionsFromData(extractionData) {
+export function extractFilterOptionsFromData(extractionData) {
   if (!extractionData || extractionData.length === 0) {
     console.warn(' No data provided for filter extraction');
     return null;
