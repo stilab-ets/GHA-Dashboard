@@ -127,8 +127,8 @@ def extraction_api():
 
     df = fetch_all_github_runs(repo, token)
 
-    # Nettoyage
-    df = df[[
+    # Nettoyage - sélectionner seulement les colonnes existantes
+    expected_columns = [
         "id",
         "name",
         "event",
@@ -143,17 +143,24 @@ def extraction_api():
         "path",
         "run_attempt",
         "workflow_id"
-    ]]
+    ]
+    df = df[[col for col in expected_columns if col in df.columns]]
 
-    df.rename(columns={
-        "id": "id_build",
-        "name": "workflow_name",
-        "head_branch": "branch",
-    }, inplace=True)
+    # Renommer les colonnes si elles existent
+    rename_dict = {}
+    if "id" in df.columns:
+        rename_dict["id"] = "id_build"
+    if "name" in df.columns:
+        rename_dict["name"] = "workflow_name"
+    if "head_branch" in df.columns:
+        rename_dict["head_branch"] = "branch"
+    df.rename(columns=rename_dict, inplace=True)
 
-    # Convertir timestamps
-    df["created_at"] = pd.to_datetime(df["created_at"])
-    df["updated_at"] = pd.to_datetime(df["updated_at"])
+    # Convertir timestamps si les colonnes existent
+    if "created_at" in df.columns:
+        df["created_at"] = pd.to_datetime(df["created_at"])
+    if "updated_at" in df.columns:
+        df["updated_at"] = pd.to_datetime(df["updated_at"])
 
     data_dict = df.to_dict(orient="records")
 

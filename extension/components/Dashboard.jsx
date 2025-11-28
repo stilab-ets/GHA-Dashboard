@@ -13,6 +13,8 @@ import {
   PieChart,
   Pie,
   Cell,
+  Legend,
+  ComposedChart,
   BarChart,
   Bar,
   Legend,
@@ -246,6 +248,10 @@ export default function Dashboard() {
   
   if (error) return <div className="dashboard dark container" style={{ color: 'var(--accent)' }}>{error}</div>;
   if (!data) return null;
+  if (data.noData) return <div className="dashboard dark container" style={{ textAlign: 'center', padding: '2rem' }}>
+    <h2>No Data Available</h2>
+    <p>{data.message}</p>
+  </div>;
 
   const { 
     runsOverTime = [], 
