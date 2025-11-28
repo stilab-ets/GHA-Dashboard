@@ -1,39 +1,7 @@
-import { fetchDashboardDataViaWebSocket } from './websocket.js';
-
 const API_CONFIG = {
   baseUrl: 'http://localhost:3000/api',
   useWebSocket: true
 };
-
-
-/**
- * Extraire le repo depuis l'URL de la page GitHub actuelle
- */
-function extractRepoFromCurrentPage() {
-  try {
-    return new Promise((resolve) => {
-      if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.get(['currentRepo'], (result) => {
-          if (result.currentRepo) {
-            console.log(` Using repo from storage: ${result.currentRepo}`);
-            resolve(result.currentRepo);
-          } else {
-            const repo = extractRepoFromURL(window.location.href);
-            console.log(` Extracted repo from URL: ${repo}`);
-            resolve(repo); 
-          }
-        });
-      } else {
-        const repo = extractRepoFromURL(window.location.href);
-        console.log(` Extracted repo from URL (no chrome): ${repo}`);
-        resolve(repo); 
-      }
-    });
-  } catch (error) {
-    console.error('Error extracting repo:', error);
-    return Promise.resolve(null);
-  }
-}
 
 function extractRepoFromURL(url) {
   try {
@@ -477,33 +445,6 @@ export function extractFilterOptionsFromData(extractionData) {
     actors: ['all', ...Array.from(actorsSet).sort()],
     columnNames
   };
-}
-
-async function fetchMetrics(repo) {
-  try {
-    console.log(` Fetching metrics for ${repo}...`);
-    
-    const response = await fetch(
-      `${API_CONFIG.baseUrl}/github-metrics?repo=${encodeURIComponent(repo)}`,
-      {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`HTTP ${response.status}: ${JSON.stringify(errorData)}`);
-    }
-    
-    const data = await response.json();
-    console.log(' Metrics fetched from backend:', data);
-    return data;
-    
-  } catch (error) {
-    console.error(' Failed to fetch metrics from backend:', error);
-    throw error;
-  }
 }
 
 async function fetchFullExtractionData(repo) {

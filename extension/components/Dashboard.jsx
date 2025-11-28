@@ -17,8 +17,6 @@ import {
   ComposedChart,
   BarChart,
   Bar,
-  Legend,
-  ComposedChart,
   Area
 } from 'recharts';
 
