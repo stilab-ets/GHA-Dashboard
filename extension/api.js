@@ -486,7 +486,11 @@ export async function fetchDashboardData(filters = {}) {
     
     if (!extractionData || extractionData.length === 0) {
       console.warn(' No extraction data available');
-      return getMockDashboardData(filters);
+      return {
+        repo: requestedRepo,
+        noData: true,
+        message: 'No workflow runs found for this repository. Please ensure the repository has GitHub Actions workflows and try again.'
+      };
     }
 
     // Extraire les options de filtres

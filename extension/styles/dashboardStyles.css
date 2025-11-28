@@ -83,10 +83,6 @@
 }
 
 /* Card that spans 2 columns */
-.card-span-2 {
-    grid-column: span 2;
-}
-
 .card h3 { margin-top: 0; margin-bottom: 12px; font-size: 16px; }
 
 @media (max-width: 900px) {
@@ -327,10 +323,6 @@ html, body {
 @media (max-width: 900px) {
     .dashboard-grid { 
         grid-template-columns: 1fr; 
-    }
-    
-    .card-span-2 {
-        grid-column: span 1;
     }
     
     .filter-row { 

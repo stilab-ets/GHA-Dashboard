@@ -12,8 +12,6 @@ import {
   PieChart,
   Pie,
   Cell,
-  BarChart,
-  Bar,
   Legend,
   ComposedChart
 } from 'recharts';
@@ -104,6 +102,10 @@ export default function Dashboard() {
   if (loading) return <div className="dashboard dark container">Loading...</div>;
   if (error) return <div className="dashboard dark container" style={{ color: 'var(--accent)' }}>{error}</div>;
   if (!data) return null;
+  if (data.noData) return <div className="dashboard dark container" style={{ textAlign: 'center', padding: '2rem' }}>
+    <h2>No Data Available</h2>
+    <p>{data.message}</p>
+  </div>;
 
   const { 
     runsOverTime = [], 
@@ -428,24 +430,6 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
-          </div>
-
-          {/* UC-03: Branch comparison chart */}
-          <div className="card card-span-2">
-            <h3>Branch performance comparison</h3>
-            <p className="chart-description">Success rate and median duration by branch</p>
-            <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={branchData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis dataKey="displayBranch" stroke="#bcd" angle={-15} textAnchor="end" height={80} />
-                <YAxis yAxisId="left" stroke="#bcd" label={{ value: 'Success %', angle: -90, position: 'insideLeft' }} />
-                <YAxis yAxisId="right" orientation="right" stroke="#bcd" label={{ value: 'Duration (s)', angle: 90, position: 'insideRight' }} />
-                <Tooltip />
-                <Legend />
-                <Bar yAxisId="left" dataKey="successRate" fill="#4caf50" name="Success rate %" />
-                <Bar yAxisId="right" dataKey="medianDuration" fill="#2196f3" name="Median duration (s)" />
-              </BarChart>
-            </ResponsiveContainer>
           </div>
 
           {/* UC-01: Daily runs breakdown */}
