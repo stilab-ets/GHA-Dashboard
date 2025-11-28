@@ -633,34 +633,48 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* Cumulative failure duration */}
+{/* Cumulative failure duration */}
           <div className="card">
             <h3>Cumulative failure duration</h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <ComposedChart data={failureDurationOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis dataKey="date" stroke="#bcd" />
-                <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="dailyFailureDuration" fill="#f44336" name="Daily failure duration" />
-                <Line type="monotone" dataKey="cumulativeFailureDuration" stroke="#ff9800" strokeWidth={2} name="Cumulative" />
-              </ComposedChart>
-            </ResponsiveContainer>
+            {failureDurationOverTime && failureDurationOverTime.length > 0 && 
+             failureDurationOverTime.some(item => (item.dailyFailureDuration || 0) > 0 || (item.cumulativeFailureDuration || 0) > 0) ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <ComposedChart data={failureDurationOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                  <XAxis dataKey="date" stroke="#bcd" />
+                  <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="dailyFailureDuration" fill="#f44336" name="Daily failure duration" />
+                  <Line type="monotone" dataKey="cumulativeFailureDuration" stroke="#ff9800" strokeWidth={2} name="Cumulative" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                No workflows with failures in the selected period
+              </div>
+            )}
           </div>
 
           {/* Top failed workflows */}
           <div className="card">
             <h3>Top failed workflows</h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={topFailedWorkflows} layout="vertical" margin={{ top: 10, right: 20, left: 100, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis type="number" stroke="#bcd" />
-                <YAxis type="category" dataKey="name" stroke="#bcd" width={90} />
-                <Tooltip />
-                <Bar dataKey="failures" fill="#f44336" name="Failures" />
-              </BarChart>
-            </ResponsiveContainer>
+            {topFailedWorkflows && topFailedWorkflows.length > 0 && 
+             topFailedWorkflows.some(item => (item.failures || 0) > 0) ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={topFailedWorkflows} layout="vertical" margin={{ top: 10, right: 20, left: 100, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                  <XAxis type="number" stroke="#bcd" />
+                  <YAxis type="category" dataKey="name" stroke="#bcd" width={90} />
+                  <Tooltip />
+                  <Bar dataKey="failures" fill="#f44336" name="Failures" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                No workflows with failures in the selected period
+              </div>
+            )}
           </div>
         </div>
       </div>
