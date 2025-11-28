@@ -31,6 +31,7 @@
         chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });
       } catch (e) {
         console.error("[GHA Dashboard] Extension context invalidated:", e);
+        window.location.reload();
       }
     }
   })();
@@ -242,6 +243,8 @@
       dashboardUrl = chrome.runtime.getURL('dashboard.html');
     } catch (e) {
       console.error("[GHA Dashboard] Extension context invalidated:", e);
+      // Force a hard refresh like F5
+      window.location.reload();
       return;
     }
     iframe.src = dashboardUrl;

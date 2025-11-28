@@ -375,6 +375,40 @@ function generateChartsFromRealData(filteredData, columnNames) {
     conclusion: run[columnNames.conclusion]
   })).sort((a, b) => new Date(a.date) - new Date(b.date));
 
+  // 12. Top failed workflows (now includes cancelled as issues)
+  const failedWorkflowStats = {};
+  filteredData.forEach(run => {
+    // Check for various failure/issue-related conclusion values
+    const conclusion = run[columnNames.conclusion];
+    const isIssue = conclusion === 'failure' || conclusion === 'failed' || conclusion === 'error' || 
+                   conclusion === 'timed_out' || conclusion === 'action_required' || conclusion === 'cancelled';
+    
+    if (isIssue) {
+      const workflow = run[columnNames.workflow];
+      if (!failedWorkflowStats[workflow]) {
+        failedWorkflowStats[workflow] = { failures: 0, totalRuns: 0 };
+      }
+      failedWorkflowStats[workflow].failures++;
+    }
+    // Count total runs for failure rate calculation
+    const workflow = run[columnNames.workflow];
+    if (!failedWorkflowStats[workflow]) {
+      failedWorkflowStats[workflow] = { failures: 0, totalRuns: 0 };
+    }
+    failedWorkflowStats[workflow].totalRuns++;
+  });
+
+  const topFailedWorkflows = Object.entries(failedWorkflowStats)
+    .filter(([, stats]) => stats.failures > 0) // Only include workflows with issues
+    .sort(([, a], [, b]) => b.failures - a.failures)
+    .slice(0, 10)
+    .map(([name, stats]) => ({
+      name,
+      failures: stats.failures,
+      totalRuns: stats.totalRuns,
+      failureRate: stats.totalRuns > 0 ? parseFloat(((stats.failures / stats.totalRuns) * 100).toFixed(2)) : 0
+    }));
+
   return {
     totalRuns,
     successRate,
@@ -390,7 +424,8 @@ function generateChartsFromRealData(filteredData, columnNames) {
     spikes,
     failedDurationsOverTime,
     workflowSuccessFailure,
-    individualDurations
+    individualDurations,
+    topFailedWorkflows
   };
 }
 

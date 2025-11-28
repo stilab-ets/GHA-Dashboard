@@ -119,6 +119,7 @@ export default function Dashboard() {
     failedDurationsOverTime = [],
     workflowSuccessFailure = [],
     individualDurations = [],
+    topFailedWorkflows = [],
     workflows = [],
     branches = [],
     actors = []
@@ -520,6 +521,30 @@ export default function Dashboard() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+
+          {/* Top Failed Workflows */}
+          <div className="card">
+            <h3>Top Problematic Workflows</h3>
+            <p className="chart-description">Workflows with the most failures and cancellations in the selected period</p>
+            {topFailedWorkflows.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+                No problematic workflows found in the selected period
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart 
+                  data={topFailedWorkflows} 
+                  margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                  <XAxis dataKey="name" stroke="#bcd" />
+                  <YAxis stroke="#bcd" />
+                  <Tooltip content={<FailedWorkflowTooltip />} />
+                  <Bar dataKey="failures" fill="#f44336" name="Issues" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -575,6 +600,22 @@ function IndividualDurationTooltip({ active, payload, label }) {
         <p style={{ color: '#2196f3', fontWeight: 'bold' }}>{`Duration: ${data.duration}s`}</p>
         <p>{`Workflow: ${data.workflow}`}</p>
         <p style={{ color: data.conclusion === 'success' ? '#4caf50' : '#f44336' }}>{`Status: ${data.conclusion}`}</p>
+      </div>
+    );
+  }
+  return null;
+}
+
+function FailedWorkflowTooltip({ active, payload, label }) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    
+    return (
+      <div className="custom-tooltip">
+        <p className="label">{`Workflow: ${data.name}`}</p>
+        <p style={{ color: '#f44336', fontWeight: 'bold' }}>{`Issues: ${data.failures}`}</p>
+        <p>{`Total Runs: ${data.totalRuns}`}</p>
+        <p>{`Issue Rate: ${data.failureRate.toFixed(2)}%`}</p>
       </div>
     );
   }
