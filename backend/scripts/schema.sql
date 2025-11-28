@@ -16,13 +16,13 @@ COMMENT ON TABLE repositories IS 'Liste des repositories GitHub suivis';
 -- ============================================
 CREATE TABLE IF NOT EXISTS workflows (
     id SERIAL PRIMARY KEY,
-    workflow_id BIGINT UNIQUE NOT NULL,
+    workflow_id BIGINT UNIQUE,
     workflow_name VARCHAR(255) NOT NULL,
     repository_id INTEGER REFERENCES repositories(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     
-    CONSTRAINT workflows_unique UNIQUE (repository_id, workflow_id)
+    CONSTRAINT workflows_unique_name UNIQUE (repository_id, workflow_name)
 );
 
 COMMENT ON TABLE workflows IS 'Workflows GitHub Actions configurés pour chaque repository';

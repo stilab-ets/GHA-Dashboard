@@ -2,7 +2,7 @@ import { fetchDashboardDataViaWebSocket } from './websocket.js';
 
 const API_CONFIG = {
   baseUrl: 'http://localhost:3000/api',
-  useWebSocket: false
+  useWebSocket: true
 };
 
 
@@ -95,7 +95,7 @@ function detectColumnNames(sampleRow) {
 /**
  * Filtre les données extraites selon les filtres sélectionnés
  */
-function filterExtractionData(data, filters, columnNames) {
+export function filterExtractionData(data, filters, columnNames) {
   const {
     workflow: selectedWorkflows = ['all'],
     branch: selectedBranches = ['all'],
@@ -119,7 +119,8 @@ function filterExtractionData(data, filters, columnNames) {
 
     // Filtre actor
     if (!selectedActors.includes('all')) {
-      const actor = run[columnNames.actor];
+      const actorObj = run[columnNames.actor];
+      const actor = typeof actorObj === 'object' && actorObj !== null ? actorObj.login : actorObj;
       if (!selectedActors.includes(actor)) return false;
     }
 
@@ -145,7 +146,7 @@ export function getRepoFromStorage() {
 /**
  * Génère les données de graphiques depuis les vraies données filtrées
  */
-function generateChartsFromRealData(filteredData, columnNames) {
+export function generateChartsFromRealData(filteredData, columnNames) {
   if (!filteredData || filteredData.length === 0) {
     return null;
   }
@@ -432,7 +433,7 @@ function generateChartsFromRealData(filteredData, columnNames) {
 /**
  * Extrait dynamiquement les valeurs uniques depuis les données avec détection auto
  */
-function extractFilterOptionsFromData(extractionData) {
+export function extractFilterOptionsFromData(extractionData) {
   if (!extractionData || extractionData.length === 0) {
     console.warn(' No data provided for filter extraction');
     return null;
@@ -458,11 +459,12 @@ function extractFilterOptionsFromData(extractionData) {
       branchesSet.add(String(branch));
     }
     
-    const actor = run[columnNames.actor];
-    if (actor && actor !== 'null' && actor !== 'undefined') {
-      actorsSet.add(String(actor));
-    }
-  });
+    const actorObj = run[columnNames.actor];
+      const actor = typeof actorObj === 'object' && actorObj !== null ? actorObj.login : actorObj;
+      if (actor && actor !== 'null' && actor !== 'undefined') {
+        actorsSet.add(String(actor));
+      }
+    });
   
   console.log(' Filter extraction complete:');
   console.log(`  - ${workflowsSet.size} unique workflows`);

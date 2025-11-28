@@ -1,415 +1,373 @@
-const WS_CONFIG = {
-  baseUrl: 'ws://localhost:3000/data',
-  reconnectDelay: 3000,
-  maxReconnectAttempts: 3
-};
+// ============================================
+// WebSocket Client
+// ============================================
 
-/**
- * Classe pour gérer la connexion WebSocket avec le backend
- */
-class GHAWebSocketClient {
-  constructor(repo, options = {}) {
-    this.repo = repo;
-    this.options = {
-      aggregationPeriod: options.aggregationPeriod || 'month',
-      startDate: options.startDate || null,
-      endDate: options.endDate || null,
-      author: options.author || null,
-      branch: options.branch || null,
-      workflowName: options.workflowName || null
-    };
-    
-    this.ws = null;
-    this.reconnectAttempts = 0;
-    this.listeners = {
-      initialData: [],
-      newData: [],
-      complete: [],
-      error: [],
-      progress: []
-    };
-  }
+let _progressCallback = null;
+let _currentRepo = null;
+let _resolvePromise = null;
+let _allRuns = []; // Stockage de tous les runs bruts
 
-  /**
-   * Construit l'URL WebSocket avec les paramètres
-   */
-    buildWebSocketURL() {
-      const encodedRepo = encodeURIComponent(this.repo);
-      let url = `${WS_CONFIG.baseUrl}/${encodedRepo}`;
+// Ecouter les changements de chrome.storage
+if (typeof chrome !== 'undefined' && chrome.storage) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
     
-      const params = [];
-    
-      if (this.options.aggregationPeriod) {
-        params.push(`aggregationPeriod=${encodeURIComponent(this.options.aggregationPeriod)}`);
-      }
-      if (this.options.startDate) {
-        const startDateOnly = this.options.startDate.split('T')[0];
-        params.push(`startDate=${encodeURIComponent(startDateOnly)}`);
-      }
-      if (this.options.endDate) {
-        const endDateOnly = this.options.endDate.split('T')[0];
-        params.push(`endDate=${encodeURIComponent(endDateOnly)}`);
-      }
-      if (this.options.author) {
-        params.push(`author=${encodeURIComponent(this.options.author)}`);
-      }
-      if (this.options.branch) {
-        params.push(`branch=${encodeURIComponent(this.options.branch)}`);
-      }
-      if (this.options.workflowName) {
-        params.push(`workflowName=${encodeURIComponent(this.options.workflowName)}`);
-      }
+    // Changement de runs
+    if (changes.wsRuns && _progressCallback && _currentRepo) {
+      const newRuns = changes.wsRuns.newValue || [];
+      _allRuns = newRuns;
       
-      if (params.length > 0) {
-        url += '?' + params.join('&');
-      }
-      
-      return url;
+      // Convertir en format dashboard (sans filtres pour l'instant)
+      const dashboardData = convertRunsToDashboard(newRuns, _currentRepo, null);
+      _progressCallback(dashboardData, false);
     }
-
-  /**
-   * Démarre la connexion WebSocket
-   */
-  connect() {
-    return new Promise((resolve, reject) => {
-      const url = this.buildWebSocketURL();
-      console.log(`🔌 Connecting to WebSocket: ${url}`);
+    
+    // Changement de statut
+    if (changes.wsStatus) {
+      const status = changes.wsStatus.newValue || {};
       
-      try {
-        this.ws = new WebSocket(url);
-        
-        this.ws.onopen = () => {
-          console.log('✅ WebSocket connected');
-          this.reconnectAttempts = 0;
-          resolve();
-        };
-        
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event.data);
-        };
-        
-        this.ws.onerror = (error) => {
-          console.error('❌ WebSocket error:', error);
-          this.emit('error', error);
-          reject(error);
-        };
-        
-        this.ws.onclose = (event) => {
-          console.log(`🔌 WebSocket closed: ${event.code} - ${event.reason}`);
+      if (status.isComplete && _resolvePromise) {
+        chrome.storage.local.get(['wsRuns'], (result) => {
+          const finalRuns = result.wsRuns || [];
+          _allRuns = finalRuns;
           
-          if (event.code === 1000) {
-            // Normal closure - extraction terminée
-            console.log('✅ Extraction completed');
-            this.emit('complete');
-          } else {
-            // Erreur ou fermeture anormale
-            this.handleReconnect();
+          const dashboardData = convertRunsToDashboard(finalRuns, _currentRepo, null);
+          
+          if (_progressCallback) {
+            _progressCallback(dashboardData, true);
           }
-        };
-        
-      } catch (error) {
-        console.error('❌ Failed to create WebSocket:', error);
-        reject(error);
-      }
-    });
-  }
-
-  /**
-   * Gère les messages reçus du serveur
-   */
-  handleMessage(data) {
-    try {
-      const message = JSON.parse(data);
-      console.log('📨 WebSocket message:', message);
-      
-      switch (message.type) {
-        case 'initialData':
-          this.emit('initialData', message.data);
-          break;
           
-        case 'newData':
-          this.emit('newData', message.data);
-          this.emit('progress', {
-            message: 'Receiving new data...',
-            data: message.data
-          });
-          break;
-          
-        default:
-          console.warn('⚠️ Unknown message type:', message.type);
-      }
-      
-    } catch (error) {
-      console.error('❌ Error parsing WebSocket message:', error);
-      this.emit('error', error);
-    }
-  }
-
-  /**
-   * Gère la reconnexion automatique
-   */
-  handleReconnect() {
-    if (this.reconnectAttempts < WS_CONFIG.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(`🔄 Reconnecting (attempt ${this.reconnectAttempts}/${WS_CONFIG.maxReconnectAttempts})...`);
-      
-      setTimeout(() => {
-        this.connect().catch(error => {
-          console.error('❌ Reconnection failed:', error);
+          if (_resolvePromise) {
+            _resolvePromise(dashboardData);
+            _resolvePromise = null;
+          }
         });
-      }, WS_CONFIG.reconnectDelay);
-    } else {
-      console.error('❌ Max reconnection attempts reached');
-      this.emit('error', new Error('Max reconnection attempts reached'));
+      }
+      
+      if (status.error) {
+        console.error('[WebSocket] Error:', status.error);
+      }
     }
-  }
-
-  /**
-   * Enregistre un listener pour un événement
-   */
-  on(event, callback) {
-    if (this.listeners[event]) {
-      this.listeners[event].push(callback);
-    }
-  }
-
-  /**
-   * Émet un événement à tous les listeners
-   */
-  emit(event, data) {
-    if (this.listeners[event]) {
-      this.listeners[event].forEach(callback => {
-        try {
-          callback(data);
-        } catch (error) {
-          console.error(`❌ Error in ${event} listener:`, error);
-        }
-      });
-    }
-  }
-
-  /**
-   * Ferme la connexion WebSocket
-   */
-  close() {
-    if (this.ws) {
-      console.log('🔌 Closing WebSocket connection');
-      this.ws.close(1000, 'Client closed connection');
-      this.ws = null;
-    }
-  }
-}
-
-/**
- * Fonction helper pour extraire des données via WebSocket
- * Retourne une Promise qui se résout avec toutes les données agrégées
- */
-export async function extractDataViaWebSocket(repo, options = {}) {
-  return new Promise((resolve, reject) => {
-    const client = new GHAWebSocketClient(repo, options);
-    const allData = [];
-    
-    client.on('initialData', (data) => {
-      console.log(`📊 Received initial data: ${data.length} items`);
-      allData.push(...data);
-    });
-    
-    client.on('newData', (data) => {
-      console.log('📊 Received new data item');
-      allData.push(data);
-    });
-    
-    client.on('complete', () => {
-      console.log(`✅ Extraction complete! Total items: ${allData.length}`);
-      resolve(allData);
-    });
-    
-    client.on('error', (error) => {
-      console.error('❌ WebSocket extraction error:', error);
-      reject(error);
-    });
-    
-    // Démarrer la connexion
-    client.connect().catch(reject);
   });
 }
 
-/**
- * Fonction pour extraire et formater les données pour le dashboard
- */
-export async function fetchDashboardDataViaWebSocket(repo, filters = {}) {
-  try {
-    console.log(`🚀 Starting WebSocket extraction for ${repo}`);
-    
-    const options = {
-      aggregationPeriod: 'day',
-      startDate: filters.start || null,
-      endDate: filters.end || null,
-      branch: filters.branch && !filters.branch.includes('all') ? filters.branch[0] : null,
-      author: filters.actor && !filters.actor.includes('all') ? filters.actor[0] : null,
-      workflowName: filters.workflow && !filters.workflow.includes('all') ? filters.workflow[0] : null
-    };
-    
-    const rawData = await extractDataViaWebSocket(repo, options);
-    
-    // Convertir les données agrégées au format attendu par le dashboard
-    const dashboardData = convertWebSocketDataToDashboard(rawData, repo);
-    
-    console.log('✅ Dashboard data ready from WebSocket:', dashboardData);
-    return dashboardData;
-    
-  } catch (error) {
-    console.error('❌ WebSocket extraction failed:', error);
-    throw error;
+// ============================================
+// Filtrer les runs localement
+// ============================================
+export function filterRunsLocally(filters) {
+  if (!_allRuns || _allRuns.length === 0) {
+    return null;
   }
+  
+  return convertRunsToDashboard(_allRuns, _currentRepo, filters);
 }
 
-/**
- * Convertit les données WebSocket au format Dashboard
- */
-function convertWebSocketDataToDashboard(aggregatedData, repo) {
-  if (!aggregatedData || aggregatedData.length === 0) {
+// ============================================
+// Convertir les runs bruts en format Dashboard
+// ============================================
+function convertRunsToDashboard(runs, repo, filters) {
+  if (!runs || runs.length === 0) {
     return {
-      repo: `${repo} (No data)`,
+      repo,
       totalRuns: 0,
       successRate: 0,
-      failureRate: 0,
-      avgDuration: 0,
       medianDuration: 0,
       stdDeviation: 0,
       runsOverTime: [],
       statusBreakdown: [],
-      topWorkflows: [],
-      durationBox: [],
-      failureRateOverTime: [],
       branchComparison: [],
-      spikes: [],
+      workflowStats: [],
+      rawRuns: [],
       workflows: ['all'],
       branches: ['all'],
       actors: ['all']
     };
   }
+
+  // Collecter toutes les valeurs uniques avant filtrage
+  const allWorkflows = new Set();
+  const allBranches = new Set();
+  const allActors = new Set();
   
-  // Calculer les métriques globales
-  const totalRuns = aggregatedData.reduce((sum, item) => sum + item.statusInfo.numRuns, 0);
-  const totalSuccesses = aggregatedData.reduce((sum, item) => sum + item.statusInfo.successes, 0);
-  const totalFailures = aggregatedData.reduce((sum, item) => sum + item.statusInfo.failures, 0);
-  const totalCancelled = aggregatedData.reduce((sum, item) => sum + item.statusInfo.cancelled, 0);
+  runs.forEach(run => {
+    if (run.workflow_name) allWorkflows.add(run.workflow_name);
+    if (run.branch) allBranches.add(run.branch);
+    if (run.actor) allActors.add(run.actor);
+  });
+
+  // Appliquer les filtres si fournis
+  let filteredRuns = runs;
   
-  const successRate = totalRuns > 0 ? totalSuccesses / totalRuns : 0;
-  const failureRate = totalRuns > 0 ? totalFailures / totalRuns : 0;
+  if (filters) {
+    if (filters.workflow && !filters.workflow.includes('all')) {
+      filteredRuns = filteredRuns.filter(run => filters.workflow.includes(run.workflow_name));
+    }
+    if (filters.branch && !filters.branch.includes('all')) {
+      filteredRuns = filteredRuns.filter(run => filters.branch.includes(run.branch));
+    }
+    if (filters.actor && !filters.actor.includes('all')) {
+      filteredRuns = filteredRuns.filter(run => filters.actor.includes(run.actor));
+    }
+  }
+
+  // Calculer les stats sur les runs filtres
+  const totalRuns = filteredRuns.length;
+  const successRuns = filteredRuns.filter(r => r.conclusion === 'success').length;
+  const failureRuns = filteredRuns.filter(r => r.conclusion === 'failure').length;
+  const cancelledRuns = filteredRuns.filter(r => r.conclusion === 'cancelled').length;
   
-  // Calculer la durée moyenne
-  const avgDuration = aggregatedData.length > 0 
-    ? aggregatedData.reduce((sum, item) => sum + item.timeInfo.average, 0) / aggregatedData.length
+  const successRate = totalRuns > 0 ? successRuns / totalRuns : 0;
+  
+  // Calculer les durees
+  const durations = filteredRuns.map(r => r.duration || 0).filter(d => d > 0);
+  const sortedDurations = [...durations].sort((a, b) => a - b);
+  const medianDuration = sortedDurations.length > 0 
+    ? Math.round(sortedDurations[Math.floor(sortedDurations.length / 2)])
+    : 0;
+  const avgDuration = durations.length > 0
+    ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
     : 0;
   
-  const medianDuration = aggregatedData.length > 0
-    ? aggregatedData.reduce((sum, item) => sum + item.timeInfo.median, 0) / aggregatedData.length
-    : 0;
-  
-  // Construire runsOverTime
-  const runsOverTime = aggregatedData.map(item => ({
-    date: item.periodStart,
-    runs: item.statusInfo.numRuns,
-    successes: item.statusInfo.successes,
-    failures: item.statusInfo.failures,
-    avgDuration: Math.round(item.timeInfo.average),
-    medianDuration: Math.round(item.timeInfo.median),
-    minDuration: Math.round(item.timeInfo.min),
-    maxDuration: Math.round(item.timeInfo.max)
-  }));
-  
-  // Status breakdown
-  const statusBreakdown = [
-    { name: 'success', value: totalSuccesses },
-    { name: 'failure', value: totalFailures },
-    { name: 'cancelled', value: totalCancelled }
-  ];
-  
-  // Extraire les workflows uniques
-  const workflowsSet = new Set();
-  const branchesSet = new Set();
-  const actorsSet = new Set();
-  
-  aggregatedData.forEach(item => {
-    if (item.runsInfo) {
-      item.runsInfo.workflowNames?.forEach(w => workflowsSet.add(w));
-      item.runsInfo.branches?.forEach(b => branchesSet.add(b));
-      item.runsInfo.authors?.forEach(a => actorsSet.add(a));
+  // Calculer l'ecart-type
+  let stdDeviation = 0;
+  if (durations.length > 1) {
+    const mean = durations.reduce((a, b) => a + b, 0) / durations.length;
+    const squaredDiffs = durations.map(d => Math.pow(d - mean, 2));
+    stdDeviation = Math.round(Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / durations.length));
+  }
+
+  // Agreger par jour
+  const runsByDate = {};
+  filteredRuns.forEach(run => {
+    const date = run.created_at ? run.created_at.split('T')[0] : 'Unknown';
+    if (!runsByDate[date]) {
+      runsByDate[date] = { successes: 0, failures: 0, cancelled: 0, durations: [] };
+    }
+    if (run.conclusion === 'success') runsByDate[date].successes++;
+    else if (run.conclusion === 'failure') runsByDate[date].failures++;
+    else if (run.conclusion === 'cancelled') runsByDate[date].cancelled++;
+    
+    if (run.duration > 0) {
+      runsByDate[date].durations.push(run.duration);
     }
   });
+
+  const runsOverTime = Object.entries(runsByDate)
+    .map(([date, stats]) => {
+      const sorted = [...stats.durations].sort((a, b) => a - b);
+      return {
+        date,
+        runs: stats.successes + stats.failures + stats.cancelled,
+        successes: stats.successes,
+        failures: stats.failures,
+        cancelled: stats.cancelled,
+        avgDuration: stats.durations.length > 0 
+          ? Math.round(stats.durations.reduce((a, b) => a + b, 0) / stats.durations.length)
+          : 0,
+        medianDuration: sorted.length > 0 ? Math.round(sorted[Math.floor(sorted.length / 2)]) : 0,
+        minDuration: sorted.length > 0 ? Math.round(sorted[0]) : 0,
+        maxDuration: sorted.length > 0 ? Math.round(sorted[sorted.length - 1]) : 0
+      };
+    })
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // Stats par branche
+  const branchStats = {};
+  filteredRuns.forEach(run => {
+    const branch = run.branch || 'unknown';
+    if (!branchStats[branch]) {
+      branchStats[branch] = { totalRuns: 0, successes: 0, failures: 0, durations: [] };
+    }
+    branchStats[branch].totalRuns++;
+    if (run.conclusion === 'success') branchStats[branch].successes++;
+    else if (run.conclusion === 'failure') branchStats[branch].failures++;
+    if (run.duration > 0) branchStats[branch].durations.push(run.duration);
+  });
+
+  const branchComparison = Object.entries(branchStats)
+    .slice(0, 10)
+    .map(([branch, stats]) => ({
+      branch,
+      workflow: 'All',
+      totalRuns: stats.totalRuns,
+      successRate: stats.totalRuns > 0 ? Math.round((stats.successes / stats.totalRuns) * 100) : 0,
+      medianDuration: stats.durations.length > 0 
+        ? Math.round(stats.durations.sort((a, b) => a - b)[Math.floor(stats.durations.length / 2)])
+        : 0,
+      failures: stats.failures
+    }));
+
+  // Stats par workflow (pour boxplot et histogramme)
+  const workflowStats = {};
+  filteredRuns.forEach(run => {
+    const wf = run.workflow_name || 'unknown';
+    if (!workflowStats[wf]) {
+      workflowStats[wf] = { totalRuns: 0, successes: 0, failures: 0, durations: [] };
+    }
+    workflowStats[wf].totalRuns++;
+    if (run.conclusion === 'success') workflowStats[wf].successes++;
+    else if (run.conclusion === 'failure') workflowStats[wf].failures++;
+    if (run.duration > 0) workflowStats[wf].durations.push(run.duration);
+  });
+
+  const workflowStatsArray = Object.entries(workflowStats).map(([name, stats]) => {
+    const sorted = [...stats.durations].sort((a, b) => a - b);
+    const q1 = sorted.length > 0 ? sorted[Math.floor(sorted.length * 0.25)] : 0;
+    const median = sorted.length > 0 ? sorted[Math.floor(sorted.length * 0.5)] : 0;
+    const q3 = sorted.length > 0 ? sorted[Math.floor(sorted.length * 0.75)] : 0;
+    
+    return {
+      name,
+      totalRuns: stats.totalRuns,
+      successes: stats.successes,
+      failures: stats.failures,
+      successRate: stats.totalRuns > 0 ? Math.round((stats.successes / stats.totalRuns) * 100) : 0,
+      // Donnees pour boxplot
+      min: sorted.length > 0 ? Math.round(sorted[0]) : 0,
+      q1: Math.round(q1),
+      median: Math.round(median),
+      q3: Math.round(q3),
+      max: sorted.length > 0 ? Math.round(sorted[sorted.length - 1]) : 0,
+      durations: sorted.map(d => Math.round(d))
+    };
+  });
+
+  // Status breakdown
+  const statusBreakdown = [
+    { name: 'success', value: successRuns },
+    { name: 'failure', value: failureRuns },
+    { name: 'cancelled', value: cancelledRuns }
+  ];
+
+  // Top failed jobs
+  const failedRuns = filteredRuns.filter(r => r.conclusion === 'failure');
+  const failedByWorkflow = {};
+  failedRuns.forEach(run => {
+    const wf = run.workflow_name || 'unknown';
+    if (!failedByWorkflow[wf]) {
+      failedByWorkflow[wf] = 0;
+    }
+    failedByWorkflow[wf]++;
+  });
   
-  const workflows = ['all', ...Array.from(workflowsSet)];
-  const branches = ['all', ...Array.from(branchesSet)];
-  const actors = ['all', ...Array.from(actorsSet)];
-  
-  // Générer topWorkflows (estimation)
-  const topWorkflows = Array.from(workflowsSet).slice(0, 5).map(name => ({
-    name,
-    runs: Math.floor(totalRuns / workflowsSet.size),
-    success: Math.floor(totalSuccesses / workflowsSet.size),
-    avgDuration: Math.round(avgDuration),
-    medianDuration: Math.round(medianDuration)
-  }));
-  
-  // Duration box
-  const durationBox = topWorkflows.map(w => ({
-    name: w.name,
-    min: Math.round(medianDuration * 0.6),
-    q1: Math.round(medianDuration * 0.8),
-    median: Math.round(medianDuration),
-    q3: Math.round(medianDuration * 1.2),
-    max: Math.round(medianDuration * 1.5)
-  }));
-  
-  // Failure rate over time
-  const failureRateOverTime = runsOverTime.map(item => ({
-    date: item.date,
-    failureRate: item.runs > 0 ? (item.failures / item.runs) * 100 : 0,
-    avgFailureRate: failureRate * 100,
-    totalRuns: item.runs
-  }));
-  
-  // Branch comparison (mock pour l'instant)
-  const branchComparison = Array.from(branchesSet).slice(0, 5).map((branch, idx) => ({
-    branch,
-    workflow: Array.from(workflowsSet)[idx % workflowsSet.size] || 'CI',
-    totalRuns: Math.floor(totalRuns / branchesSet.size),
-    successRate: Math.round(successRate * 100),
-    avgDuration: Math.round(avgDuration),
-    medianDuration: Math.round(medianDuration),
-    failures: Math.floor(totalFailures / branchesSet.size)
-  }));
-  
-  // Spike detection
-  const spikes = runsOverTime.map(item => ({
-    ...item,
-    anomalyScore: null,
-    isAnomaly: false,
-    anomalyType: null,
-    anomalyDetail: null
-  }));
-  
+  const topFailedWorkflows = Object.entries(failedByWorkflow)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([name, count]) => ({ name, failures: count }));
+
+  // Cumul des durees des echecs
+  let cumulativeFailureDuration = 0;
+  const failureDurationOverTime = runsOverTime.map(day => {
+    const dayFailures = filteredRuns.filter(r => 
+      r.created_at?.startsWith(day.date) && r.conclusion === 'failure'
+    );
+    const dayFailureDuration = dayFailures.reduce((sum, r) => sum + (r.duration || 0), 0);
+    cumulativeFailureDuration += dayFailureDuration;
+    return {
+      date: day.date,
+      dailyFailureDuration: Math.round(dayFailureDuration),
+      cumulativeFailureDuration: Math.round(cumulativeFailureDuration)
+    };
+  });
+
   return {
     repo,
     totalRuns,
     successRate,
-    failureRate,
-    avgDuration: Math.round(avgDuration),
-    medianDuration: Math.round(medianDuration),
-    stdDeviation: 35, // TODO: calculer depuis les données
+    failureRate: totalRuns > 0 ? failureRuns / totalRuns : 0,
+    avgDuration,
+    medianDuration,
+    stdDeviation,
     runsOverTime,
     statusBreakdown,
-    topWorkflows,
-    durationBox,
-    failureRateOverTime,
     branchComparison,
-    spikes,
-    workflows,
-    branches,
-    actors
+    workflowStats: workflowStatsArray,
+    topFailedWorkflows,
+    failureDurationOverTime,
+    rawRuns: filteredRuns, // Pour les graphiques qui ont besoin des donnees individuelles
+    workflows: ['all', ...Array.from(allWorkflows).sort()],
+    branches: ['all', ...Array.from(allBranches).sort()],
+    actors: ['all', ...Array.from(allActors).sort()]
   };
 }
 
-export { GHAWebSocketClient };
+// ============================================
+// API Publique
+// ============================================
+
+export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgressCallback = null) {
+  return new Promise((resolve, reject) => {
+    _currentRepo = repo;
+    _progressCallback = onProgressCallback;
+    _resolvePromise = resolve;
+    _allRuns = [];
+    
+    chrome.runtime.sendMessage({
+      action: 'startWebSocketExtraction',
+      repo: repo,
+      filters: { start: filters.start, end: filters.end } // Seulement dates
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('[WebSocket] Error:', chrome.runtime.lastError);
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      
+      if (response?.cached) {
+        _allRuns = response.data;
+        const dashboardData = convertRunsToDashboard(response.data, repo, filters);
+        if (onProgressCallback) {
+          onProgressCallback(dashboardData, true);
+        }
+        resolve(dashboardData);
+        _resolvePromise = null;
+      } else {
+        // Timeout de securite (3 minutes)
+        setTimeout(() => {
+          if (_resolvePromise) {
+            chrome.storage.local.get(['wsRuns'], (result) => {
+              const data = result.wsRuns || [];
+              if (data.length > 0) {
+                _allRuns = data;
+                const dashboardData = convertRunsToDashboard(data, repo, filters);
+                resolve(dashboardData);
+              } else {
+                reject(new Error('WebSocket timeout'));
+              }
+              _resolvePromise = null;
+            });
+          }
+        }, 180000);
+      }
+    });
+  });
+}
+
+export function getWebSocketCacheStatus(repo) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({
+      action: 'getWebSocketCacheStatus',
+      repo: repo
+    }, (response) => {
+      resolve(response || { hasCache: false, itemCount: 0, isComplete: false });
+    });
+  });
+}
+
+export function clearWebSocketCache(repo = null) {
+  chrome.runtime.sendMessage({
+    action: 'clearWebSocketCache',
+    repo: repo
+  });
+  chrome.storage.local.remove(['wsRuns', 'wsStatus']);
+  _allRuns = [];
+}
+
+// Exporter pour utilisation dans Dashboard.jsx
+export function getAllRuns() {
+  return _allRuns;
+}
+
+export function getCurrentRepo() {
+  return _currentRepo;
+}

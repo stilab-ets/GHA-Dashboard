@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { fetchDashboardData } from '../api';
+import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, getAllRuns } from '../websocket';
 import '../styles/dashboardStyles.css';
 import {
   ResponsiveContainer,
@@ -16,13 +17,14 @@ import {
   ComposedChart,
   BarChart,
   Bar,
-  ScatterChart,
-  Scatter
+  Legend,
+  ComposedChart,
+  Area
 } from 'recharts';
 
-const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3'];
+const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3', '#9c27b0', '#00bcd4'];
+const USE_WEBSOCKET = true;
 
-// helper to format JS Date for <input type="datetime-local"> (YYYY-MM-DDTHH:MM)
 function formatDateForInput(d) {
   const pad = (n) => String(n).padStart(2, '0');
   const year = d.getFullYear();
@@ -34,8 +36,6 @@ function formatDateForInput(d) {
 }
 
 export default function Dashboard() {
-
-
   const getCurrentDefaults = () => {
     const now = new Date();
     const defaultEnd = formatDateForInput(now);
@@ -48,33 +48,39 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [progress, setProgress] = useState({ items: 0, complete: false, isStreaming: false });
   
-  // UC-02: Filter state
+  // Options disponibles pour les filtres
+  const [availableFilters, setAvailableFilters] = useState({
+    workflows: ['all'],
+    branches: ['all'],
+    actors: ['all']
+  });
+  
   const [filters, setFilters] = useState({
-    // store multi-selects as arrays; use ['all'] as sentinel meaning no filter
     workflow: ['all'],
     branch: ['all'],
     actor: ['all'],
-    // ISO-like local strings for datetime-local inputs
     start: defaultStart,
     end: defaultEnd
   });
 
-  // UC-02: Dropdown open/close state
+  // Track si les donnees initiales sont chargees
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const prevDatesRef = useRef({ start: defaultStart, end: defaultEnd });
+
   const [openDropdowns, setOpenDropdowns] = useState({
     workflow: false,
     branch: false,
     actor: false
   });
 
-  // Refs for dropdown containers to detect clicks outside
   const dropdownRefs = {
     workflow: useRef(null),
     branch: useRef(null),
     actor: useRef(null)
   };
 
-  // Handle clicks outside dropdowns to close them
   useEffect(() => {
     const handleClickOutside = (event) => {
       Object.keys(dropdownRefs).forEach(key => {
@@ -90,20 +96,156 @@ export default function Dashboard() {
     };
   }, []);
 
-  useEffect(() => {
-    fetchDashboardData(filters)
-      .then((d) => {
-        setData(d);
-        setLoading(false);
-      })
-      .catch((e) => {
-        console.error(e);
-        setError('Error loading data.');
-        setLoading(false);
+  // Charger les donnees (seulement quand les dates changent)
+  const loadDashboardData = async () => {
+    setLoading(true);
+    setError(null);
+    setProgress({ items: 0, complete: false, isStreaming: true });
+    setDataLoaded(false);
+    
+    try {
+      const repo = await new Promise((resolve) => {
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+          chrome.storage.local.get(['currentRepo'], (result) => {
+            resolve(result.currentRepo || 'facebook/react');
+          });
+        } else {
+          resolve('facebook/react');
+        }
       });
-  }, [filters]);
 
-  if (loading) return <div className="dashboard dark container">Loading...</div>;
+      if (USE_WEBSOCKET) {
+        clearWebSocketCache(repo);
+        
+        const onProgress = (partialData, isComplete) => {
+          // Sauvegarder les options de filtres
+          if (partialData.workflows && partialData.workflows.length > 1) {
+            setAvailableFilters({
+              workflows: partialData.workflows,
+              branches: partialData.branches || ['all'],
+              actors: partialData.actors || ['all']
+            });
+          }
+          
+          // Appliquer les filtres locaux
+          const filteredData = applyLocalFilters(partialData);
+          setData(filteredData);
+          
+          setProgress({ 
+            items: partialData.totalRuns || 0, 
+            complete: isComplete,
+            isStreaming: !isComplete
+          });
+          setLoading(false);
+          
+          if (isComplete) {
+            setDataLoaded(true);
+          }
+        };
+        
+        const wsFilters = {
+          start: filters.start,
+          end: filters.end
+        };
+        
+        await fetchDashboardDataViaWebSocket(repo, wsFilters, onProgress);
+        
+      } else {
+        const result = await fetchDashboardData(filters);
+        setData(result);
+        setLoading(false);
+        setDataLoaded(true);
+      }
+    } catch (err) {
+      console.error('Error loading dashboard data:', err);
+      setError('Error loading data: ' + err.message);
+      setLoading(false);
+      setProgress({ items: 0, complete: true, isStreaming: false });
+    }
+  };
+
+  // Appliquer les filtres locaux
+  const applyLocalFilters = (rawData) => {
+    if (!rawData) return rawData;
+    
+    // Si tous les filtres sont "all", retourner tel quel
+    if (filters.workflow.includes('all') && 
+        filters.branch.includes('all') && 
+        filters.actor.includes('all')) {
+      return rawData;
+    }
+    
+    // Utiliser la fonction de filtrage du websocket
+    const filtered = filterRunsLocally({
+      workflow: filters.workflow,
+      branch: filters.branch,
+      actor: filters.actor
+    });
+    
+    if (filtered) {
+      // Garder les options de filtres originales
+      return {
+        ...filtered,
+        workflows: rawData.workflows,
+        branches: rawData.branches,
+        actors: rawData.actors
+      };
+    }
+    
+    return rawData;
+  };
+
+  // Charger quand les DATES changent
+  useEffect(() => {
+    const datesChanged = prevDatesRef.current.start !== filters.start || 
+                         prevDatesRef.current.end !== filters.end;
+    
+    if (datesChanged || !dataLoaded) {
+      prevDatesRef.current = { start: filters.start, end: filters.end };
+      loadDashboardData();
+    }
+  }, [filters.start, filters.end]);
+
+  // Appliquer filtres quand workflow/branch/actor changent
+  useEffect(() => {
+    if (dataLoaded && getAllRuns().length > 0) {
+      const filtered = filterRunsLocally({
+        workflow: filters.workflow,
+        branch: filters.branch,
+        actor: filters.actor
+      });
+      
+      if (filtered) {
+        // Garder les options de filtres originales
+        setData(prev => ({
+          ...filtered,
+          workflows: availableFilters.workflows,
+          branches: availableFilters.branches,
+          actors: availableFilters.actors
+        }));
+      }
+    }
+  }, [filters.workflow, filters.branch, filters.actor, dataLoaded]);
+
+  if (loading && !data) {
+    return (
+      <div className="dashboard dark container">
+        <div style={{ textAlign: 'center', padding: '40px' }}>
+          <div className="spinner" style={{ 
+            border: '4px solid #f3f3f3',
+            borderTop: '4px solid #2196f3',
+            borderRadius: '50%',
+            width: '40px',
+            height: '40px',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 20px'
+          }}></div>
+          <p>Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+  
   if (error) return <div className="dashboard dark container" style={{ color: 'var(--accent)' }}>{error}</div>;
   if (!data) return null;
   if (data.noData) return <div className="dashboard dark container" style={{ textAlign: 'center', padding: '2rem' }}>
@@ -115,47 +257,32 @@ export default function Dashboard() {
     runsOverTime = [], 
     statusBreakdown = [], 
     branchComparison = [],
-    durationBox = [],
-    failedDurationsOverTime = [],
-    workflowSuccessFailure = [],
-    individualDurations = [],
+    workflowStats = [],
     topFailedWorkflows = [],
-    workflows = [],
-    branches = [],
-    actors = []
+    failureDurationOverTime = []
   } = data;
-  // compute percent for status breakdown so we can show it in the legend
+  
+  const { workflows, branches, actors } = availableFilters;
+  
   const totalStatus = statusBreakdown.reduce((sum, s) => sum + (s.value || 0), 0);
   const statusData = statusBreakdown.map(s => ({
     ...s,
     percent: totalStatus ? Math.round((s.value / totalStatus) * 100) : 0
   }));
   
-  // prepare branch comparison data with workflow information
-  const branchData = branchComparison.map(b => ({
-    ...b,
-    displayBranch: b.workflow ? `${b.workflow}/${b.branch}` : b.branch
-  }));
-  
-  // UC-02: Filter handlers
   const handleFilterChange = (filterType, value) => {
-    // For start/end we sanitize to ensure start <= end and neither is in the future
     if (filterType === 'start' || filterType === 'end') {
       const currentDefaults = getCurrentDefaults();
-      const nowStr = currentDefaults.defaultEnd; // formatted 'now' (updated in real-time)
+      const nowStr = currentDefaults.defaultEnd;
       let newStart = filterType === 'start' ? value : filters.start;
       let newEnd = filterType === 'end' ? value : filters.end;
 
-      // clamp to now
       if (newStart > nowStr) newStart = nowStr;
       if (newEnd > nowStr) newEnd = nowStr;
 
-      // ensure start <= end
       if (newStart > newEnd) {
-        // if user changed start to after end, move end forward to match start
         newEnd = newStart;
       } else if (newEnd < newStart) {
-        // if user changed end to before start, move start back to match end
         newStart = newEnd;
       }
 
@@ -166,7 +293,6 @@ export default function Dashboard() {
     setFilters(prev => ({ ...prev, [filterType]: value }));
   };
 
-  // checkbox-based multi-select toggler
   const toggleCheckbox = (filterType, value, checked) => {
     setFilters(prev => {
       const prevVals = Array.isArray(prev[filterType]) ? prev[filterType] : ['all'];
@@ -176,10 +302,8 @@ export default function Dashboard() {
         newVals = checked ? ['all'] : [];
       } else {
         if (checked) {
-          // add value, ensure 'all' removed
           newVals = Array.from(new Set([...prevVals.filter(v => v !== 'all'), value]));
         } else {
-          // remove value
           newVals = prevVals.filter(v => v !== value && v !== 'all');
         }
       }
@@ -192,11 +316,48 @@ export default function Dashboard() {
   return (
     <div className="dashboard dark">
       <div className="container">
+        {/* Indicateur de streaming */}
+        {progress.isStreaming && (
+          <div style={{ 
+            padding: '15px 20px', 
+            background: 'linear-gradient(90deg, #ff9800 0%, #f44336 100%)',
+            color: 'white',
+            borderRadius: '8px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div className="spinner" style={{ 
+                border: '3px solid rgba(255,255,255,0.3)',
+                borderTop: '3px solid white',
+                borderRadius: '50%',
+                width: '20px',
+                height: '20px',
+                animation: 'spin 1s linear infinite'
+              }}></div>
+              <span style={{ fontWeight: 600 }}>Streaming data from GitHub API...</span>
+            </div>
+            <span style={{ 
+              background: 'rgba(255,255,255,0.2)', 
+              padding: '4px 12px', 
+              borderRadius: '12px',
+              fontSize: '14px',
+              fontWeight: 700
+            }}>
+              {progress.items} runs received
+            </span>
+          </div>
+        )}
+
         <h2 style={{ marginTop: 0 }}>GitHub Actions Dashboard</h2>
-        {/* === FILTER PANEL === */}
+        
+        {/* Filter Panel */}
         <div className="filter-panel card">
           <div className="filter-row">
-            {/* WORKFLOW DROPDOWN */}
+            {/* Workflow */}
             <div className="filter-group">
               <label>Workflow</label>
               <div className="dropdown-container" ref={dropdownRefs.workflow}>
@@ -221,7 +382,7 @@ export default function Dashboard() {
                       />
                       <span>All workflows</span>
                     </label>
-                    {workflows.map(w => (
+                    {workflows.filter(w => w !== 'all').map(w => (
                       <label key={w} className="dropdown-item">
                         <input
                           type="checkbox"
@@ -236,7 +397,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* BRANCH DROPDOWN */}
+            {/* Branch */}
             <div className="filter-group">
               <label>Branch</label>
               <div className="dropdown-container" ref={dropdownRefs.branch}>
@@ -261,7 +422,7 @@ export default function Dashboard() {
                       />
                       <span>All branches</span>
                     </label>
-                    {branches.map(b => (
+                    {branches.filter(b => b !== 'all').map(b => (
                       <label key={b} className="dropdown-item">
                         <input
                           type="checkbox"
@@ -276,7 +437,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* ACTOR DROPDOWN */}
+            {/* Actor */}
             <div className="filter-group">
               <label>Actor</label>
               <div className="dropdown-container" ref={dropdownRefs.actor}>
@@ -301,7 +462,7 @@ export default function Dashboard() {
                       />
                       <span>All actors</span>
                     </label>
-                    {actors.map(a => (
+                    {actors.filter(a => a !== 'all').map(a => (
                       <label key={a} className="dropdown-item">
                         <input
                           type="checkbox"
@@ -316,7 +477,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* DATE PICKERS */}
+            {/* Dates */}
             <div className="filter-group">
               <label>Period start</label>
               <input
@@ -339,7 +500,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* === CORE STATS === */}
+        {/* Stats */}
         <div className="stats-row">
           <div className="stat-card card">
             <div className="title">Repository</div>
@@ -363,59 +524,44 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* === STATUS PIE === */}
+        {/* Charts */}
         <div className="dashboard-grid">
+          {/* Status breakdown */}
           <div className="card">
             <h3>Status breakdown</h3>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
-                    data={statusData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={90}
-                    // custom label: large percent with small sublabel for name
-                    label={(entry) => {
-                      try {
-                        const x = entry.x || entry.cx;
-                        const y = entry.y || entry.cy;
-                        const pct = (entry.payload && typeof entry.payload.percent === 'number') ? entry.payload.percent : entry.percent * 100;
-                        const pctText = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(pct) + '%';
-                        return (
-                          <text x={x} y={y} textAnchor="middle" fill="#fff">
-                            <tspan fontSize={12} fontWeight={700}>{pctText}</tspan>
-                            <tspan x={x} dy={14} fontSize={10} fill="#9aa">{entry.payload && entry.payload.name}</tspan>
-                          </text>
-                        );
-                      } catch (e) {
-                        return null;
-                      }
-                    }}
-                  >
+                  data={statusData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  label={({ x, y, payload }) => (
+                    <text x={x} y={y} textAnchor="middle" fill="#fff">
+                      <tspan fontSize={12} fontWeight={700}>{payload.percent}%</tspan>
+                      <tspan x={x} dy={14} fontSize={10} fill="#9aa">{payload.name}</tspan>
+                    </text>
+                  )}
+                >
                   {statusData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Legend formatter={(value, entry) => {
-                  const pct = entry && entry.payload && typeof entry.payload.percent === 'number' ? entry.payload.percent : null;
-                  const pctText = pct !== null ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(pct)}%` : '';
-                  return `${value}: ${pctText}`;
-                }} />
-                <Tooltip/>
+                <Legend />
+                <Tooltip />
               </PieChart>
             </ResponsiveContainer>
           </div>
 
-          {/* UC-03: Branch statistics table */}
+          {/* Branch statistics table */}
           <div className="card">
-            <h3>Branch statistics details</h3>
+            <h3>Branch statistics</h3>
             <div className="table-wrapper">
               <table className="branch-table">
                 <thead>
                   <tr>
-                    <th>Workflow</th>
                     <th>Branch</th>
                     <th>Runs</th>
                     <th>Success</th>
@@ -424,9 +570,8 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {branchData.map(b => (
-                    <tr key={`${b.workflow || 'unknown'}-${b.branch}`}>
-                      <td className="workflow-name">{b.workflow || 'Unknown'}</td>
+                  {branchComparison.map(b => (
+                    <tr key={b.branch}>
                       <td className="branch-name">{b.branch}</td>
                       <td>{b.totalRuns}</td>
                       <td className={b.successRate > 90 ? 'success-high' : b.successRate > 70 ? 'success-medium' : 'success-low'}>
@@ -441,183 +586,93 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* UC-01: Daily runs breakdown */}
+          {/* Workflow success/failure histogram */}
+          <div className="card card-span-2">
+            <h3>Workflow success/failure breakdown</h3>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={workflowStats} margin={{ top: 20, right: 30, left: 10, bottom: 60 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                <XAxis dataKey="name" stroke="#bcd" angle={-45} textAnchor="end" height={80} interval={0} />
+                <YAxis stroke="#bcd" />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="successes" stackId="a" fill="#4caf50" name="Successes" />
+                <Bar dataKey="failures" stackId="a" fill="#f44336" name="Failures" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Daily runs */}
           <div className="card">
             <h3>Daily runs breakdown</h3>
-            <p className="chart-description">Successful and failed runs over time</p>
             <ResponsiveContainer width="100%" height={280}>
               <LineChart data={runsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#122" />
                 <XAxis dataKey="date" stroke="#bcd" />
                 <YAxis stroke="#bcd" />
-                <Tooltip content={<RunsBreakdownTooltip />} />
+                <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="successes" stroke="#4caf50" strokeWidth={3} dot={{ r: 4 }} name="Successful runs" />
-                <Line type="monotone" dataKey="failures" stroke="#f44336" strokeWidth={3} dot={{ r: 4 }} name="Failed runs" />
+                <Line type="monotone" dataKey="successes" stroke="#4caf50" strokeWidth={2} name="Successes" />
+                <Line type="monotone" dataKey="failures" stroke="#f44336" strokeWidth={2} name="Failures" />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
-          {/* UC-06: Duration variability chart */}
+          {/* Duration over time */}
           <div className="card">
-            <h3>Duration variability over time</h3>
-            <p className="chart-description">Individual run durations over time</p>
-            <ResponsiveContainer width="100%" height={320}>
-              <ScatterChart data={individualDurations} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+            <h3>Duration variability</h3>
+            <ResponsiveContainer width="100%" height={280}>
+              <ComposedChart data={runsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#122" />
                 <XAxis dataKey="date" stroke="#bcd" />
                 <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
-                <Tooltip content={<IndividualDurationTooltip />} />
-                <Scatter dataKey="duration" fill="#2196f3" />
-              </ScatterChart>
+                <Tooltip />
+                <Legend />
+                <Area type="monotone" dataKey="maxDuration" fill="#ff980030" stroke="#ff9800" name="Max" />
+                <Area type="monotone" dataKey="minDuration" fill="#4caf5030" stroke="#4caf50" name="Min" />
+                <Line type="monotone" dataKey="medianDuration" stroke="#2196f3" strokeWidth={3} name="Median" />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Workflow durations boxplot */}
+          {/* Cumulative failure duration */}
           <div className="card">
-            <h3>Workflow Durations</h3>
-            <p className="chart-description">Median duration for each workflow</p>
+            <h3>Cumulative failure duration</h3>
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={durationBox} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <ComposedChart data={failureDurationOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis dataKey="name" stroke="#bcd" />
+                <XAxis dataKey="date" stroke="#bcd" />
                 <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="median" fill="#2196f3" name="Median duration" />
-              </BarChart>
+                <Bar dataKey="dailyFailureDuration" fill="#f44336" name="Daily failure duration" />
+                <Line type="monotone" dataKey="cumulativeFailureDuration" stroke="#ff9800" strokeWidth={2} name="Cumulative" />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Cumulative failed durations */}
+          {/* Top failed workflows */}
           <div className="card">
-            <h3>Cumulative Failed Durations</h3>
-            <p className="chart-description">Accumulated duration of failed runs over time</p>
+            <h3>Top failed workflows</h3>
             <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={failedDurationsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <BarChart data={topFailedWorkflows} layout="vertical" margin={{ top: 10, right: 20, left: 100, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis dataKey="date" stroke="#bcd" />
-                <YAxis stroke="#bcd" label={{ value: 'Cumulative Duration (s)', angle: -90, position: 'insideLeft' }} />
+                <XAxis type="number" stroke="#bcd" />
+                <YAxis type="category" dataKey="name" stroke="#bcd" width={90} />
                 <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="cumulativeFailedDuration" stroke="#f44336" strokeWidth={3} dot={{ r: 4 }} name="Cumulative failed duration" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Success/Failure per workflow */}
-          <div className="card">
-            <h3>Workflow Success/Failure</h3>
-            <p className="chart-description">Number of successes and failures for each workflow</p>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={workflowSuccessFailure} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis dataKey="workflow" stroke="#bcd" />
-                <YAxis stroke="#bcd" />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="successes" fill="#4caf50" name="Successes" />
                 <Bar dataKey="failures" fill="#f44336" name="Failures" />
               </BarChart>
             </ResponsiveContainer>
           </div>
-
-          {/* Top Failed Workflows */}
-          <div className="card">
-            <h3>Top Problematic Workflows</h3>
-            <p className="chart-description">Workflows with the most failures and cancellations in the selected period</p>
-            {topFailedWorkflows.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-                No problematic workflows found in the selected period
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart 
-                  data={topFailedWorkflows} 
-                  margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis dataKey="name" stroke="#bcd" />
-                  <YAxis stroke="#bcd" />
-                  <Tooltip content={<FailedWorkflowTooltip />} />
-                  <Bar dataKey="failures" fill="#f44336" name="Issues" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
         </div>
       </div>
+      
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
-}
-
-function RunsBreakdownTooltip({ active, payload, label }) {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    const totalRuns = data.runs || (data.successes + data.failures);
-    const successes = data.successes || 0;
-    const failures = data.failures || 0;
-    
-    return (
-      <div className="custom-tooltip">
-        <p className="label">{`Date: ${label}`}</p>
-        <p>{`Total runs: ${totalRuns}`}</p>
-        <p style={{ color: '#4caf50' }}>{`Successful: ${successes}`}</p>
-        <p style={{ color: '#f44336' }}>{`Failed: ${failures}`}</p>
-      </div>
-    );
-  }
-  return null;
-}
-
-function DurationTooltip({ active, payload, label }) {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    
-    return (
-      <div className="custom-tooltip">
-        <p className="label">{`Date: ${label}`}</p>
-        <p style={{ color: '#2196f3', fontWeight: 'bold' }}>{`Median: ${data.medianDuration}s`}</p>
-        <p style={{ color: '#9c27b0' }}>{`Average: ${data.avgDuration}s`}</p>
-        <p style={{ color: '#ff9800' }}>{`Maximum: ${data.maxDuration}s`}</p>
-        <p style={{ color: '#4caf50' }}>{`Minimum: ${data.minDuration}s`}</p>
-        <p style={{ color: '#666', fontSize: '12px' }}>
-          Range: {(data.maxDuration - data.minDuration).toFixed(1)}s
-        </p>
-      </div>
-    );
-  }
-  return null;
-}
-
-function IndividualDurationTooltip({ active, payload, label }) {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    
-    return (
-      <div className="custom-tooltip">
-        <p className="label">{`Date: ${data.date}`}</p>
-        <p style={{ color: '#2196f3', fontWeight: 'bold' }}>{`Duration: ${data.duration}s`}</p>
-        <p>{`Workflow: ${data.workflow}`}</p>
-        <p style={{ color: data.conclusion === 'success' ? '#4caf50' : '#f44336' }}>{`Status: ${data.conclusion}`}</p>
-      </div>
-    );
-  }
-  return null;
-}
-
-function FailedWorkflowTooltip({ active, payload, label }) {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    
-    return (
-      <div className="custom-tooltip">
-        <p className="label">{`Workflow: ${data.name}`}</p>
-        <p style={{ color: '#f44336', fontWeight: 'bold' }}>{`Issues: ${data.failures}`}</p>
-        <p>{`Total Runs: ${data.totalRuns}`}</p>
-        <p>{`Issue Rate: ${data.failureRate.toFixed(2)}%`}</p>
-      </div>
-    );
-  }
-  return null;
 }
