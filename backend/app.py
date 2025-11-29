@@ -476,6 +476,39 @@ def ingest_runs(runs, repository):
     for run in runs:
         ingest_run_into_db(repository, run)
 
+@app.post("/api/repository/create")
+def create_repository():
+    repo = request.args.get("repo")
+    if not repo:
+        return jsonify({"error": "Paramètre manquant : repo"}), 400
+    
+    owner = repo.split("/")[0] if "/" in repo else "unknown"
+
+    # Vérifier si le repo existe déjà
+    existing = db.session.query(Repository).filter_by(repo_name=repo).one_or_none()
+    if existing:
+        return jsonify({
+            "created": False,
+            "repo": repo,
+            "id": existing.id,
+            "message": "Repository already exists"
+        }), 200
+
+    # Créer le nouveau repository
+    new_repo = Repository(
+        repo_name=repo,
+        owner=owner,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+    db.session.add(new_repo)
+    db.session.commit()
+
+    return jsonify({
+        "created": True,
+        "repo": repo,
+        "id": new_repo.id
+    }), 201
 
 # ============================================
 # Démarrage de l'Application
