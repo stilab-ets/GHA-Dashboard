@@ -393,8 +393,10 @@ def sync_repo():
     print(" Lancement automatique de GHAminer...")
     ok = run_ghaminer(repo, token)
     if not ok:
+        print("❌ ERROR: GHAminer a échoué — cause possible ci-dessous")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": "GHAminer a échoué"}), 500
-    
 
     # 1) Extraction
    
@@ -509,6 +511,61 @@ def create_repository():
         "repo": repo,
         "id": new_repo.id
     }), 201
+
+@app.get("/api/repository/data")
+def repository_data():
+    repo = request.args.get("repo")
+    if not repo:
+        return jsonify({"error": "Paramètre manquant : repo"}), 400
+
+    # Vérifier si le repo existe
+    repo_obj = Repository.query.filter_by(repo_name=repo).first()
+    if not repo_obj:
+        return jsonify({"repo": repo, "status": "missing"}), 404
+
+    # Charger les workflows
+    workflows = Workflow.query.filter_by(repository_id=repo_obj.id).all()
+
+    # Charger les runs
+    runs = WorkflowRun.query.filter_by(repository_id=repo_obj.id).all()
+
+    # Formater les données
+    workflows_json = [
+        {
+            "id": wf.id,
+            "workflow_name": wf.workflow_name,
+            "created_at": wf.created_at.isoformat(),
+            "updated_at": wf.updated_at.isoformat()
+        }
+        for wf in workflows
+    ]
+
+    runs_json = [
+        {
+            "id_build": wr.id_build,
+            "workflow_id": wr.workflow_id,
+            "repository_id": wr.repository_id,
+            "status": wr.status,
+            "conclusion": wr.conclusion,
+            "created_at": wr.created_at.isoformat() if wr.created_at else None,
+            "updated_at": wr.updated_at.isoformat() if wr.updated_at else None,
+            "duration": wr.build_duration,
+            "branch": wr.branch,
+            "issuer_name": wr.issuer_name,
+            "event": wr.workflow_event_trigger
+        }
+        for wr in runs
+    ]
+
+    return jsonify({
+        "repo": repo,
+        "status": "exists",
+        "repository_id": repo_obj.id,
+        "workflows": workflows_json,
+        "runs": runs_json,
+        "run_count": len(runs_json)
+    }), 200
+
 
 # ============================================
 # Démarrage de l'Application

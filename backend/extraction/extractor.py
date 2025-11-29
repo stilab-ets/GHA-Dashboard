@@ -13,6 +13,8 @@ import datetime
 from typing import AsyncIterator
 import asyncio
 
+
+
 # ---------------------------------------------------------------------------
 #  Configuration de base
 # ---------------------------------------------------------------------------
@@ -34,24 +36,47 @@ def needs_refresh(csv_path, max_age_days=1):
 # --- Lance GHAminer si besoin ---
 def run_ghaminer(repo_url, token):
     try:
-        print(f" Lancement GHAminer pour {repo_url}...")
-        result = subprocess.run([
+        print(f"\n🚀 Lancement GHAminer pour {repo_url}...\n")
+
+        cmd = [
             "python", "ghaminer/src/GHAMetrics.py",
             "-t", token,
             "-s", f"https://github.com/{repo_url}",
             "-fd", "2022-04-03",
             "-td", "2025-10-31"
-        ], capture_output=True, text=True, check=True)
+        ]
 
-        print(" GHAminer terminé :", result.stdout)
+        print("📌 Commande exécutée :")
+        print(" ".join(cmd))
+
+        # --- Exécution correcte ---
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+
+        print("\n======= STDOUT =======")
+        print(result.stdout)
+
+        print("\n======= STDERR =======")
+        print(result.stderr)
+
+        print("\n======= RETURN CODE =======")
+        print(result.returncode)
+
+        if result.returncode != 0:
+            print("❌ ERREUR : GHAminer a échoué")
+            return False
+
+        print("✅ GHAminer terminé avec succès")
         return True
 
-    except subprocess.CalledProcessError as e:
-        print(" GHAminer FAILED")
-        print("STDOUT:", e.stdout)
-        print("STDERR:", e.stderr)
+    except Exception as e:
+        print("🔥 Exception dans run_ghaminer :", e)
+        import traceback
+        traceback.print_exc()
         return False
-
 
 def extract_data(repo_url, token, from_date, to_date):
     if not os.path.exists(BUILD_FEATURES_PATH):

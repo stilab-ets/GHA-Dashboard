@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# Installer les dépendances système
+# Dépendances système
 RUN apt-get update && apt-get install -y \
     git \
     postgresql-client \
@@ -10,28 +10,26 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copier requirements.txt en premier (meilleur cache Docker)
+# Installer les requirements avant la copie complète
 COPY requirements.txt .
-
-# Installer les dépendances Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copier tout le backend (inclut ghaminer/, extraction/, etc.)
+# Copier tout le backend
 COPY . .
 
-# Donner les permissions à GHAminer
-RUN chmod -R 777 /app/ghaminer/src/tmp || true && \
-    chmod -R 777 /app/ghaminer/src/repos || true
+# Créer un dossier tmp global (pour GHAMiner) 
+RUN mkdir -p /tmp/ghaminer && chmod -R 777 /tmp/ghaminer
+
+# Symlink propre pour GHAMiner
+RUN rm -rf ghaminer/src/tmp && \
+    ln -s /tmp/ghaminer ghaminer/src/tmp
 
 # Créer utilisateur non-root
-RUN useradd -m -u 1001 flaskuser && \
-    chown -R flaskuser:flaskuser /app
-
+RUN useradd -m -u 1001 flaskuser && chown -R flaskuser:flaskuser /app
 USER flaskuser
 
+# Flask écoute sur 3000 (comme ton compose)
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:3000/health')" || exit 1
-
-CMD ["python", "app.py"]
+# Toujours utiliser FLASK run (sinon ça marche pas)
+CMD ["flask", "run", "--host=0.0.0.0", "--port=3000"]
