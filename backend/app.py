@@ -315,6 +315,7 @@ def websocket_data(ws, repositoryName: str):
 
     asyncio.run(send_data(ws, repositoryName, filters))
 
+
 # ============================================
 # Route de Debug
 # ============================================
@@ -342,6 +343,31 @@ def debug():
         "working_directory": os.getcwd(),
         "python_version": os.sys.version
     })
+
+# ============================================
+# Route: Vérifier si un repo existe en BD
+# ============================================
+
+@app.get("/api/repository/status")
+def repository_status():
+    repo = request.args.get("repo")
+    if not repo:
+        return jsonify({"error": "Paramètre manquant : ?repo=owner/name"}), 400
+
+    # Vérifier si le dépôt est dans la table Repository
+    repo_obj = Repository.query.filter_by(repo_name=repo).first()
+
+    if repo_obj:
+        return jsonify({
+            "repo": repo,
+            "status": "exists",
+            "repository_id": repo_obj.id
+        }), 200
+
+    return jsonify({
+        "repo": repo,
+        "status": "missing"
+    }), 200
 
 
 # ============================================
@@ -445,6 +471,11 @@ def sync_repo():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+    
+def ingest_runs(runs, repository):
+    for run in runs:
+        ingest_run_into_db(repository, run)
+
 
 # ============================================
 # Démarrage de l'Application
