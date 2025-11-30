@@ -373,107 +373,31 @@ def repository_status():
 # ============================================
 # Route Extraction + Ingestion BD 
 # ============================================
-
-@app.post("/api/sync")
+@app.route("/api/sync", methods=["POST"])
 def sync_repo():
-    """
-    1) Extrait les runs pour ?repo=owner/name
-    2) Sauvegarde builds_features.csv
-    3) Insère en BD (Repository/Workflow/WorkflowRun), sans doublons
-    4) Retourne un résumé JSON
-    """
     repo = request.args.get("repo")
     if not repo:
-        return jsonify({"error": "Paramètre manquant : ?repo=owner/name"}), 400
+        return jsonify({"error": "missing parameter ?repo="}), 400
 
-    token = os.getenv("GITHUB_TOKEN")
-    if not token:
-        return jsonify({"error": "GITHUB_TOKEN manquant dans .env"}), 400
+    print(f"[SYNC] Repo demandé : {repo}")
 
-    print(" Lancement automatique de GHAminer...")
-    ok = run_ghaminer(repo, token)
-    if not ok:
-        print("❌ ERROR: GHAminer a échoué — cause possible ci-dessous")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": "GHAminer a échoué"}), 500
+    # A. Déjà en BD → on ne fait rien
+    if repo_exists(repo):
+        print(f"[SYNC] Repo {repo} trouvé en BD → Pas de streaming")
+        return jsonify({"status": "already_in_db"}), 200
 
-    # 1) Extraction
-   
-    success = True
-    df, error = extract_data(repo, token, "2024-04-01", "2025-10-31")
-    if error:
-        return jsonify({"error": error}), 400
-    if df is None or df.empty:
-        return jsonify({"error": "Pas de données extraites pour ce dépôt."}), 404
+    # B. Streaming (nouveau repo)
+    print(f"[SYNC] NEW REPO → STREAMING GITHUB…")
+    runs = run_streaming_and_collect(repo)
 
-    # 2) Sauvegarde CSV 
-    try:
-        df.to_csv(CSV_PATH, index=False)
-    except Exception as e:
-        print("Échec sauvegarde CSV:", e)
+    # C. Insertion BD
+    print(f"[SYNC] Insertion BD ({len(runs)} runs)")
+    insert_streamed_data_into_db(repo, runs)
 
-    # 3) Ingestion BD
-    try:
-        # Charger TOUS les id_build existants d'un coup
-        existing_ids = set(
-            db.session.query(WorkflowRun.id_build).with_entities(WorkflowRun.id_build).all()
-        )
-        existing_ids = {row[0] for row in existing_ids}
+    return jsonify({"status": "streamed_and_saved"}), 200
 
-        owner_name = repo.split("/")[0] if "/" in repo else "unknown"
-        repo_obj = _get_or_create_repo(repo_name=repo, owner=owner_name)
 
-        inserted, skipped = 0, 0
 
-        # IMPORTANT : désactiver l'autoflush
-        with db.session.no_autoflush:
-
-            for _, row in df.iterrows():
-
-                run_id = int(row["id_build"])
-
-                # --- SKIP si existe déjà ---
-                if run_id in existing_ids:
-                    skipped += 1
-                    continue
-
-                # Assurer un workflow
-                wf_name = str(row.get("workflow_name") or row.get("workflow") or ".github/workflows/ci.yml")
-                wf_obj = _get_or_create_workflow(repo_obj.id, wf_name)
-
-                # Créer le workflow_run
-                wr = WorkflowRun(
-                    id_build=run_id,
-                    workflow_id=wf_obj.id,
-                    repository_id=repo_obj.id,
-                    status=str(row.get("status") or "completed"),
-                    conclusion=str(row.get("conclusion") or "unknown"),
-                    created_at=_iso_dt(row.get("created_at")) or datetime.utcnow(),
-                    updated_at=_iso_dt(row.get("updated_at")),
-                    build_duration=float(row.get("build_duration") or 0),
-                    branch=str(row.get("branch") or "unknown"),
-                    issuer_name=str(row.get("issuer_name") or None),
-                    workflow_event_trigger=str(row.get("event") or row.get("workflow_event_trigger") or None),
-                )
-
-                db.session.add(wr)
-                inserted += 1
-
-        db.session.commit()
-
-        return jsonify({
-            "ok": True,
-            "repo": repo,
-            "rows_extracted": int(len(df)),
-            "inserted": inserted,
-            "skipped": skipped
-        }), 201
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-    
 def ingest_runs(runs, repository):
     for run in runs:
         ingest_run_into_db(repository, run)
@@ -565,6 +489,99 @@ def repository_data():
         "runs": runs_json,
         "run_count": len(runs_json)
     }), 200
+
+def repo_exists(repo_name: str):
+    repo = Repository.query.filter_by(repo_name=repo_name).first()
+    return repo is not None
+
+
+def run_streaming_and_collect(repo: str):
+    """
+    Ceci appelle l'extraction existante (fetch_all_github_runs)
+    et retourne un tableau de runs structuré comme tes coéquipiers.
+    """
+
+    token = os.getenv("GITHUB_TOKEN")
+    df = fetch_all_github_runs(repo, token)
+
+    if df is None or df.empty:
+        return []
+
+    df["created_at"] = pd.to_datetime(df["created_at"])
+    df["updated_at"] = pd.to_datetime(df["updated_at"])
+
+    return df.to_dict(orient="records")
+
+def insert_streamed_data_into_db(repo_name: str, runs):
+    from datetime import datetime
+
+    owner = repo_name.split("/")[0]
+
+    # 1. Créer repo s'il n'existe pas
+    repo_obj = Repository.query.filter_by(repo_name=repo_name).first()
+    if not repo_obj:
+        repo_obj = Repository(
+            repo_name=repo_name,
+            owner=owner,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.session.add(repo_obj)
+        db.session.flush()
+
+    # 2. Ingestion des runs
+    for r in runs:
+
+        # Déterminer le nom du workflow
+        workflow_name = (
+            r.get("name")
+            or r.get("workflow_name")
+            or "unknown"
+        )
+
+        # Chercher workflow existant
+        wf = Workflow.query.filter_by(
+            repository_id=repo_obj.id,
+            workflow_name=workflow_name
+        ).first()
+
+        # Le créer s'il n'existe pas
+        if not wf:
+            wf = Workflow(
+                workflow_name=workflow_name,
+                repository_id=repo_obj.id,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            db.session.add(wf)
+            db.session.flush()
+
+        # Extraire correctement l'actor (login seulement)
+        actor = r.get("actor")
+        if isinstance(actor, dict):
+            issuer = actor.get("login")
+        else:
+            issuer = actor
+
+        # Créer un WorkflowRun propre
+        run_obj = WorkflowRun(
+            id_build=r.get("id"),
+            workflow_id=wf.id,
+            repository_id=repo_obj.id,
+            status=r.get("status"),
+            conclusion=r.get("conclusion"),
+            created_at=r.get("created_at"),
+            updated_at=r.get("updated_at"),
+            build_duration=r.get("run_duration") or 0,
+            branch=r.get("head_branch") or r.get("branch"),
+            issuer_name=issuer,
+            workflow_event_trigger=r.get("event"),
+        )
+
+        db.session.add(run_obj)
+
+    db.session.commit()
+    print(f"📌 BD UPDATED — {len(runs)} runs ajoutés pour {repo_name}")
 
 
 # ============================================
