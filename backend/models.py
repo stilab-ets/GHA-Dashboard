@@ -162,12 +162,36 @@ class TimeInfo:
     max: float
     average: float
 
+    def __eq__(self, value) -> bool:
+        if not isinstance(value, TimeInfo):
+            return NotImplemented
+
+        is_eq = self.min == value.min
+        is_eq = is_eq and self.q1 == value.q1
+        is_eq = is_eq and self.median == value.median
+        is_eq = is_eq and self.q3 == value.q3
+        is_eq = is_eq and self.max == value.max
+        is_eq = is_eq and self.average == value.average
+
+        return is_eq
+
 @dataclass
 class StatusInfo:
     numRuns: int
     successes: int
     failures: int
     cancelled: int
+
+    def __eq__(self, value) -> bool:
+        if not isinstance(value, StatusInfo):
+            return NotImplemented
+
+        is_eq = self.numRuns == value.numRuns
+        is_eq = is_eq and self.successes == value.successes
+        is_eq = is_eq and self.failures == value.failures
+        is_eq = is_eq and self.cancelled == value.cancelled
+
+        return is_eq
 
 @dataclass
 class RunInfo:
@@ -176,6 +200,17 @@ class RunInfo:
     branches: list[str]
     authors: list[str]
 
+    def __eq__(self, value) -> bool:
+        if not isinstance(value, RunInfo):
+            return NotImplemented
+
+        is_eq = self.repositoryName == value.repositoryName
+        is_eq = is_eq and self.workflowNames == value.workflowNames
+        is_eq = is_eq and self.branches == value.branches
+        is_eq = is_eq and self.authors == value.authors
+
+        return is_eq
+
 @dataclass
 class AggregationData:
     runsInfo: RunInfo
@@ -183,6 +218,18 @@ class AggregationData:
     periodStart: date
     statusInfo: StatusInfo
     timeInfo: TimeInfo
+
+    def __eq__(self, value) -> bool:
+        if not isinstance(value, AggregationData):
+            return NotImplemented
+
+        is_eq = self.runsInfo == value.runsInfo
+        is_eq = is_eq and self.aggregationPeriod == value.aggregationPeriod
+        is_eq = is_eq and self.periodStart == value.periodStart
+        is_eq = is_eq and self.statusInfo == value.statusInfo
+        is_eq = is_eq and self.timeInfo == value.timeInfo
+
+        return is_eq
 
 @dataclass
 class NewDataMessage:

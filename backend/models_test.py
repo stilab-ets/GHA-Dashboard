@@ -233,3 +233,230 @@ def test_workflow_run_equality_fails():
 
     assert a != b
 
+# =============================
+# || TimeInfo equality tests ||
+# =============================
+def test_time_info_equality_passes():
+    a = m.TimeInfo(
+            1.0,
+            3.0,
+            5.0,
+            7.0,
+            9.0,
+            5.0
+        )
+
+    b = m.TimeInfo(
+            1.0,
+            3.0,
+            5.0,
+            7.0,
+            9.0,
+            5.0
+        )
+
+    assert a == b
+
+def test_time_info_equality_fails():
+    a = m.TimeInfo(
+            1.0,
+            3.0,
+            5.0,
+            7.0,
+            9.0,
+            5.0
+        )
+
+    b = m.TimeInfo(
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            2.5
+        )
+
+    assert a != b
+
+# ===============================
+# || StatusInfo equality tests ||
+# ===============================
+def test_status_info_equality_passes():
+    a = m.StatusInfo(
+            10,
+            5,
+            3,
+            2
+        )
+
+    b = m.StatusInfo(
+            10,
+            5,
+            3,
+            2
+        )
+
+    assert a == b
+
+def test_status_info_equality_fails():
+    a = m.StatusInfo(
+            10,
+            5,
+            3,
+            2
+        )
+
+    b = m.StatusInfo(
+            20,
+            10,
+            6,
+            4
+        )
+
+    assert a != b
+
+# ============================
+# || RunInfo equality tests ||
+# ============================
+def test_run_info_equality_passes():
+    a = m.RunInfo(
+            "rust-lang/crates.io",
+            ["CI", "CD"],
+            ["main", "dev"],
+            ["Gaubbe", "torvalds"],
+        )
+
+    b = m.RunInfo(
+            "rust-lang/crates.io",
+            ["CI", "CD"],
+            ["main", "dev"],
+            ["Gaubbe", "torvalds"],
+        )
+
+    assert a == b
+
+def test_run_info_equality_fails():
+    a = m.RunInfo(
+            "rust-lang/crates.io",
+            ["CI", "CD"],
+            ["main", "dev"],
+            ["Gaubbe", "torvalds"],
+        )
+
+    b = m.RunInfo(
+            "rust-lang/rust",
+            ["CI", "doc-gen"],
+            ["main", "feat/compiler"],
+            ["peter", "torvalds"],
+        )
+
+    assert a != b
+
+# ====================================
+# || AggregationData equality tests ||
+# ====================================
+def test_aggregation_data_equality_passes():
+    a = m.AggregationData(
+            m.RunInfo(
+                "rust-lang/crates.io",
+                ["CI", "CD"],
+                ["main", "dev"],
+                ["Gaubbe", "torvalds"],
+            ),
+            "day",
+            dt.date(2025, 11, 1),
+            m.StatusInfo(
+                10,
+                5,
+                3,
+                2
+            ),
+            m.TimeInfo(
+                1.0,
+                3.0,
+                5.0,
+                7.0,
+                9.0,
+                5.0
+            )
+        )
+
+    b = m.AggregationData(
+            m.RunInfo(
+                "rust-lang/crates.io",
+                ["CI", "CD"],
+                ["main", "dev"],
+                ["Gaubbe", "torvalds"],
+            ),
+            "day",
+            dt.date(2025, 11, 1),
+            m.StatusInfo(
+                10,
+                5,
+                3,
+                2
+            ),
+            m.TimeInfo(
+                1.0,
+                3.0,
+                5.0,
+                7.0,
+                9.0,
+                5.0
+            )
+        )
+
+    assert a == b
+
+def test_aggregation_data_equality_fails():
+    a = m.AggregationData(
+            m.RunInfo(
+                "rust-lang/crates.io",
+                ["CI", "CD"],
+                ["main", "dev"],
+                ["Gaubbe", "torvalds"],
+            ),
+            "day",
+            dt.date(2025, 11, 1),
+            m.StatusInfo(
+                10,
+                5,
+                3,
+                2
+            ),
+            m.TimeInfo(
+                1.0,
+                3.0,
+                5.0,
+                7.0,
+                9.0,
+                5.0
+            )
+        )
+
+    b = m.AggregationData(
+            m.RunInfo(
+                "rust-lang/rust",
+                ["CI", "doc-gen"],
+                ["main", "feat/compiler"],
+                ["peter", "torvalds"],
+            ),
+            "week",
+            dt.date(2025, 12, 1),
+            m.StatusInfo(
+                20,
+                10,
+                6,
+                4
+            ),
+            m.TimeInfo(
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0,
+                2.5
+            )
+        )
+
+    assert a != b
