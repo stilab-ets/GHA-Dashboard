@@ -118,23 +118,70 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
       try {
         const message = JSON.parse(event.data);
         const cache = wsCache.get(repo);
-        
- 
-      if (message.type === "repo_status") {
-        console.log(`[DB] Repo status: ${message.message}`);
-      }
 
-      if (message.type === "db_insert") {
-        console.log(`[DB] Batch inserted = ${message.batchInserted} | Total = ${message.totalInserted}`);
-      }
+        // ============================
+        // LOGS CONSOLE BACKEND → FRONT
+        // ============================
 
-      if (message.type === "db_final_insert") {
-        console.log(`[DB] FINAL INSERT for ${message.repo}: ${message.inserted} runs`);
-        console.log(`[DB] Message: ${message.message}`);
-      }
-     
+        if (message.type === "repo_status") {
+          console.log(
+            `%c[DB] Repo status: ${message.message}`,
+            "color: #00b3ff; font-weight: bold;"
+          );
+        }
 
+        if (message.type === "runs_cached") {
+          console.log(
+            `%c[DB] Returning ${message.totalRuns} cached runs from database for ${repo}`,
+            "color: #1e00ff; font-weight: bold;"
+          );
+
+          wsCache.set(repo, {
+            runs: message.data,
+            isComplete: true,
+            pageCount: 0,
+            startDate: filters.start,
+            endDate: filters.end
+          });
+
+          chrome.storage.local.set({
+            wsRuns: message.data,
+            wsStatus: {
+              isStreaming: false,
+              isComplete: true,
+              repo: repo,
+              totalRuns: message.totalRuns,
+              cached: true
+            }
+          });
+
+          return;
+        }
+
+        // Batch insert logs
+        if (message.type === "db_insert") {
+          console.log(
+            `%c[DB] Batch inserted = ${message.batchInserted} | Total = ${message.totalInserted}`,
+            "color: orange; font-weight: bold;"
+          );
+        }
+
+        // Final insert log
+        if (message.type === "db_final_insert") {
+          console.log(
+            `%c[DB] FINAL INSERT for ${message.repo}: ${message.inserted} runs`,
+            "color: #ff00ff; font-weight: bold;"
+          );
+          console.log(
+            `%c[DB] Message: ${message.message}`,
+            "color: #ff00ff;"
+          );
+        }
+
+        // ============================
         // Recevoir des runs bruts
+        // ============================
+
         if (message.type === 'runs') {
           cache.runs.push(...message.data);
           cache.pageCount = message.page;
