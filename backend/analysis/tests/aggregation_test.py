@@ -1,5 +1,5 @@
 import analysis.aggregation as agg
-from models import AggregationPeriod, WorkflowRun, Workflow, Repository
+from models import AggregationData, AggregationPeriod, RunInfo, StatusInfo, TimeInfo, WorkflowRun, Workflow, Repository
 from typing import TypeAlias
 
 import asyncio
@@ -130,3 +130,35 @@ def test_correct_period_separation(aggregation_period: AggregationPeriod,
 
     final_list = asyncio.run(exhaust_list())
     assert final_list == expected
+
+# ================================
+# || aggregate_one_period tests ||
+# ================================
+def test_aggregation():
+    data = agg.aggregate_one_period(WORKFLOW_RUN_TEST_DATASET, dt.date(2025, 12, 1), "month")
+    expected = AggregationData(
+            RunInfo(
+                "rust-lang/crates.io",
+                ["CI"],
+                ["main"],
+                ["Gaubbe"],
+            ),
+            "month",
+            dt.date(2025, 12, 1),
+            StatusInfo(
+                31,
+                15,
+                16,
+                0
+            ),
+            TimeInfo(
+                1.0,
+                8.0,
+                16.0,
+                24.0,
+                31.0,
+                16.0
+            )
+        )
+
+    assert data == expected
