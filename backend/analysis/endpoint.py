@@ -110,7 +110,26 @@ def process_run(run: dict) -> dict:
 async def send_data(ws: Any, repo: str, filters: AggregationFilters):
 
     print(f"[WebSocket] Connection for {repo}")
+    # Vérifier si le repo existe déjà dans la BD
+    existing_repo = Repository.query.filter_by(repo_name=repo).first()
+
+    if existing_repo:
+        ws.send(json.dumps({
+            "type": "repo_status",
+            "repo": repo,
+            "exists": True,
+            "message": f"Repository '{repo}' already exists in the database."
+        }))
+    else:
+        ws.send(json.dumps({
+            "type": "repo_status",
+            "repo": repo,
+            "exists": False,
+            "message": f"Repository '{repo}' does NOT exist in the database."
+        }))
+
     print(f"[WebSocket] Date filters: {filters.startDate} to {filters.endDate}")
+    total_inserted = 0
 
     token = os.getenv("GITHUB_TOKEN")
     if not token:
@@ -142,7 +161,15 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
                 batch.append(processed)
 
                 if len(batch) >= 50:
-                    insert_runs_batch(repo, batch)
+                    inserted = insert_runs_batch(repo, batch)
+                    total_inserted += inserted
+
+                    ws.send(json.dumps({
+                        "type": "db_insert",
+                        "batchInserted": inserted,
+                        "totalInserted": total_inserted
+                    }))
+
                     batch.clear()
 
                 try:
@@ -179,10 +206,20 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
             page += 1
             time_module.sleep(0.1)
 
+        # Final batch insert
         if batch:
-            insert_runs_batch(repo, batch)
-            batch.clear()
+            inserted = insert_runs_batch(repo, batch)
+            total_inserted += inserted
 
+        # Inform front-end of total inserted
+        ws.send(json.dumps({
+            "type": "db_final_insert",
+            "repo": repo,
+            "inserted": total_inserted,
+            "message": f"Insertion terminée : {total_inserted} runs insérés en BD pour {repo}"
+        }))
+
+        # Inform WebSocket stream is complete
         ws.send(json.dumps({
             "type": "complete",
             "totalRuns": total_runs_sent,
@@ -191,12 +228,6 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
 
         print(f"[WebSocket] COMPLETE for {repo}: {total_runs_sent} runs, {page} pages")
 
-    except Exception as e:
-        print(f"[WebSocket] ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-
-        ws.send(json.dumps({"type": "error", "message": str(e)}))
-
     finally:
-        ws.close()
+         ws.close()
+        

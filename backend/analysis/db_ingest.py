@@ -1,97 +1,66 @@
 from models import db, Repository, Workflow, WorkflowRun
 from datetime import datetime
 
-BATCH_SIZE = 50
+def insert_runs_batch(repo_name: str, runs: list[dict]) -> int:
+    """
+    Insère un batch de runs.
+    Retourne le VRAI nombre inséré (sans doublons).
+    """
 
-def insert_runs_batch(repo_name: str, runs: list[dict]):
-    """Insère plusieurs runs en un seul commit (performant et propre)."""
-
-    if not runs:
-        return 0
-
-    owner = repo_name.split("/")[0]
-
-    # 1. Repo
-    repo = Repository.query.filter_by(repo_name=repo_name).first()
-    if not repo:
-        repo = Repository(
-            repo_name=repo_name,
-            owner=owner,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        db.session.add(repo)
+    repository = Repository.query.filter_by(repo_name=repo_name).first()
+    if not repository:
+        # Jamais censé arriver, mais au cas où…
+        owner = repo_name.split("/")[0]
+        repository = Repository(repo_name=repo_name, owner=owner)
+        db.session.add(repository)
         db.session.flush()
 
-    inserted = 0
+    inserted_count = 0
 
-    for r in runs:
-        try:
-            # Nom du workflow
-            wf_name = (
-                r.get("workflow_name")
-                or r.get("name")
-                or "unknown"
+    for run in runs:
+        # Skip doublons
+        if WorkflowRun.query.filter_by(id_build=run["id"]).first():
+            continue
+
+        # Trouver (ou créer workflow)
+        wf_name = run.get("workflow_name") or "unknown"
+        workflow = Workflow.query.filter_by(
+            workflow_name=wf_name,
+            repository_id=repository.id
+        ).first()
+
+        if not workflow:
+            workflow = Workflow(
+                workflow_name=wf_name,
+                repository_id=repository.id,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
             )
+            db.session.add(workflow)
+            db.session.flush()
 
-            wf = Workflow.query.filter_by(
-                repository_id=repo.id,
-                workflow_name=wf_name
-            ).first()
+        # Création du run
+        new_run = WorkflowRun(
+            id_build=run["id"],
+            workflow_id=workflow.id,
+            repository_id=repository.id,
 
-            if not wf:
-                wf = Workflow(
-                    workflow_name=wf_name,
-                    repository_id=repo.id,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
-                )
-                db.session.add(wf)
-                db.session.flush()
+            branch=run.get("branch"),
+            issuer_name=run.get("actor"),
 
-            # Skip doublons
-            build_id = r.get("id")
-            if WorkflowRun.query.filter_by(id_build=build_id).first():
-                continue
+            status=run.get("status"),
+            conclusion=run.get("conclusion"),
 
-            # Dates
-            created_at = None
-            if r.get("created_at"):
-                try:
-                    created_at = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
-                except:
-                    pass
+            workflow_event_trigger=run.get("event"),
 
-            updated_at = None
-            if r.get("updated_at"):
-                try:
-                    updated_at = datetime.fromisoformat(r["updated_at"].replace("Z", "+00:00"))
-                except:
-                    pass
+            created_at=datetime.fromisoformat(run["created_at"].replace("Z", "+00:00")),
+            updated_at=datetime.fromisoformat(run["updated_at"].replace("Z", "+00:00")) if run.get("updated_at") else None,
 
-            # Insert WorkflowRun
-            wr = WorkflowRun(
-                id_build=build_id,
-                workflow_id=wf.id,
-                repository_id=repo.id,
-                status=r.get("status"),
-                conclusion=r.get("conclusion"),
-                created_at=created_at,
-                updated_at=updated_at,
-                build_duration=r.get("duration") or 0,
-                branch=r.get("branch"),
-                issuer_name=r.get("actor"),
-                workflow_event_trigger=r.get("event"),
-            )
+            build_duration=run.get("duration")
+        )
 
-            db.session.add(wr)
-            inserted += 1
-
-        except Exception as e:
-            print("❌ ERROR inserting run:", e)
-            db.session.rollback()
+        db.session.add(new_run)
+        inserted_count += 1
 
     db.session.commit()
-    print(f"📌 BATCH INSERT — {inserted} runs inserted for {repo_name}")
-
-    return inserted
+    return inserted_count

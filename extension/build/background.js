@@ -119,6 +119,21 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         const message = JSON.parse(event.data);
         const cache = wsCache.get(repo);
         
+ 
+      if (message.type === "repo_status") {
+        console.log(`[DB] Repo status: ${message.message}`);
+      }
+
+      if (message.type === "db_insert") {
+        console.log(`[DB] Batch inserted = ${message.batchInserted} | Total = ${message.totalInserted}`);
+      }
+
+      if (message.type === "db_final_insert") {
+        console.log(`[DB] FINAL INSERT for ${message.repo}: ${message.inserted} runs`);
+        console.log(`[DB] Message: ${message.message}`);
+      }
+     
+
         // Recevoir des runs bruts
         if (message.type === 'runs') {
           cache.runs.push(...message.data);
@@ -220,3 +235,6 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
 }
 
 console.log('[Background] GHA Dashboard Background Script loaded');
+
+
+
