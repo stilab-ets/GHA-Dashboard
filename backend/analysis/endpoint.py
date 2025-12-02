@@ -64,7 +64,6 @@ def process_run(run: dict) -> dict:
     Extrait les champs utiles d'un run GitHub Actions.
     Retourne un dictionnaire simplifie pour le frontend.
     """
-    # Calculer la duree si possible
     duration = 0
     if run.get('updated_at') and run.get('created_at'):
         try:
@@ -74,7 +73,6 @@ def process_run(run: dict) -> dict:
         except:
             duration = 0
     
-    # Extraire l'actor (peut etre un objet ou une string)
     actor = run.get('actor')
     actor_login = None
     if isinstance(actor, dict):
@@ -98,19 +96,30 @@ def process_run(run: dict) -> dict:
     }
 
 
-async def send_data(ws: Any, repo: str, filters: AggregationFilters):
+async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None):
     """
     Recupere les donnees depuis l'API GitHub PAGE PAR PAGE
     et envoie les RUNS BRUTS (pas agreges) au frontend.
     
-    Le frontend fait l'agregation et le filtrage localement.
+    
+    Args:
+        ws: WebSocket connection
+        repo: Repository name (owner/repo)
+        filters: Aggregation filters
+        token: GitHub token (from extension or fallback to env)
     """
     print(f"[WebSocket] Connection for {repo}")
     print(f"[WebSocket] Date filters: {filters.startDate} to {filters.endDate}")
     
-    token = os.getenv("GITHUB_TOKEN")
+    # Utiliser le token passé en paramètre, sinon fallback sur .env
     if not token:
-        error_msg = {"type": "error", "message": "GITHUB_TOKEN not configured"}
+        token = os.getenv("GITHUB_TOKEN")
+    
+    if not token:
+        error_msg = {
+            "type": "error",
+            "message": "GitHub token required. Please configure it in the Chrome extension popup (click the extension icon and enter your token)."
+        }
         ws.send(json.dumps(error_msg))
         ws.close()
         return
@@ -129,29 +138,24 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
             if not runs:
                 break
             
-            # Traiter et filtrer les runs par date
             processed_runs = []
             oldest_run_date = None
             
             for run in runs:
                 processed = process_run(run)
                 
-                # Parser la date pour filtrage
                 try:
                     run_date = datetime.fromisoformat(processed['created_at'].replace('Z', '+00:00'))
                     run_date_naive = run_date.replace(tzinfo=None)
                     
-                    # Tracker la date la plus ancienne
                     if oldest_run_date is None or run_date_naive < oldest_run_date:
                         oldest_run_date = run_date_naive
                     
-                    # Filtrer par date
                     if start_dt <= run_date_naive <= end_dt:
                         processed_runs.append(processed)
                 except:
                     pass
             
-            # Envoyer les runs de cette page
             if processed_runs:
                 msg = {
                     "type": "runs",
@@ -163,11 +167,9 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
                 total_runs_sent += len(processed_runs)
                 print(f"[WebSocket] Page {page}: sent {len(processed_runs)} runs (total: {total_runs_sent})")
             
-            # Verifier si on doit continuer
             if not has_more:
                 break
             
-            # Arreter si tous les runs sont plus anciens que la date de debut
             if oldest_run_date and oldest_run_date < start_dt:
                 print(f"[WebSocket] Runs older than start date, stopping")
                 break
@@ -175,7 +177,6 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters):
             page += 1
             time_module.sleep(0.1)
         
-        # Envoyer le message de fin
         complete_msg = {
             "type": "complete",
             "totalRuns": total_runs_sent,
