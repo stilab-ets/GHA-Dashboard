@@ -3,9 +3,9 @@ services:
     image: postgres:17-alpine
     container_name: gha-postgres
     environment:
-      POSTGRES_DB: ${DB_NAME:-gha_dashboard}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: gha_dashboard
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
     volumes:
@@ -29,19 +29,19 @@ services:
       FLASK_APP: app.py
       FLASK_RUN_HOST: 0.0.0.0
       FLASK_RUN_PORT: 3000
-      FLASK_ENV: ${FLASK_ENV:-development}
+      FLASK_ENV: development
       FLASK_DEBUG: 1
 
       # Database
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/gha_dashboard
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-gha_dashboard}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: gha_dashboard
+      DB_USER: postgres
+      DB_PASSWORD: postgres
 
-      # GitHub
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      # GitHub Token - NOT NEEDED ANYMORE
+      # Token will be provided by the Chrome extension via WebSocket query params
     ports:
       - "3000:3000"
     volumes:
@@ -50,8 +50,6 @@ services:
       - ./backend/extraction:/app/extraction:ro
       - ./backend/ghaminer:/app/ghaminer:ro
       - ./backend/builds_features.csv:/app/builds_features.csv
-      #- ghaminer-tmp:/app/ghaminer/src/tmp
-      #- ghaminer-repos:/app/ghaminer/src/repos
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,8 +62,8 @@ services:
     image: dpage/pgadmin4:latest
     container_name: gha-pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@gha.local}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_DEFAULT_EMAIL: admin@gha.local
+      PGADMIN_DEFAULT_PASSWORD: admin
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     ports:
       - "5050:80"
@@ -87,8 +85,4 @@ volumes:
   postgres-data:
     driver: local
   pgadmin-data:
-    driver: local
-  ghaminer-tmp:
-    driver: local
-  ghaminer-repos:
     driver: local

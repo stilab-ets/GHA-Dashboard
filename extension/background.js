@@ -1,12 +1,9 @@
-// ============================================
-// Background Service Worker - WebSocket Manager
-// ============================================
+// Background Service Worker - WebSocket Manager with GitHub Token
 
 const wsCache = new Map();
 let activeWebSocket = null;
 let currentRepo = null;
 
-// Gestion des messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   if (request.action === "openDashboardTab") {
@@ -25,7 +22,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "startWebSocketExtraction") {
     const { repo, filters } = request;
     
-    // Verifier le cache (seulement si memes dates)
+    // Check cache (only if same dates)
     const cached = wsCache.get(repo);
     if (cached && cached.isComplete && cached.startDate === filters.start && cached.endDate === filters.end) {
       sendResponse({ 
@@ -68,7 +65,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return false;
 });
 
-// WebSocket Connection
 function startWebSocketExtraction(repo, filters = {}, tabId) {
   if (activeWebSocket) {
     activeWebSocket.close();
@@ -77,146 +73,158 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
   
   currentRepo = repo;
   
-  // Reinitialiser le storage
   chrome.storage.local.set({ 
     wsRuns: [], 
     wsStatus: { isStreaming: true, isComplete: false, repo: repo, page: 0, totalRuns: 0 }
   });
   
-  // Construire l'URL WebSocket (seulement dates, pas de filtres workflow/branch/actor)
-  const encodedRepo = encodeURIComponent(repo);
-  let wsUrl = `ws://localhost:3000/data/${encodedRepo}?aggregationPeriod=day`;
-  
-  if (filters.start) {
-    const startDate = filters.start.split('T')[0];
-    wsUrl += `&startDate=${startDate}`;
-  }
-  if (filters.end) {
-    const endDate = filters.end.split('T')[0];
-    wsUrl += `&endDate=${endDate}`;
-  }
-  
-  // Initialiser le cache
-  wsCache.set(repo, { 
-    runs: [], 
-    isComplete: false, 
-    pageCount: 0,
-    startDate: filters.start,
-    endDate: filters.end
-  });
-  
-  try {
-    activeWebSocket = new WebSocket(wsUrl);
+  // Get GitHub token from storage
+  chrome.storage.local.get(['githubToken'], (result) => {
+    const token = result.githubToken;
     
-    activeWebSocket.onopen = () => {
-      chrome.storage.local.set({ 
-        wsStatus: { isStreaming: true, isComplete: false, connected: true, repo: repo, page: 0, totalRuns: 0 }
-      });
-    };
-    
-    activeWebSocket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        const cache = wsCache.get(repo);
-        
-        // Recevoir des runs bruts
-        if (message.type === 'runs') {
-          cache.runs.push(...message.data);
-          cache.pageCount = message.page;
-          
-          chrome.storage.local.set({ 
-            wsRuns: [...cache.runs],
-            wsStatus: { 
-              isStreaming: true, 
-              isComplete: false, 
-              repo: repo, 
-              page: message.page,
-              totalRuns: cache.runs.length,
-              hasMore: message.hasMore
-            }
-          });
-        }
-        // Message de fin
-        else if (message.type === 'complete') {
-          cache.isComplete = true;
-          
-          chrome.storage.local.set({ 
-            wsStatus: { 
-              isStreaming: false, 
-              isComplete: true, 
-              repo: repo, 
-              totalRuns: cache.runs.length,
-              totalPages: message.totalPages
-            }
-          });
-        }
-        // Erreur
-        else if (message.type === 'error') {
-          console.error('[Background] Server error:', message.message);
-          chrome.storage.local.set({ 
-            wsStatus: { 
-              isStreaming: false, 
-              isComplete: false, 
-              error: message.message, 
-              repo: repo 
-            }
-          });
-        }
-        
-      } catch (error) {
-        console.error('[Background] Error parsing message:', error);
-      }
-    };
-    
-    activeWebSocket.onclose = (event) => {
-      const cache = wsCache.get(repo);
-      if (cache) {
-        cache.isComplete = true;
-      }
-      
+    if (!token) {
       chrome.storage.local.set({ 
         wsStatus: { 
           isStreaming: false, 
-          isComplete: true, 
-          repo: repo, 
-          totalRuns: cache?.runs?.length || 0,
-          totalPages: cache?.pageCount || 0
+          isComplete: false, 
+          error: 'GitHub token not configured. Please go to Settings.', 
+          repo: repo 
         }
       });
-      
-      activeWebSocket = null;
-    };
+      return;
+    }
     
-    activeWebSocket.onerror = (error) => {
-      const cache = wsCache.get(repo);
-      if (cache && cache.runs && cache.runs.length > 0) {
-        return;
-      }
+    // Build WebSocket URL with token
+    const encodedRepo = encodeURIComponent(repo);
+    let wsUrl = `ws://localhost:3000/data/${encodedRepo}?aggregationPeriod=day&token=${encodeURIComponent(token)}`;
+    
+    if (filters.start) {
+      const startDate = filters.start.split('T')[0];
+      wsUrl += `&startDate=${startDate}`;
+    }
+    if (filters.end) {
+      const endDate = filters.end.split('T')[0];
+      wsUrl += `&endDate=${endDate}`;
+    }
+    
+    wsCache.set(repo, { 
+      runs: [], 
+      isComplete: false, 
+      pageCount: 0,
+      startDate: filters.start,
+      endDate: filters.end
+    });
+    
+    try {
+      activeWebSocket = new WebSocket(wsUrl);
       
-      console.error('[Background] WebSocket error:', error);
+      activeWebSocket.onopen = () => {
+        chrome.storage.local.set({ 
+          wsStatus: { isStreaming: true, isComplete: false, connected: true, repo: repo, page: 0, totalRuns: 0 }
+        });
+      };
+      
+      activeWebSocket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const cache = wsCache.get(repo);
+          
+          if (message.type === 'runs') {
+            cache.runs.push(...message.data);
+            cache.pageCount = message.page;
+            
+            chrome.storage.local.set({ 
+              wsRuns: [...cache.runs],
+              wsStatus: { 
+                isStreaming: true, 
+                isComplete: false, 
+                repo: repo, 
+                page: message.page,
+                totalRuns: cache.runs.length,
+                hasMore: message.hasMore
+              }
+            });
+          }
+          else if (message.type === 'complete') {
+            cache.isComplete = true;
+            
+            chrome.storage.local.set({ 
+              wsStatus: { 
+                isStreaming: false, 
+                isComplete: true, 
+                repo: repo, 
+                totalRuns: cache.runs.length,
+                totalPages: message.totalPages
+              }
+            });
+          }
+          else if (message.type === 'error') {
+            console.error('[Background] Server error:', message.message);
+            chrome.storage.local.set({ 
+              wsStatus: { 
+                isStreaming: false, 
+                isComplete: false, 
+                error: message.message, 
+                repo: repo 
+              }
+            });
+          }
+          
+        } catch (error) {
+          console.error('[Background] Error parsing message:', error);
+        }
+      };
+      
+      activeWebSocket.onclose = (event) => {
+        const cache = wsCache.get(repo);
+        if (cache) {
+          cache.isComplete = true;
+        }
+        
+        chrome.storage.local.set({ 
+          wsStatus: { 
+            isStreaming: false, 
+            isComplete: true, 
+            repo: repo, 
+            totalRuns: cache?.runs?.length || 0,
+            totalPages: cache?.pageCount || 0
+          }
+        });
+        
+        activeWebSocket = null;
+      };
+      
+      activeWebSocket.onerror = (error) => {
+        const cache = wsCache.get(repo);
+        if (cache && cache.runs && cache.runs.length > 0) {
+          return;
+        }
+        
+        console.error('[Background] WebSocket error:', error);
+        
+        chrome.storage.local.set({ 
+          wsStatus: { 
+            isStreaming: false, 
+            isComplete: false, 
+            error: 'WebSocket connection failed', 
+            repo: repo 
+          }
+        });
+      };
+      
+    } catch (error) {
+      console.error('[Background] Failed to create WebSocket:', error);
       
       chrome.storage.local.set({ 
         wsStatus: { 
           isStreaming: false, 
           isComplete: false, 
-          error: 'WebSocket connection failed', 
+          error: error.message, 
           repo: repo 
         }
       });
-    };
-    
-  } catch (error) {
-    console.error('[Background] Failed to create WebSocket:', error);
-    
-    chrome.storage.local.set({ 
-      wsStatus: { 
-        isStreaming: false, 
-        isComplete: false, 
-        error: error.message, 
-        repo: repo 
-      }
-    });
-  }
+    }
+  });
 }
 
 console.log('[Background] GHA Dashboard Background Script loaded');
