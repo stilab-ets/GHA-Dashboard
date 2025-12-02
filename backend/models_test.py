@@ -2,6 +2,9 @@ import models as m
 
 import datetime as dt
 
+# Fixed datetime for tests
+TEST_DATETIME = dt.datetime(2025, 12, 2, 12, 0, 0)
+
 # ===============================
 # || Repository equality tests ||
 # ===============================
@@ -10,15 +13,15 @@ def test_repository_equality_passes():
     a.id = 1
     a.repo_name = "crates.io"
     a.owner = "rust-lang"
-    a.created_at = dt.datetime.today()
-    a.updated_at = dt.datetime.today()
+    a.created_at = TEST_DATETIME
+    a.updated_at = TEST_DATETIME
 
     b = m.Repository()
     b.id = 1
     b.repo_name = "crates.io"
     b.owner = "rust-lang"
-    b.created_at = dt.datetime.today()
-    b.updated_at = dt.datetime.today()
+    b.created_at = TEST_DATETIME
+    b.updated_at = TEST_DATETIME
 
     assert a == b
 
@@ -27,15 +30,15 @@ def test_repository_equality_fails():
     a.id = 2
     a.repo_name = "git"
     a.owner = "git"
-    a.created_at = dt.datetime.today()
-    a.updated_at = dt.datetime.today()
+    a.created_at = TEST_DATETIME
+    a.updated_at = TEST_DATETIME
 
     b = m.Repository()
     b.id = 1
     b.repo_name = "crates.io"
     b.owner = "rust-lang"
-    b.created_at = dt.datetime.today()
-    b.updated_at = dt.datetime.today()
+    b.created_at = TEST_DATETIME
+    b.updated_at = TEST_DATETIME
 
     assert a != b
 
@@ -47,15 +50,15 @@ def test_workflow_equality_passes():
     a.id = 1
     a.workflow_name = "CI"
     a.repository_id = 1
-    a.created_at = dt.datetime.today()
-    a.updated_at = dt.datetime.today()
+    a.created_at = TEST_DATETIME
+    a.updated_at = TEST_DATETIME
 
     b = m.Workflow()
     b.id = 1
     b.workflow_name = "CI"
     b.repository_id = 1
-    b.created_at = dt.datetime.today()
-    b.updated_at = dt.datetime.today()
+    b.created_at = TEST_DATETIME
+    b.updated_at = TEST_DATETIME
 
     assert a == b
 
@@ -64,15 +67,15 @@ def test_workflow_equality_fails():
     a.id = 1
     a.workflow_name = "CI"
     a.repository_id = 1
-    a.created_at = dt.datetime.today()
-    a.updated_at = dt.datetime.today()
+    a.created_at = TEST_DATETIME
+    a.updated_at = TEST_DATETIME
 
     b = m.Workflow()
     b.id = 2
     b.workflow_name = "CD"
     b.repository_id = 2
-    b.created_at = dt.datetime.today()
-    b.updated_at = dt.datetime.today()
+    b.created_at = TEST_DATETIME
+    b.updated_at = TEST_DATETIME
 
     assert a != b
 
@@ -91,8 +94,8 @@ def test_workflow_run_equality_passes():
     a.conclusion = "success"
     a.workflow_event_trigger = "push"
     a.issuer_name = "Gaubbe"
-    a.created_at = dt.datetime.today()
-    a.updated_at = dt.datetime.today()
+    a.created_at = TEST_DATETIME
+    a.updated_at = TEST_DATETIME
     a.build_duration = 300.0
     a.tests_ran = True
     a.tests_passed = 10
@@ -128,8 +131,8 @@ def test_workflow_run_equality_passes():
     b.conclusion = "success"
     b.workflow_event_trigger = "push"
     b.issuer_name = "Gaubbe"
-    b.created_at = dt.datetime.today()
-    b.updated_at = dt.datetime.today()
+    b.created_at = TEST_DATETIME
+    b.updated_at = TEST_DATETIME
     b.build_duration = 300.0
     b.tests_ran = True
     b.tests_passed = 10
@@ -168,8 +171,8 @@ def test_workflow_run_equality_fails():
     a.conclusion = "success"
     a.workflow_event_trigger = "push"
     a.issuer_name = "Gaubbe"
-    a.created_at = dt.datetime.today()
-    a.updated_at = dt.datetime.today()
+    a.created_at = TEST_DATETIME
+    a.updated_at = TEST_DATETIME
     a.build_duration = 300.0
     a.tests_ran = True
     a.tests_passed = 10
@@ -205,8 +208,8 @@ def test_workflow_run_equality_fails():
     b.conclusion = "failure"
     b.workflow_event_trigger = "pull_request"
     b.issuer_name = "torvalds"
-    b.created_at = dt.datetime.today()
-    b.updated_at = dt.datetime.today()
+    b.created_at = TEST_DATETIME
+    b.updated_at = TEST_DATETIME
     b.build_duration = 600.0
     b.tests_ran = False
     b.tests_passed = 0
