@@ -103,7 +103,24 @@ export default function Dashboard() {
     
     try {
       const repo = await new Promise((resolve) => {
-        if (typeof chrome !== 'undefined' && chrome.storage) {
+        if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
+          // Get the active tab and use its per-tab repo key
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const activeTab = tabs && tabs[0];
+            if (activeTab && typeof activeTab.id === 'number' && chrome.storage) {
+              const key = `currentRepo_${activeTab.id}`;
+              chrome.storage.local.get([key], (result) => {
+                resolve(result[key] || 'facebook/react');
+              });
+            } else if (chrome.storage) {
+              chrome.storage.local.get(['currentRepo'], (result) => {
+                resolve(result.currentRepo || 'facebook/react');
+              });
+            } else {
+              resolve('facebook/react');
+            }
+          });
+        } else if (typeof chrome !== 'undefined' && chrome.storage) {
           chrome.storage.local.get(['currentRepo'], (result) => {
             resolve(result.currentRepo || 'facebook/react');
           });
@@ -244,7 +261,24 @@ export default function Dashboard() {
     );
   }
   
-  if (error) return <div className="dashboard dark container" style={{ color: 'var(--accent)' }}>{error}</div>;
+  if (error) return (
+    <div className="dashboard dark container">
+      <div className="card" style={{
+        borderLeft: '4px solid #f44336',
+        background: 'linear-gradient(90deg, rgba(244,67,54,0.1) 0%, rgba(244,67,54,0.05) 100%)',
+        padding: '16px 20px',
+        marginTop: '16px'
+      }}>
+        <h3 style={{ margin: '0 0 8px 0', color: '#ff867c' }}>Connection Error</h3>
+        <p style={{ margin: 0, color: '#ffd0cc' }}>
+          {error}
+        </p>
+        <div style={{ marginTop: '12px' }}>
+          <button className="primary-button" onClick={loadDashboardData}>Retry</button>
+        </div>
+      </div>
+    </div>
+  );
   if (!data) return null;
   if (data.noData) return <div className="dashboard dark container" style={{ textAlign: 'center', padding: '2rem' }}>
     <h2>No Data Available</h2>

@@ -3,6 +3,7 @@
 const wsCache = new Map();
 let activeWebSocket = null;
 let currentRepo = null;
+let currentTabId = null; // Tab owning the active WebSocket
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
@@ -15,12 +16,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.type === "UPDATE_REPO") {
-    chrome.storage.local.set({ currentRepo: request.repo });
+    const tabId = sender?.tab?.id;
+    if (typeof tabId === 'number') {
+      // Store repo name per-tab so multiple GitHub tabs don't overwrite
+      // each other's "currentRepo" value.
+      const key = `currentRepo_${tabId}`;
+      chrome.storage.local.set({ [key]: request.repo });
+    }
     return true;
   }
   
   if (request.action === "startWebSocketExtraction") {
     const { repo, filters } = request;
+    
+    // If another repository is currently streaming, do not start a new one.
+    // Instead, signal the caller that the backend is busy so it can show
+    // an appropriate error and allow retrying later without stealing
+    // the existing stream.
+    if (activeWebSocket && currentRepo && currentRepo !== repo) {
+      const cached = wsCache.get(currentRepo);
+      sendResponse({
+        success: false,
+        busy: true,
+        currentRepo,
+        isComplete: cached?.isComplete || false,
+        itemCount: cached?.runs?.length || 0
+      });
+      return true;
+    }
     
     // Check cache (only if same dates)
     const cached = wsCache.get(repo);
@@ -65,6 +88,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return false;
 });
 
+// Close WebSocket if the owner tab is closed
+chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+  if (currentTabId !== null && tabId === currentTabId && activeWebSocket) {
+    try {
+      activeWebSocket.close();
+    } catch (e) {
+      console.error('[Background] Error closing WebSocket on tab removal:', e);
+    }
+    activeWebSocket = null;
+    currentRepo = null;
+    currentTabId = null;
+  }
+});
+
+// Close WebSocket if the owner tab is refreshed
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!activeWebSocket || currentTabId === null) return;
+
+  // We only care about the tab that owns the current WebSocket
+  if (tabId !== currentTabId) return;
+
+  // When the page starts loading again in that tab (F5 / hard reload),
+  // immediately close the WebSocket so the backend is freed.
+  if (changeInfo.status === 'loading') {
+    try {
+      activeWebSocket.close();
+    } catch (e) {
+      console.error('[Background] Error closing WebSocket on tab reload:', e);
+    }
+    activeWebSocket = null;
+    currentRepo = null;
+    currentTabId = null;
+  }
+});
+
 function startWebSocketExtraction(repo, filters = {}, tabId) {
   if (activeWebSocket) {
     activeWebSocket.close();
@@ -72,6 +130,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
   }
   
   currentRepo = repo;
+  currentTabId = tabId ?? null;
   
   chrome.storage.local.set({ 
     wsRuns: [], 
@@ -177,21 +236,36 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
       
       activeWebSocket.onclose = (event) => {
         const cache = wsCache.get(repo);
+        const hadData = cache?.runs?.length > 0;
         if (cache) {
           cache.isComplete = true;
         }
-        
-        chrome.storage.local.set({ 
-          wsStatus: { 
-            isStreaming: false, 
-            isComplete: true, 
-            repo: repo, 
-            totalRuns: cache?.runs?.length || 0,
-            totalPages: cache?.pageCount || 0
-          }
-        });
-        
+
+        if (!hadData) {
+          chrome.storage.local.set({
+            wsStatus: {
+              isStreaming: false,
+              isComplete: false,
+              error: 'Unable to connect to API at ws://localhost:3000. Please verify the backend is running and reachable.',
+              repo: repo
+            }
+          });
+        } else {
+          chrome.storage.local.set({ 
+            wsStatus: { 
+              isStreaming: false, 
+              isComplete: true, 
+              repo: repo, 
+              totalRuns: cache?.runs?.length || 0,
+              totalPages: cache?.pageCount || 0
+            }
+          });
+        }
+
         activeWebSocket = null;
+        // When the socket closes for any reason, clear ownership so
+        // new repositories can start streaming.
+        currentTabId = null;
       };
       
       activeWebSocket.onerror = (error) => {
@@ -206,7 +280,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
           wsStatus: { 
             isStreaming: false, 
             isComplete: false, 
-            error: 'WebSocket connection failed', 
+            error: 'Unable to connect to API at ws://localhost:3000. Please verify the backend is running and reachable.', 
             repo: repo 
           }
         });
