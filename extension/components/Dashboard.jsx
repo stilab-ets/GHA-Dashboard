@@ -110,24 +110,18 @@ export default function Dashboard() {
             if (activeTab && typeof activeTab.id === 'number' && chrome.storage) {
               const key = `currentRepo_${activeTab.id}`;
               chrome.storage.local.get([key], (result) => {
-                resolve(result[key] || 'facebook/react');
+                resolve(result[key]);
               });
             } else if (chrome.storage) {
               chrome.storage.local.get(['currentRepo'], (result) => {
-                resolve(result.currentRepo || 'facebook/react');
+                resolve(result.currentRepo);
               });
-            } else {
-              resolve('facebook/react');
-            }
-          });
+          }});
         } else if (typeof chrome !== 'undefined' && chrome.storage) {
           chrome.storage.local.get(['currentRepo'], (result) => {
-            resolve(result.currentRepo || 'facebook/react');
+            resolve(result.currentRepo);
           });
-        } else {
-          resolve('facebook/react');
-        }
-      });
+      }});
 
       if (USE_WEBSOCKET) {
         clearWebSocketCache(repo);
