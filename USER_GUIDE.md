@@ -19,10 +19,10 @@ This guide explains how to install, run, and use the dashboard.
 - GitHub Personal Access Token (PAT) with `repo` or `public_repo` permission
 
 ###  Configure your Token
-Create a `.env` file inside the `backend/` directory:
-- GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxx
-- FLASK_RUN_PORT=3000
-
+- Open the Chrome extension popup.
+- Paste your GitHub Personal Access Token (PAT) in the “Token” field.
+- Save your changes.
+Once configured, the extension automatically uses your token to fetch GitHub Actions data.
 
 ---
 
@@ -66,6 +66,8 @@ Enable Developer Mode (top right).
 Click Load unpacked
 Select the folder: /extension
 The “GHA Dashboard” icon will appear in Chrome.
+
+Le folder c'est /extension/build
 
 ##  4. Using the Dashboard
 
@@ -162,4 +164,4 @@ docker compose up --build
 ##  9. Contact & Support
 - Author : Anthony monton, Vyshmi Nagendran, Fatma Aljane, Gabriel Aubé, Valentin Palashev
 - Project : PFE017 Design and Development of an Intelligent Dashboard for Monitoring GitHub Actions – Final Year Project (ÉTS)
-- Year : 2026
+- Year : 2025
