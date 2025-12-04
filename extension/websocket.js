@@ -85,7 +85,22 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
 // Filtrer les runs localement
 // ============================================
 export function filterRunsLocally(filters, repoOverride = null) {
-  const repo = repoOverride || getCurrentRepo();
+  // Try explicit repo first; if not provided, fall back to the last
+  // repository seen in wsStatus so filtering still works from
+  // Dashboard without needing to thread the repo everywhere.
+  let repo = repoOverride;
+  if (!repo && typeof chrome !== 'undefined' && chrome.storage) {
+    // NOTE: we cannot do async storage reads here because callers
+    // expect a synchronous return, so we rely on the in-memory
+    // cache, which is already keyed by repo in the storage listener.
+    // If no explicit repo is provided, we take the last key in
+    // _runsByRepo as the current repo.
+    const keys = Array.from(_runsByRepo.keys());
+    if (keys.length > 0) {
+      repo = keys[keys.length - 1];
+    }
+  }
+
   if (!repo) {
     return null;
   }
@@ -420,9 +435,14 @@ export function clearWebSocketCache(repo = null) {
 
 // Exporter pour utilisation dans Dashboard.jsx
 export function getAllRuns() {
-  const repo = getCurrentRepo();
-  if (!repo) return [];
-  return _runsByRepo.get(repo) || [];
+  // As filtering now expects an explicit repo, this helper is retained
+  // only for backward compatibility in places that just check for the
+  // presence of runs. We return the union of all cached runs.
+  const all = [];
+  for (const runs of _runsByRepo.values()) {
+    all.push(...runs);
+  }
+  return all;
 }
 
 export function getCurrentRepo() {

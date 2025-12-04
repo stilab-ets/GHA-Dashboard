@@ -223,7 +223,8 @@ export default function Dashboard() {
 
   // Appliquer filtres quand workflow/branch/actor changent
   useEffect(() => {
-    if (dataLoaded && getAllRuns().length > 0) {
+    const currentRuns = getAllRuns();
+    if (dataLoaded && currentRuns.length > 0) {
       const filtered = filterRunsLocally({
         workflow: filters.workflow,
         branch: filters.branch,
