@@ -103,14 +103,25 @@ export default function Dashboard() {
     
     try {
       const repo = await new Promise((resolve) => {
-        if (typeof chrome !== 'undefined' && chrome.storage) {
+        if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
+          // Get the active tab and use its per-tab repo key
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const activeTab = tabs && tabs[0];
+            if (activeTab && typeof activeTab.id === 'number' && chrome.storage) {
+              const key = `currentRepo_${activeTab.id}`;
+              chrome.storage.local.get([key], (result) => {
+                resolve(result[key]);
+              });
+            } else if (chrome.storage) {
+              chrome.storage.local.get(['currentRepo'], (result) => {
+                resolve(result.currentRepo);
+              });
+          }});
+        } else if (typeof chrome !== 'undefined' && chrome.storage) {
           chrome.storage.local.get(['currentRepo'], (result) => {
-            resolve(result.currentRepo || 'facebook/react');
+            resolve(result.currentRepo);
           });
-        } else {
-          resolve('facebook/react');
-        }
-      });
+      }});
 
       if (USE_WEBSOCKET) {
         clearWebSocketCache(repo);
@@ -206,7 +217,8 @@ export default function Dashboard() {
 
   // Appliquer filtres quand workflow/branch/actor changent
   useEffect(() => {
-    if (dataLoaded && getAllRuns().length > 0) {
+    const currentRuns = getAllRuns();
+    if (dataLoaded && currentRuns.length > 0) {
       const filtered = filterRunsLocally({
         workflow: filters.workflow,
         branch: filters.branch,
@@ -244,7 +256,24 @@ export default function Dashboard() {
     );
   }
   
-  if (error) return <div className="dashboard dark container" style={{ color: 'var(--accent)' }}>{error}</div>;
+  if (error) return (
+    <div className="dashboard dark container">
+      <div className="card" style={{
+        borderLeft: '4px solid #f44336',
+        background: 'linear-gradient(90deg, rgba(244,67,54,0.1) 0%, rgba(244,67,54,0.05) 100%)',
+        padding: '16px 20px',
+        marginTop: '16px'
+      }}>
+        <h3 style={{ margin: '0 0 8px 0', color: '#ff867c' }}>Connection Error</h3>
+        <p style={{ margin: 0, color: '#ffd0cc' }}>
+          {error}
+        </p>
+        <div style={{ marginTop: '12px' }}>
+          <button className="primary-button" onClick={loadDashboardData}>Retry</button>
+        </div>
+      </div>
+    </div>
+  );
   if (!data) return null;
   if (data.noData) return <div className="dashboard dark container" style={{ textAlign: 'center', padding: '2rem' }}>
     <h2>No Data Available</h2>
@@ -353,7 +382,34 @@ export default function Dashboard() {
         <h2 style={{ marginTop: 0 }}>GitHub Actions Dashboard</h2>
         
         {/* Filter Panel */}
-        <div className="filter-panel card">
+        <div
+          className="filter-panel card"
+          style={{
+            position: 'relative',
+            opacity: progress.isStreaming ? 0.5 : 1,
+            pointerEvents: progress.isStreaming ? 'none' : 'auto',
+            transition: 'opacity 0.2s ease'
+          }}
+        >
+          {progress.isStreaming && (
+            <div
+              style={{
+                position: 'absolute',
+                zIndex: 10,
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#fff',
+                fontWeight: 600,
+                fontSize: '14px',
+                background: 'linear-gradient(90deg, rgba(0,0,0,0.6), rgba(0,0,0,0.4))',
+                pointerEvents: 'auto'
+              }}
+            >
+              Filters disabled while data is loading…
+            </div>
+          )}
           <div className="filter-row">
             {/* Workflow */}
             <div className="filter-group">
@@ -361,6 +417,7 @@ export default function Dashboard() {
               <div className="dropdown-container" ref={dropdownRefs.workflow}>
                 <button
                   className="dropdown-toggle"
+                  disabled={progress.isStreaming}
                   onClick={() => setOpenDropdowns(prev => ({
                     workflow: !prev.workflow,
                     branch: false,
@@ -375,6 +432,7 @@ export default function Dashboard() {
                     <label className="dropdown-item">
                       <input
                         type="checkbox"
+                        disabled={progress.isStreaming}
                         checked={filters.workflow.includes('all')}
                         onChange={(e) => toggleCheckbox('workflow', 'all', e.target.checked)}
                       />
@@ -401,6 +459,7 @@ export default function Dashboard() {
               <div className="dropdown-container" ref={dropdownRefs.branch}>
                 <button
                   className="dropdown-toggle"
+                  disabled={progress.isStreaming}
                   onClick={() => setOpenDropdowns(prev => ({
                     workflow: false,
                     branch: !prev.branch,
@@ -415,6 +474,7 @@ export default function Dashboard() {
                     <label className="dropdown-item">
                       <input
                         type="checkbox"
+                        disabled={progress.isStreaming}
                         checked={filters.branch.includes('all')}
                         onChange={(e) => toggleCheckbox('branch', 'all', e.target.checked)}
                       />
@@ -441,6 +501,7 @@ export default function Dashboard() {
               <div className="dropdown-container" ref={dropdownRefs.actor}>
                 <button
                   className="dropdown-toggle"
+                  disabled={progress.isStreaming}
                   onClick={() => setOpenDropdowns(prev => ({
                     workflow: false,
                     branch: false,
@@ -455,6 +516,7 @@ export default function Dashboard() {
                     <label className="dropdown-item">
                       <input
                         type="checkbox"
+                        disabled={progress.isStreaming}
                         checked={filters.actor.includes('all')}
                         onChange={(e) => toggleCheckbox('actor', 'all', e.target.checked)}
                       />
@@ -482,6 +544,7 @@ export default function Dashboard() {
                 type="datetime-local"
                 value={filters.start}
                 max={filters.end || defaultEnd}
+                disabled={progress.isStreaming}
                 onChange={(e) => handleFilterChange('start', e.target.value)}
               />
             </div>
@@ -492,6 +555,7 @@ export default function Dashboard() {
                 value={filters.end}
                 min={filters.start}
                 max={defaultEnd}
+                disabled={progress.isStreaming}
                 onChange={(e) => handleFilterChange('end', e.target.value)}
               />
             </div>

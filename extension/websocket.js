@@ -2,50 +2,80 @@
 // WebSocket Client
 // ============================================
 
-let _progressCallback = null;
-let _currentRepo = null;
-let _resolvePromise = null;
-let _allRuns = []; // Stockage de tous les runs bruts
+// Global Chrome storage events are shared across all extension contexts.
+// To avoid dashboards overwriting each other's state, we keep a cache of
+// runs per repository, and always use the repo passed into the public
+// functions instead of a mutable global "current repo".
+const _runsByRepo = new Map();
 
-// Ecouter les changements de chrome.storage
+const _progressCallbacks = new Map();
+const _pendingResolves = new Map();
+const _pendingRejects = new Map();
+
 if (typeof chrome !== 'undefined' && chrome.storage) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
     
     // Changement de runs
-    if (changes.wsRuns && _progressCallback && _currentRepo) {
+    if (changes.wsRuns) {
       const newRuns = changes.wsRuns.newValue || [];
-      _allRuns = newRuns;
-      
-      // Convertir en format dashboard (sans filtres pour l'instant)
-      const dashboardData = convertRunsToDashboard(newRuns, _currentRepo, null);
-      _progressCallback(dashboardData, false);
+
+      // When runs change, also read wsStatus to know for which repo the
+      // background script is currently streaming. This ensures we store
+      // the data under the correct repository key.
+      chrome.storage.local.get(['wsStatus'], (state) => {
+        const status = state.wsStatus || {};
+        const repo = status.repo;
+        if (!repo) return;
+
+        _runsByRepo.set(repo, newRuns);
+
+        // If a dashboard is actively waiting on progress, it will have
+        // registered its own callback via fetchDashboardDataViaWebSocket.
+        if (_progressCallbacks.has(repo)) {
+          const cb = _progressCallbacks.get(repo);
+          const dashboardData = convertRunsToDashboard(newRuns, repo, null);
+          cb(dashboardData, false);
+        }
+      });
     }
     
     // Changement de statut
     if (changes.wsStatus) {
       const status = changes.wsStatus.newValue || {};
+      const repo = status.repo;
       
-      if (status.isComplete && _resolvePromise) {
+      if (!repo) return;
+
+      if (status.isComplete && _pendingResolves.has(repo)) {
         chrome.storage.local.get(['wsRuns'], (result) => {
           const finalRuns = result.wsRuns || [];
-          _allRuns = finalRuns;
+          _runsByRepo.set(repo, finalRuns);
           
-          const dashboardData = convertRunsToDashboard(finalRuns, _currentRepo, null);
+          const dashboardData = convertRunsToDashboard(finalRuns, repo, null);
           
-          if (_progressCallback) {
-            _progressCallback(dashboardData, true);
+          const cb = _progressCallbacks.get(repo);
+          if (cb) {
+            cb(dashboardData, true);
           }
           
-          if (_resolvePromise) {
-            _resolvePromise(dashboardData);
-            _resolvePromise = null;
+          const resolver = _pendingResolves.get(repo);
+          if (resolver) {
+            resolver(dashboardData);
           }
+          _pendingResolves.delete(repo);
+          _pendingRejects.delete(repo);
         });
       }
       
-      if (status.error) {
+      if (status.error && _pendingRejects.has(repo)) {
         console.error('[WebSocket] Error:', status.error);
+        const rejector = _pendingRejects.get(repo);
+        if (rejector) {
+          rejector(new Error(status.error));
+        }
+        _pendingRejects.delete(repo);
+        _pendingResolves.delete(repo);
       }
     }
   });
@@ -54,12 +84,33 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
 // ============================================
 // Filtrer les runs localement
 // ============================================
-export function filterRunsLocally(filters) {
-  if (!_allRuns || _allRuns.length === 0) {
+export function filterRunsLocally(filters, repoOverride = null) {
+  // Try explicit repo first; if not provided, fall back to the last
+  // repository seen in wsStatus so filtering still works from
+  // Dashboard without needing to thread the repo everywhere.
+  let repo = repoOverride;
+  if (!repo && typeof chrome !== 'undefined' && chrome.storage) {
+    // NOTE: we cannot do async storage reads here because callers
+    // expect a synchronous return, so we rely on the in-memory
+    // cache, which is already keyed by repo in the storage listener.
+    // If no explicit repo is provided, we take the last key in
+    // _runsByRepo as the current repo.
+    const keys = Array.from(_runsByRepo.keys());
+    if (keys.length > 0) {
+      repo = keys[keys.length - 1];
+    }
+  }
+
+  if (!repo) {
     return null;
   }
-  
-  return convertRunsToDashboard(_allRuns, _currentRepo, filters);
+
+  const runs = _runsByRepo.get(repo);
+  if (!runs || runs.length === 0) {
+    return null;
+  }
+
+  return convertRunsToDashboard(runs, repo, filters);
 }
 
 // ============================================
@@ -297,10 +348,16 @@ function convertRunsToDashboard(runs, repo, filters) {
 
 export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgressCallback = null) {
   return new Promise((resolve, reject) => {
-    _currentRepo = repo;
-    _progressCallback = onProgressCallback;
-    _resolvePromise = resolve;
-    _allRuns = [];
+    // Store callbacks and promise handlers per repo so multiple
+    // dashboards (for different repos) do not interfere.
+    if (onProgressCallback) {
+      _progressCallbacks.set(repo, onProgressCallback);
+    } else {
+      _progressCallbacks.delete(repo);
+    }
+    _pendingResolves.set(repo, resolve);
+    _pendingRejects.set(repo, reject);
+    _runsByRepo.set(repo, []);
     
     chrome.runtime.sendMessage({
       action: 'startWebSocketExtraction',
@@ -313,28 +370,37 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
         return;
       }
       
+      // If background reports that another repo is already streaming
+      if (response && response.busy) {
+        const message = response.error || `Another repository (${response.currentRepo}) is currently streaming. Please wait until it finishes before starting a new extraction.`;
+        reject(new Error(message));
+        return;
+      }
+
       if (response?.cached) {
-        _allRuns = response.data;
         const dashboardData = convertRunsToDashboard(response.data, repo, filters);
         if (onProgressCallback) {
           onProgressCallback(dashboardData, true);
         }
         resolve(dashboardData);
-        _resolvePromise = null;
+        _pendingResolves.delete(repo);
+        _pendingRejects.delete(repo);
       } else {
         // Timeout de securite (3 minutes)
         setTimeout(() => {
-          if (_resolvePromise) {
+          if (_pendingResolves.has(repo)) {
             chrome.storage.local.get(['wsRuns'], (result) => {
               const data = result.wsRuns || [];
               if (data.length > 0) {
-                _allRuns = data;
                 const dashboardData = convertRunsToDashboard(data, repo, filters);
                 resolve(dashboardData);
               } else {
-                reject(new Error('WebSocket timeout'));
+                if (_pendingRejects.has(repo)) {
+                  reject(new Error('WebSocket timeout'));
+                }
               }
-              _resolvePromise = null;
+              _pendingResolves.delete(repo);
+              _pendingRejects.delete(repo);
             });
           }
         }, 180000);
@@ -360,14 +426,35 @@ export function clearWebSocketCache(repo = null) {
     repo: repo
   });
   chrome.storage.local.remove(['wsRuns', 'wsStatus']);
-  _allRuns = [];
+  if (repo) {
+    _runsByRepo.delete(repo);
+  } else {
+    _runsByRepo.clear();
+  }
 }
 
 // Exporter pour utilisation dans Dashboard.jsx
 export function getAllRuns() {
-  return _allRuns;
+  // As filtering now expects an explicit repo, this helper is retained
+  // only for backward compatibility in places that just check for the
+  // presence of runs. We return the union of all cached runs.
+  const all = [];
+  for (const runs of _runsByRepo.values()) {
+    all.push(...runs);
+  }
+  return all;
 }
 
 export function getCurrentRepo() {
-  return _currentRepo;
+  // Best-effort: read the last repo from wsStatus so that
+  // callers that don't explicitly track the repo can still
+  // access the most recent one.
+  // Note: this is only used as a fallback; dashboards should
+  // prefer passing the repo explicitly to avoid cross-talk.
+  if (typeof chrome === 'undefined' || !chrome.storage) return null;
+  // This is async in reality, but existing callers treat
+  // getCurrentRepo as sync. For backward-compatibility we
+  // just return null here and rely on filterRunsLocally's
+  // repoOverride when used from Dashboard.
+  return null;
 }
