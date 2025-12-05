@@ -1,0 +1,48 @@
+@startuml Loading Data Sequence Diagram
+title Sequence Diagram: User Initiating Dashboard Data Loading via fetchDashboardDataViaWebSocket
+
+actor User
+participant Dashboard as "Dashboard.jsx"
+participant WebSocketClient as "websocket.js"
+participant Background as "background.js"
+participant Storage as "chrome.storage.local"
+participant Backend as "Backend (API)"
+
+User -> Dashboard: Interact (e.g., change filters or load dashboard)
+Dashboard -> Dashboard: loadDashboardData()
+Dashboard -> Storage: Get current repo (currentRepo_${tabId} or currentRepo)
+Storage --> Dashboard: Return repo
+Dashboard -> WebSocketClient: clearWebSocketCache(repo)
+WebSocketClient -> Storage: Remove wsRuns and wsStatus for repo
+Dashboard -> WebSocketClient: fetchDashboardDataViaWebSocket(repo, filters, onProgress)
+WebSocketClient -> Background: chrome.runtime.sendMessage({action: "startWebSocketExtraction", repo, filters})
+Background -> Background: Check wsCache for existing data
+alt Cache hit and complete
+    Background --> WebSocketClient: Send cached data
+else Cache miss or incomplete
+    Background -> Background: startWebSocketExtraction()
+    Background -> Storage: Get githubToken
+    Storage --> Background: Return token
+    Background -> Backend: new WebSocket(ws://localhost:3000/data/{repo}?token={...}&start={...}&end={...})
+    Backend --> Background: WebSocket connected
+    Background -> Storage: Update wsStatus (isStreaming: true)
+    loop While streaming
+        Backend --> Background: Send message (runs data)
+        Background -> Background: Accumulate runs in wsCache
+        Background -> Storage: Update wsRuns and wsStatus
+        Storage --> WebSocketClient: Storage change event
+        WebSocketClient -> WebSocketClient: Update _runsByRepo
+        WebSocketClient -> WebSocketClient: Process data via convertRunsToDashboard()
+        WebSocketClient -> Dashboard: Call onProgress(partialData, isComplete)
+        Dashboard -> Dashboard: Update UI with filtered data
+    end
+    Backend --> Background: Send 'complete' message
+    Background -> Background: Mark wsCache as complete
+    Background -> Storage: Update wsStatus (isComplete: true)
+    Storage --> WebSocketClient: Storage change event
+    WebSocketClient -> WebSocketClient: Final data processing
+    WebSocketClient -> Dashboard: Call onProgress(finalData, true)
+    Dashboard -> Dashboard: Set dataLoaded = true
+end
+
+@enduml
