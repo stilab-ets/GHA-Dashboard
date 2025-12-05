@@ -150,12 +150,10 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
     let wsUrl = `ws://localhost:3000/data/${encodedRepo}?aggregationPeriod=day&token=${encodeURIComponent(token)}`;
     
     if (filters.start) {
-      const startDate = filters.start.split('T')[0];
-      wsUrl += `&startDate=${startDate}`;
+      wsUrl += `&startDate=${filters.start}`;
     }
     if (filters.end) {
-      const endDate = filters.end.split('T')[0];
-      wsUrl += `&endDate=${endDate}`;
+      wsUrl += `&endDate=${filters.end}`;
     }
     
     wsCache.set(repo, { 

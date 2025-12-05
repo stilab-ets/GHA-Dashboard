@@ -21,16 +21,13 @@ import {
 } from 'recharts';
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3', '#9c27b0', '#00bcd4'];
-const USE_WEBSOCKET = true;
 
 function formatDateForInput(d) {
   const pad = (n) => String(n).padStart(2, '0');
   const year = d.getFullYear();
   const month = pad(d.getMonth() + 1);
   const day = pad(d.getDate());
-  const hours = pad(d.getHours());
-  const minutes = pad(d.getMinutes());
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  return `${year}-${month}-${day}`;
 }
 
 export default function Dashboard() {
@@ -141,48 +138,40 @@ export default function Dashboard() {
 
       setCurrentRepo(repo);
 
-      if (USE_WEBSOCKET) {
-        clearWebSocketCache(repo);
-        
-        const onProgress = (partialData, isComplete) => {
-          // Save filter options
-          if (partialData.workflows && partialData.workflows.length > 1) {
-            setAvailableFilters({
-              workflows: partialData.workflows,
-              branches: partialData.branches || ['all'],
-              actors: partialData.actors || ['all']
-            });
-          }
-          
-          // Apply local filters
-          const filteredData = applyLocalFilters(partialData);
-          setData(filteredData);
-          
-          setProgress({ 
-            items: partialData.totalRuns || 0, 
-            complete: isComplete,
-            isStreaming: !isComplete
+      clearWebSocketCache(repo);
+      
+      const onProgress = (partialData, isComplete) => {
+        // Save filter options
+        if (partialData.workflows && partialData.workflows.length > 1) {
+          setAvailableFilters({
+            workflows: partialData.workflows,
+            branches: partialData.branches || ['all'],
+            actors: partialData.actors || ['all']
           });
-          setLoading(false);
-          
-          if (isComplete) {
-            setDataLoaded(true);
-          }
-        };
+        }
         
-        const wsFilters = {
-          start: filters.start,
-          end: filters.end
-        };
+        // Apply local filters
+        const filteredData = applyLocalFilters(partialData);
+        setData(filteredData);
         
-        await fetchDashboardDataViaWebSocket(repo, wsFilters, onProgress);
-        
-      } else {
-        const result = await fetchDashboardData(filters);
-        setData(result);
+        setProgress({ 
+          items: partialData.totalRuns || 0, 
+          complete: isComplete,
+          isStreaming: !isComplete
+        });
         setLoading(false);
-        setDataLoaded(true);
-      }
+        
+        if (isComplete) {
+          setDataLoaded(true);
+        }
+      };
+      
+      const wsFilters = {
+        start: filters.start,
+        end: filters.end
+      };
+      
+      await fetchDashboardDataViaWebSocket(repo, wsFilters, onProgress);
     } catch (err) {
       console.error('Error loading dashboard data:', err);
       setError('Error loading data: ' + err.message);
@@ -226,7 +215,7 @@ export default function Dashboard() {
     return rawData;
   };
 
-  // Charger quand les DATES changent
+  // Apply filters when DATES change
   useEffect(() => {
     const datesChanged = prevDatesRef.current.start !== filters.start || 
                          prevDatesRef.current.end !== filters.end;
@@ -237,7 +226,7 @@ export default function Dashboard() {
     }
   }, [filters.start, filters.end]);
 
-  // Appliquer filtres quand workflow/branch/actor changent
+  // Apply filters when workflow/branch/actor change
   useEffect(() => {
     if (dataLoaded && currentRepo) {
       const filtered = filterRunsLocally({
@@ -247,7 +236,7 @@ export default function Dashboard() {
       }, currentRepo);
       
       if (filtered) {
-        // Garder les options de filtres originales
+        // Keep original filter options
         setData(prev => ({
           ...filtered,
           workflows: availableFilters.workflows,
@@ -566,7 +555,7 @@ export default function Dashboard() {
             <div className="filter-group">
               <label>Period start</label>
               <input
-                type="datetime-local"
+                type="date"
                 value={filters.start}
                 max={filters.end || defaultEnd}
                 disabled={progress.isStreaming}
@@ -576,7 +565,7 @@ export default function Dashboard() {
             <div className="filter-group">
               <label>Period end</label>
               <input
-                type="datetime-local"
+                type="date"
                 value={filters.end}
                 min={filters.start}
                 max={defaultEnd}
@@ -722,7 +711,7 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
 
-{/* Cumulative failure duration */}
+          {/* Cumulative failure duration */}
           <div className="card">
             <h3>Cumulative failure duration</h3>
             {failureDurationOverTime && failureDurationOverTime.length > 0 && 
