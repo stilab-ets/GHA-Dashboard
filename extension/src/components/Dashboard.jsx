@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { fetchDashboardData } from '../api';
-import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, getAllRuns } from '../websocket';
+import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally } from '../websocket';
 import '../styles/dashboardStyles.css';
 import {
   ResponsiveContainer,

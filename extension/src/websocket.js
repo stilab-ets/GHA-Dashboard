@@ -267,26 +267,6 @@ function calculateWorkflowStats(filteredRuns) {
   });
 }
 
-/**
- * Calculate failure duration over time
- */
-function calculateFailureDurationOverTime(filteredRuns, runsOverTime) {
-  let cumulativeFailureDuration = 0;
-
-  return runsOverTime.map(day => {
-    const dayFailures = filteredRuns.filter(r =>
-      r.created_at?.startsWith(day.date) && r.conclusion === 'failure'
-    );
-    const dayFailureDuration = dayFailures.reduce((sum, r) => sum + (r.duration || 0), 0);
-    cumulativeFailureDuration += dayFailureDuration;
-    return {
-      date: day.date,
-      dailyFailureDuration: Math.round(dayFailureDuration),
-      cumulativeFailureDuration: Math.round(cumulativeFailureDuration)
-    };
-  });
-}
-
 // ============================================
 // Convert raw runs to Dashboard format
 // ============================================
@@ -491,30 +471,4 @@ export function clearWebSocketCache(repo = null) {
   } else {
     _runsByRepo.clear();
   }
-}
-
-// Exporter pour utilisation dans Dashboard.jsx
-export function getAllRuns() {
-  // As filtering now expects an explicit repo, this helper is retained
-  // only for backward compatibility in places that just check for the
-  // presence of runs. We return the union of all cached runs.
-  const all = [];
-  for (const runs of _runsByRepo.values()) {
-    all.push(...runs);
-  }
-  return all;
-}
-
-export function getCurrentRepo() {
-  // Best-effort: read the last repo from wsStatus so that
-  // callers that don't explicitly track the repo can still
-  // access the most recent one.
-  // Note: this is only used as a fallback; dashboards should
-  // prefer passing the repo explicitly to avoid cross-talk.
-  if (typeof chrome === 'undefined' || !chrome.storage) return null;
-  // This is async in reality, but existing callers treat
-  // getCurrentRepo as sync. For backward-compatibility we
-  // just return null here and rely on filterRunsLocally's
-  // repoOverride when used from Dashboard.
-  return null;
 }
