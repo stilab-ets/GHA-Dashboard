@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "pack": "npm run build && node scripts/assemble.js",
+    "pack": "npm run build && node src/scripts/assemble.js",
     "dist": "npm run pack && powershell -NoProfile -Command \"Compress-Archive -Path build\\* -DestinationPath gha-dashboard.zip -Force\""
   },
   "dependencies": {

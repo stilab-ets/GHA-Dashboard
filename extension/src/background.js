@@ -7,14 +7,6 @@ let currentTabId = null; // Tab owning the active WebSocket
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
-  if (request.action === "openDashboardTab") {
-    chrome.tabs.create({
-      url: chrome.runtime.getURL("react_page/index.html")
-    });
-    sendResponse({ success: true });
-    return true;
-  }
-  
   if (request.type === "UPDATE_REPO") {
     const tabId = sender?.tab?.id;
     if (typeof tabId === 'number') {
@@ -146,7 +138,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         wsStatus: { 
           isStreaming: false, 
           isComplete: false, 
-          error: 'GitHub token not configured. Please go to Settings.', 
+          error: 'GitHub token not configured. Enter it in the extension popup.', 
           repo: repo 
         }
       });

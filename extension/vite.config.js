@@ -8,8 +8,8 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        dashboard: 'dashboard.html',
-        popup: 'popup.html'
+        dashboard: 'src/dashboard/dashboard.html',
+        popup: 'src/popup/popup.html'
       }
     }
   },
