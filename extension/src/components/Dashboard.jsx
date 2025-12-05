@@ -68,7 +68,8 @@ export default function Dashboard() {
     end: defaultEnd
   });
 
-  // UI states
+  // Current repo state
+  const [currentRepo, setCurrentRepo] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const prevDatesRef = useRef({ start: defaultStart, end: defaultEnd });
 
@@ -125,16 +126,20 @@ export default function Dashboard() {
               chrome.storage.local.get([key], (result) => {
                 resolve(result[key]);
               });
-            } else if (chrome.storage) {
+            } else {
               chrome.storage.local.get(['currentRepo'], (result) => {
                 resolve(result.currentRepo);
               });
-          }});
+            }
+          });
         } else if (typeof chrome !== 'undefined' && chrome.storage) {
           chrome.storage.local.get(['currentRepo'], (result) => {
             resolve(result.currentRepo);
           });
-      }});
+        }
+      });
+
+      setCurrentRepo(repo);
 
       if (USE_WEBSOCKET) {
         clearWebSocketCache(repo);
@@ -206,7 +211,7 @@ export default function Dashboard() {
       workflow: filters.workflow,
       branch: filters.branch,
       actor: filters.actor
-    });
+    }, rawData.repo);
     
     if (filtered) {
       // Keep original filter options
@@ -234,13 +239,12 @@ export default function Dashboard() {
 
   // Appliquer filtres quand workflow/branch/actor changent
   useEffect(() => {
-    const currentRuns = getAllRuns();
-    if (dataLoaded && currentRuns.length > 0) {
+    if (dataLoaded && currentRepo) {
       const filtered = filterRunsLocally({
         workflow: filters.workflow,
         branch: filters.branch,
         actor: filters.actor
-      });
+      }, currentRepo);
       
       if (filtered) {
         // Garder les options de filtres originales
@@ -252,7 +256,7 @@ export default function Dashboard() {
         }));
       }
     }
-  }, [filters.workflow, filters.branch, filters.actor, dataLoaded]);
+  }, [filters.workflow, filters.branch, filters.actor, dataLoaded, currentRepo]);
 
   if (loading && !data) {
     return (
