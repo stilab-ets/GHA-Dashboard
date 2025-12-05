@@ -1,6 +1,5 @@
 const API_CONFIG = {
-  baseUrl: 'http://localhost:3000/api',
-  useWebSocket: true
+  baseUrl: 'http://localhost:3000/api'
 };
 
 function extractRepoFromURL(url) {
