@@ -7,14 +7,14 @@ function extractRepoFromURL(url) {
   try {
     const urlObj = new URL(url);
 
-    // pas sur github.com → pas de repo
+    // Not on github.com → no repo
     if (!urlObj.hostname.includes("github.com")) return null;
 
     const parts = urlObj.pathname
       .split("/")
-      .filter(Boolean); // retire les éléments vides
+      .filter(Boolean); // remove empty elements
 
-    // cas normal : github.com/owner/repo/...
+    // Normal case: github.com/owner/repo/...
     if (parts.length >= 2) {
       const owner = parts[0];
       const repo = parts[1];
@@ -32,7 +32,7 @@ function extractRepoFromURL(url) {
 
 
 /**
- * Fonction intelligente pour trouver le bon nom de colonne
+ * Smart function to find the correct column name
  */
 function findColumnName(row, possibleNames) {
   for (const name of possibleNames) {
@@ -44,7 +44,7 @@ function findColumnName(row, possibleNames) {
 }
 
 /**
- * Détecte automatiquement les noms de colonnes depuis les données
+ * Automatically detects column names from the data
  */
 function detectColumnNames(sampleRow) {
   const detected = {
@@ -61,7 +61,7 @@ function detectColumnNames(sampleRow) {
 }
 
 /**
- * Filtre les données extraites selon les filtres sélectionnés
+ * Filters extracted data according to selected filters
  */
 export function filterExtractionData(data, filters, columnNames) {
   const {
@@ -112,7 +112,7 @@ export function getRepoFromStorage() {
 }
 
 /**
- * Génère les données de graphiques depuis les vraies données filtrées
+ * Generates chart data from the real filtered data
  */
 export function generateChartsFromRealData(filteredData, columnNames) {
   if (!filteredData || filteredData.length === 0) {
@@ -399,7 +399,7 @@ export function generateChartsFromRealData(filteredData, columnNames) {
 }
 
 /**
- * Extrait dynamiquement les valeurs uniques depuis les données avec détection auto
+ * Dynamically extracts unique values from data with auto-detection
  */
 export function extractFilterOptionsFromData(extractionData) {
   if (!extractionData || extractionData.length === 0) {
@@ -489,7 +489,7 @@ export async function fetchDashboardData(filters = {}) {
     console.log(` Loading dashboard data for: ${requestedRepo}`);
     console.log(`Applied filters:`, filters);
     
-    // Récupérer les données d'extraction complètes
+    // Retrieve complete extraction data
     const extractionData = await fetchFullExtractionData(requestedRepo);
     
     if (!extractionData || extractionData.length === 0) {
@@ -501,7 +501,7 @@ export async function fetchDashboardData(filters = {}) {
       };
     }
 
-    // Extraire les options de filtres
+    // Extract filter options
     const filterOptions = extractFilterOptionsFromData(extractionData);
     
     if (!filterOptions) {
@@ -509,11 +509,11 @@ export async function fetchDashboardData(filters = {}) {
       return getMockDashboardData(filters);
     }
 
-    //  Filtrer les données selon les filtres sélectionnés
+    // Filter data according to selected filters
     const filteredData = filterExtractionData(extractionData, filters, filterOptions.columnNames);
     console.log(` Filtered to ${filteredData.length} runs (from ${extractionData.length} total)`);
 
-    //  Générer les graphiques depuis les données filtrées
+    // Generate charts from filtered data
     const chartData = generateChartsFromRealData(filteredData, filterOptions.columnNames);
     
     if (!chartData) {

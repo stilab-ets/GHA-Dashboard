@@ -2,7 +2,7 @@
   'use strict';
 
   /* ---------------------------------------------------------
-   *  FIX 1 : always define extractRepoFromURL BEFORE usage
+   * FIX 1: Always define extractRepoFromURL before usage
    * --------------------------------------------------------- */
   function extractRepoFromURL(url) {
     try {
@@ -18,7 +18,7 @@
   }
 
   /* ---------------------------------------------------------
-   *  FIX 2 : detect repo at first load
+   * FIX 2: Detect repo at first load
    * --------------------------------------------------------- */
   (function detectRepoOnGitHub() {
     if (location.hostname !== "github.com") return;
@@ -27,7 +27,12 @@
     console.log(" [ContentScript] Detected repo:", repo);
 
     if (repo && chrome.runtime) {
-      chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });
+      try {
+        chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });
+      } catch (e) {
+        console.error("[GHA Dashboard] Extension context invalidated:", e);
+        window.location.reload();
+      }
     }
   })();
 
@@ -41,7 +46,7 @@
   let isDashboardActive = false;
 
   /* ---------------------------------------------------------
-   * helper to check repo page
+   * Helper to check repo page
    * --------------------------------------------------------- */
   const isGitHubRepoPage = () => {
     const parts = location.pathname.split('/').filter(Boolean);
@@ -233,7 +238,15 @@
     `;
     iframe.setAttribute('scrolling', 'no');
     
-    const dashboardUrl = chrome.runtime.getURL('dashboard.html');
+    let dashboardUrl;
+    try {
+      dashboardUrl = chrome.runtime.getURL('src/dashboard/dashboard.html');
+    } catch (e) {
+      console.error("[GHA Dashboard] Extension context invalidated:", e);
+      // Force a hard refresh like F5
+      window.location.reload();
+      return;
+    }
     iframe.src = dashboardUrl;
 
     // Dynamically resize iframe to fit content and remove all scrollbars

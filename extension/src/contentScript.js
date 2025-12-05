@@ -2,7 +2,7 @@
   'use strict';
 
   /* ---------------------------------------------------------
-   *  FIX 1 : always define extractRepoFromURL BEFORE usage
+   * FIX 1: Always define extractRepoFromURL before usage
    * --------------------------------------------------------- */
   function extractRepoFromURL(url) {
     try {
@@ -18,7 +18,7 @@
   }
 
   /* ---------------------------------------------------------
-   *  FIX 2 : detect repo at first load
+   * FIX 2: Detect repo at first load
    * --------------------------------------------------------- */
   (function detectRepoOnGitHub() {
     if (location.hostname !== "github.com") return;
@@ -46,7 +46,7 @@
   let isDashboardActive = false;
 
   /* ---------------------------------------------------------
-   * helper to check repo page
+   * Helper to check repo page
    * --------------------------------------------------------- */
   const isGitHubRepoPage = () => {
     const parts = location.pathname.split('/').filter(Boolean);
@@ -240,7 +240,7 @@
     
     let dashboardUrl;
     try {
-      dashboardUrl = chrome.runtime.getURL('dashboard.html');
+      dashboardUrl = chrome.runtime.getURL('src/dashboard/dashboard.html');
     } catch (e) {
       console.error("[GHA Dashboard] Extension context invalidated:", e);
       // Force a hard refresh like F5

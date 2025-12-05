@@ -34,6 +34,10 @@ function formatDateForInput(d) {
 }
 
 export default function Dashboard() {
+  // ============================================
+  // State Management
+  // ============================================
+
   const getCurrentDefaults = () => {
     const now = new Date();
     const defaultEnd = formatDateForInput(now);
@@ -43,12 +47,13 @@ export default function Dashboard() {
 
   const { defaultStart, defaultEnd } = getCurrentDefaults();
 
+  // Main data states
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState({ items: 0, complete: false, isStreaming: false });
   
-  // Options disponibles pour les filtres
+  // Filter states
   const [availableFilters, setAvailableFilters] = useState({
     workflows: ['all'],
     branches: ['all'],
@@ -63,7 +68,8 @@ export default function Dashboard() {
     end: defaultEnd
   });
 
-  // Track si les donnees initiales sont chargees
+  // Current repo state
+  const [currentRepo, setCurrentRepo] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const prevDatesRef = useRef({ start: defaultStart, end: defaultEnd });
 
@@ -78,6 +84,10 @@ export default function Dashboard() {
     branch: useRef(null),
     actor: useRef(null)
   };
+
+  // ============================================
+  // Effects
+  // ============================================
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -94,7 +104,11 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Charger les donnees (seulement quand les dates changent)
+  // ============================================
+  // Data Loading Functions
+  // ============================================
+
+  // Load data (only when dates change)
   const loadDashboardData = async () => {
     setLoading(true);
     setError(null);
@@ -112,22 +126,26 @@ export default function Dashboard() {
               chrome.storage.local.get([key], (result) => {
                 resolve(result[key]);
               });
-            } else if (chrome.storage) {
+            } else {
               chrome.storage.local.get(['currentRepo'], (result) => {
                 resolve(result.currentRepo);
               });
-          }});
+            }
+          });
         } else if (typeof chrome !== 'undefined' && chrome.storage) {
           chrome.storage.local.get(['currentRepo'], (result) => {
             resolve(result.currentRepo);
           });
-      }});
+        }
+      });
+
+      setCurrentRepo(repo);
 
       if (USE_WEBSOCKET) {
         clearWebSocketCache(repo);
         
         const onProgress = (partialData, isComplete) => {
-          // Sauvegarder les options de filtres
+          // Save filter options
           if (partialData.workflows && partialData.workflows.length > 1) {
             setAvailableFilters({
               workflows: partialData.workflows,
@@ -136,7 +154,7 @@ export default function Dashboard() {
             });
           }
           
-          // Appliquer les filtres locaux
+          // Apply local filters
           const filteredData = applyLocalFilters(partialData);
           setData(filteredData);
           
@@ -173,26 +191,30 @@ export default function Dashboard() {
     }
   };
 
-  // Appliquer les filtres locaux
+  // ============================================
+  // Filter Functions
+  // ============================================
+
+  // Apply local filters
   const applyLocalFilters = (rawData) => {
     if (!rawData) return rawData;
     
-    // Si tous les filtres sont "all", retourner tel quel
+    // If all filters are "all", return as is
     if (filters.workflow.includes('all') && 
         filters.branch.includes('all') && 
         filters.actor.includes('all')) {
       return rawData;
     }
     
-    // Utiliser la fonction de filtrage du websocket
+    // Use the filtering function from websocket
     const filtered = filterRunsLocally({
       workflow: filters.workflow,
       branch: filters.branch,
       actor: filters.actor
-    });
+    }, rawData.repo);
     
     if (filtered) {
-      // Garder les options de filtres originales
+      // Keep original filter options
       return {
         ...filtered,
         workflows: rawData.workflows,
@@ -217,13 +239,12 @@ export default function Dashboard() {
 
   // Appliquer filtres quand workflow/branch/actor changent
   useEffect(() => {
-    const currentRuns = getAllRuns();
-    if (dataLoaded && currentRuns.length > 0) {
+    if (dataLoaded && currentRepo) {
       const filtered = filterRunsLocally({
         workflow: filters.workflow,
         branch: filters.branch,
         actor: filters.actor
-      });
+      }, currentRepo);
       
       if (filtered) {
         // Garder les options de filtres originales
@@ -235,7 +256,7 @@ export default function Dashboard() {
         }));
       }
     }
-  }, [filters.workflow, filters.branch, filters.actor, dataLoaded]);
+  }, [filters.workflow, filters.branch, filters.actor, dataLoaded, currentRepo]);
 
   if (loading && !data) {
     return (
@@ -297,6 +318,10 @@ export default function Dashboard() {
     percent: totalStatus ? Math.round((s.value / totalStatus) * 100) : 0
   }));
   
+  // ============================================
+  // Event Handlers
+  // ============================================
+
   const handleFilterChange = (filterType, value) => {
     if (filterType === 'start' || filterType === 'end') {
       const currentDefaults = getCurrentDefaults();
@@ -343,7 +368,7 @@ export default function Dashboard() {
   return (
     <div className="dashboard dark">
       <div className="container">
-        {/* Indicateur de streaming */}
+        {/* Streaming indicator */}
         {progress.isStreaming && (
           <div style={{ 
             padding: '15px 20px', 

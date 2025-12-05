@@ -8,7 +8,7 @@
   "host_permissions": ["https://github.com/*"],
 
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background.js"
   },
 
   "content_security_policy": {
@@ -18,7 +18,7 @@
   "content_scripts": [
     {
       "matches": ["https://github.com/*"],
-      "js": ["contentScript.js"],
+      "js": ["src/contentScript.js"],
       "run_at": "document_end",
       "all_frames": false    
     }
@@ -27,10 +27,10 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "dashboard.html",
-        "dashboardStyles.css",
+        "src/dashboard/dashboard.html",
+        "src/styles/dashboardStyles.css",
         "react_page/*",
-        "assets/dashboard.png"
+        "src/assets/dashboard.png"
       ],
       "matches": ["https://github.com/*"],
       "use_dynamic_url": true   
@@ -39,11 +39,11 @@
 
   "action": {
     "default_title": "My GitHub Actions Metrics Dashboard",
-    "default_popup": "popup.html",
+    "default_popup": "src/popup/popup.html",
     "default_icon": {
-      "16": "assets/dashboard.png",
-      "24": "assets/dashboard.png",
-      "32": "assets/dashboard.png"
+      "16": "src/assets/dashboard.png",
+      "24": "src/assets/dashboard.png",
+      "32": "src/assets/dashboard.png"
     }
   }
 }
