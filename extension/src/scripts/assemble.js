@@ -35,7 +35,6 @@ async function main() {
   const fileMappings = [
     { src: 'manifest.json', dest: 'manifest.json' },
     { src: 'src/background.js', dest: 'background.js' },
-    { src: 'src/api.js', dest: 'api.js' },
     { src: 'src/contentScript.js', dest: 'contentScript.js' },
     { src: 'src/popup/popup.css', dest: 'popup/popup.css' }
   ];

@@ -211,8 +211,8 @@ html, body {
     flex: 1;
 }
 
-/* Datetime Input Styling */
-.filter-group input[type="datetime-local"] {
+/* Date Input Styling */
+.filter-group input[type="date"] {
     width: 100%;
     padding: 8px 12px;
     background: var(--bg);
@@ -226,25 +226,25 @@ html, body {
     box-sizing: border-box;
 }
 
-.filter-group input[type="datetime-local"]:hover {
+.filter-group input[type="date"]:hover {
     border-color: var(--accent);
 }
 
-.filter-group input[type="datetime-local"]:focus {
+.filter-group input[type="date"]:focus {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
 }
 
 /* Styling for the calendar picker dropdown */
-.filter-group input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+.filter-group input[type="date"]::-webkit-calendar-picker-indicator {
     filter: invert(1);
     cursor: pointer;
     opacity: 0.7;
     transition: opacity 0.2s;
 }
 
-.filter-group input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+.filter-group input[type="date"]::-webkit-calendar-picker-indicator:hover {
     opacity: 1;
 }
 
