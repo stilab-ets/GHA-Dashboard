@@ -8,6 +8,8 @@ from typing import Any
 from dataclasses import dataclass
 import time as time_module
 import requests
+from analysis.db_ingest import insert_runs_batch
+
 
 @dataclass
 class AggregationFilters:
@@ -128,6 +130,9 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str 
         page = 1
         max_pages = 100
         total_runs_sent = 0
+
+        # initialisation du batch BD
+        batch = []
         
         start_dt = datetime.combine(filters.startDate, dt_time())
         end_dt = datetime.combine(filters.endDate, dt_time(23, 59, 59))
@@ -143,6 +148,20 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str 
             
             for run in runs:
                 processed = process_run(run)
+                #ajout au  batch BD
+                batch.append(processed)
+
+                # insertion par lot toutes les 50 entrées
+                if len(batch) >= 50:
+                    inserted = insert_runs_batch(repo, batch)
+                    print(f"[WebSocket] Inserted {inserted} runs into DB")
+                    #notify frontend
+                    ws.send(json.dumps({
+                        "type": "log",
+                        "message": f"Inserted {inserted} runs into DB"
+                    }))
+                    
+                    batch.clear()
                 
                 try:
                     run_date = datetime.fromisoformat(processed['created_at'].replace('Z', '+00:00'))
@@ -176,7 +195,20 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str 
             
             page += 1
             time_module.sleep(0.1)
-        
+
+        # insérer le reste du batch BD
+        if batch:
+            inserted = insert_runs_batch(repo, batch)
+            print(f"[WebSocket] Final insert : {inserted} runs into DB")
+
+            # --- notify frontend ---
+            log_msg = {
+                "type": "log",
+                "message": f"Inserted {inserted} runs into DB"
+            }
+            ws.send(json.dumps(log_msg))
+
+
         complete_msg = {
             "type": "complete",
             "totalRuns": total_runs_sent,
