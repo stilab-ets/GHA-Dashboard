@@ -1,5 +1,6 @@
+import asyncio
 from models import *
-from extraction.extractor import fetch_all_github_runs
+from extraction.extractor import async_extract_data, fetch_all_github_runs
 import json
 import os
 import pandas as pd
@@ -95,103 +96,102 @@ def process_run(run: dict) -> dict:
         'html_url': run.get('html_url')
     }
 
+async def send_data(ws, repo: str, filters: AggregationFilters, token: str):
+    """
+    Version WebSocket utilisant uniquement GHAminer :
+    - récupère les runs déjà en BD (db_data)
+    - stream les nouveaux runs avec async_extract_data()
+    """
 
-async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None):
-    """
-    Recupere les donnees depuis l'API GitHub PAGE PAR PAGE
-    et envoie les RUNS BRUTS (pas agreges) au frontend.
-    
-    
-    Args:
-        ws: WebSocket connection
-        repo: Repository name (owner/repo)
-        filters: Aggregation filters
-        token: GitHub token (from extension or fallback to env)
-    """
-    print(f"[WebSocket] Connection for {repo}")
-    print(f"[WebSocket] Date filters: {filters.startDate} to {filters.endDate}")
-    
-    # Utiliser le token passé en paramètre, sinon fallback sur .env
+    print(f"[WS] Start extraction for: {repo}")
+    print(f"[WS] Date range: {filters.startDate} → {filters.endDate}")
+
     if not token:
-        token = os.getenv("GITHUB_TOKEN")
-    
-    if not token:
-        error_msg = {
+        ws.send(json.dumps({
             "type": "error",
-            "message": "GitHub token required. Please configure it in the Chrome extension popup (click the extension icon and enter your token)."
-        }
-        ws.send(json.dumps(error_msg))
+            "message": "Missing GitHub token"
+        }))
         ws.close()
         return
-    
+
+    # Convert dates
+    start_dt = datetime.combine(filters.startDate, dt_time.min)
+    end_dt = datetime.combine(filters.endDate, dt_time.max)
+
+    cancel_event = asyncio.Event()
+
     try:
-        page = 1
-        max_pages = 100
-        total_runs_sent = 0
-        
-        start_dt = datetime.combine(filters.startDate, dt_time())
-        end_dt = datetime.combine(filters.endDate, dt_time(23, 59, 59))
-        
-        while page <= max_pages:
-            runs, has_more = fetch_github_runs_page(repo, token, page)
-            
-            if not runs:
-                break
-            
-            processed_runs = []
-            oldest_run_date = None
-            
-            for run in runs:
-                processed = process_run(run)
-                
-                try:
-                    run_date = datetime.fromisoformat(processed['created_at'].replace('Z', '+00:00'))
-                    run_date_naive = run_date.replace(tzinfo=None)
-                    
-                    if oldest_run_date is None or run_date_naive < oldest_run_date:
-                        oldest_run_date = run_date_naive
-                    
-                    if start_dt <= run_date_naive <= end_dt:
-                        processed_runs.append(processed)
-                except:
-                    pass
-            
-            if processed_runs:
-                msg = {
+        # 1) Charger les données existantes depuis la BD + lancer GHAminer
+        db_data, async_iter = async_extract_data(
+            repo, token, start_dt, end_dt, cancel_event
+        )
+
+        # 2) Envoyer les runs déjà en BD
+        buffer = []
+        for run in db_data:
+            buffer.append(run.to_dict())
+
+            if len(buffer) >= 50:
+                ws.send(json.dumps({
                     "type": "runs",
-                    "data": processed_runs,
+                    "data": buffer,
+                    "page": 0,
+                    "hasMore": True
+                }, default=json_default))
+                buffer = []
+
+        if buffer:
+            ws.send(json.dumps({
+                "type": "runs",
+                "data": buffer,
+                "page": 0,
+                "hasMore": True
+            }, default=json_default))
+
+        print(f"[WS] Sent {len(db_data)} DB runs")
+
+        # 3) Stream des nouveaux runs venant du miner
+        new_count = 0
+        page = 1
+        chunk = []
+
+        async for run in async_iter:
+            chunk.append(run.to_dict())
+            new_count += 1
+
+            if len(chunk) >= 20:
+                ws.send(json.dumps({
+                    "type": "runs",
+                    "data": chunk,
                     "page": page,
-                    "hasMore": has_more
-                }
-                ws.send(json.dumps(msg, default=json_default))
-                total_runs_sent += len(processed_runs)
-                print(f"[WebSocket] Page {page}: sent {len(processed_runs)} runs (total: {total_runs_sent})")
-            
-            if not has_more:
-                break
-            
-            if oldest_run_date and oldest_run_date < start_dt:
-                print(f"[WebSocket] Runs older than start date, stopping")
-                break
-            
-            page += 1
-            time_module.sleep(0.1)
-        
-        complete_msg = {
+                    "hasMore": True
+                }, default=json_default))
+                chunk = []
+                page += 1
+
+        if chunk:
+            ws.send(json.dumps({
+                "type": "runs",
+                "data": chunk,
+                "page": page,
+                "hasMore": False
+            }, default=json_default))
+
+        # 4) Fin extraction
+        total = len(db_data) + new_count
+
+        ws.send(json.dumps({
             "type": "complete",
-            "totalRuns": total_runs_sent,
+            "totalRuns": total,
             "totalPages": page
-        }
-        ws.send(json.dumps(complete_msg, default=json_default))
-        
-        print(f"[WebSocket] Complete for {repo}: {total_runs_sent} runs, {page} pages")
-        
+        }))
+
+        print(f"[WS] COMPLETE: {total} total runs sent")
+
     except Exception as e:
-        print(f"[WebSocket] Error: {e}")
-        import traceback
-        traceback.print_exc()
-        error_msg = {"type": "error", "message": str(e)}
-        ws.send(json.dumps(error_msg, default=json_default))
-    
+        print("[WS ERROR]", e)
+        ws.send(json.dumps({"type": "error", "message": str(e)}))
+
     finally:
+        cancel_event.set()
         ws.close()

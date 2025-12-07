@@ -290,6 +290,7 @@ def websocket_data(ws, repositoryName: str):
     """
     WebSocket endpoint avec support du token depuis query params
     """
+    repo = repositoryName.replace("__", "/")
     filters = AggregationFilters()
 
     # Récupérer le token depuis query params
@@ -320,7 +321,7 @@ def websocket_data(ws, repositoryName: str):
         filters.workflowName = workflowName
 
     # Passer le token à send_data
-    asyncio.run(send_data(ws, repositoryName, filters, token))
+    asyncio.run(send_data(ws, repo, filters, token))
 
 # ============================================
 # Route de Debug

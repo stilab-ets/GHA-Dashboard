@@ -110,6 +110,37 @@ class WorkflowRun(db.Model):
     git_num_committers = db.Column(db.Integer)
     git_commits = db.Column(db.Integer)
 
+    def to_dict(self):
+        return {
+            #  le front s'attend à "id", pas "id_build"
+            "id": int(self.id_build),
+
+            # Nom du workflow : on va le chercher via la relation SQLAlchemy
+            "workflow_name": self.workflow.workflow_name if self.workflow else None,
+
+            # Branch
+            "branch": self.branch,
+
+            # Actor → on réutilise issuer_name
+            "actor": self.issuer_name,
+
+            # Statut GitHub Actions
+            "status": self.status,
+            "conclusion": self.conclusion,
+
+            # Dates
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+
+            # Durée en secondes → même clé que dans process_run()
+            "duration": float(self.build_duration or 0),
+
+            # Divers (optionnels mais utiles)
+            "run_number": int(self.id_build),
+            "event": self.workflow_event_trigger,
+            "html_url": None,  # on n’a pas l’URL exacte côté GHAMiner
+        }
+
     def __eq__(self, value) -> bool:
         if not isinstance(value, WorkflowRun):
             return NotImplemented
