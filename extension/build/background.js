@@ -177,6 +177,13 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         try {
           const message = JSON.parse(event.data);
           const cache = wsCache.get(repo);
+
+          // ---- HANDLE LOG MESSAGES FROM BACKEND ----
+        if (message.type === "log") {
+          console.log("[Background] DB Log:", message.message);
+          return;
+        }
+
           
           if (message.type === 'runs') {
             cache.runs.push(...message.data);

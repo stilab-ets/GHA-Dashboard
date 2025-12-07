@@ -49,4 +49,7 @@ def insert_runs_batch(repo_name: str, runs: list[dict]) -> int:
         inserted += 1
 
     db.session.commit()
+    db.session.commit()
+    print(f"[DB] Batch committed successfully — {inserted} rows written")
     return inserted
+

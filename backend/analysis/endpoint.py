@@ -198,9 +198,10 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str 
 
         # insérer le reste du batch BD
         if batch:
+            print(f"[BACKEND] Inserting batch of {len(batch)} runs into database…")
             inserted = insert_runs_batch(repo, batch)
             print(f"[WebSocket] Final insert : {inserted} runs into DB")
-
+            print(f"[BACKEND] Batch inserted: {inserted} runs")
             # --- notify frontend ---
             log_msg = {
                 "type": "log",
