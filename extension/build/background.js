@@ -146,7 +146,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
     }
     
     // Build WebSocket URL with token
-    const encodedRepo = encodeURIComponent(repo);
+    const encodedRepo = repo.replace("/", "__");
     let wsUrl = `ws://localhost:3000/data/${encodedRepo}?aggregationPeriod=day&token=${encodeURIComponent(token)}`;
     
     if (filters.start) {

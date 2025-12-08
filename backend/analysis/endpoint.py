@@ -97,101 +97,124 @@ def process_run(run: dict) -> dict:
     }
 
 async def send_data(ws, repo: str, filters: AggregationFilters, token: str):
-    """
-    Version WebSocket utilisant uniquement GHAminer :
-    - récupère les runs déjà en BD (db_data)
-    - stream les nouveaux runs avec async_extract_data()
-    """
-
     print(f"[WS] Start extraction for: {repo}")
-    print(f"[WS] Date range: {filters.startDate} → {filters.endDate}")
 
     if not token:
-        ws.send(json.dumps({
-            "type": "error",
-            "message": "Missing GitHub token"
-        }))
+        ws.send(json.dumps({"type": "error", "message": "Missing GitHub token"}))
         ws.close()
         return
 
-    # Convert dates
     start_dt = datetime.combine(filters.startDate, dt_time.min)
     end_dt = datetime.combine(filters.endDate, dt_time.max)
 
     cancel_event = asyncio.Event()
 
+    total_sent = 0
+    page = 0
+    progress = 0
+    PROGRESS_STEP = 5
+
     try:
-        # 1) Charger les données existantes depuis la BD + lancer GHAminer
+        # --- Extraction initiale ---
         db_data, async_iter = async_extract_data(
             repo, token, start_dt, end_dt, cancel_event
         )
 
-        # 2) Envoyer les runs déjà en BD
+        # --- 1) ENVOI DES RUNS BD ---
         buffer = []
-        for run in db_data:
-            buffer.append(run.to_dict())
 
-            if len(buffer) >= 50:
+        for run in db_data:
+            try:
+                buffer.append(run.to_dict())
+            except Exception as e:
+                print("[DB RUN ERROR] Skipping run:", e)
+                continue
+            
+            if len(buffer) == 50:
                 ws.send(json.dumps({
                     "type": "runs",
                     "data": buffer,
-                    "page": 0,
+                    "page": page,
                     "hasMore": True
                 }, default=json_default))
-                buffer = []
 
+                total_sent += 50
+                buffer = []
+                page += 1
+
+                progress = min(100, progress + PROGRESS_STEP)
+                ws.send(json.dumps({"type": "progress", "percent": progress}))
+
+        # dernier batch
         if buffer:
             ws.send(json.dumps({
                 "type": "runs",
                 "data": buffer,
-                "page": 0,
+                "page": page,
                 "hasMore": True
             }, default=json_default))
 
-        print(f"[WS] Sent {len(db_data)} DB runs")
+            total_sent += len(buffer)
+            page += 1
+            progress = min(100, progress + PROGRESS_STEP)
+            ws.send(json.dumps({"type": "progress", "percent": progress}))
 
-        # 3) Stream des nouveaux runs venant du miner
-        new_count = 0
-        page = 1
-        chunk = []
 
+        # --- 2) GHAMINER STREAM ---
+        miner_buffer = []
         async for run in async_iter:
-            chunk.append(run.to_dict())
-            new_count += 1
+            try:
+                miner_buffer.append(run.to_dict())
+            except Exception as e:
+                print("[GHAMiner ERROR] Skipping run:", e)
+                continue
 
-            if len(chunk) >= 20:
+            if len(miner_buffer) == 50:
                 ws.send(json.dumps({
                     "type": "runs",
-                    "data": chunk,
+                    "data": miner_buffer,
                     "page": page,
                     "hasMore": True
                 }, default=json_default))
-                chunk = []
+
+                total_sent += 50
+                miner_buffer = []
                 page += 1
 
-        if chunk:
+                progress = min(100, progress + PROGRESS_STEP)
+                ws.send(json.dumps({"type": "progress", "percent": progress}))
+
+        # dernier batch GHAMiner
+        if miner_buffer:
             ws.send(json.dumps({
                 "type": "runs",
-                "data": chunk,
+                "data": miner_buffer,
                 "page": page,
                 "hasMore": False
             }, default=json_default))
 
-        # 4) Fin extraction
-        total = len(db_data) + new_count
-
-        ws.send(json.dumps({
-            "type": "complete",
-            "totalRuns": total,
-            "totalPages": page
-        }))
-
-        print(f"[WS] COMPLETE: {total} total runs sent")
+            total_sent += len(miner_buffer)
+            page += 1
 
     except Exception as e:
         print("[WS ERROR]", e)
         ws.send(json.dumps({"type": "error", "message": str(e)}))
 
     finally:
+        try:
+            ws.send(json.dumps({
+                "type": "complete",
+                "totalRuns": total_sent,
+                "totalPages": page
+            }))
+        except Exception as e:
+            print("[WS SEND COMPLETE ERROR]", e)
+
         cancel_event.set()
-        ws.close()
+
+        try:
+            ws.close()
+        except:
+            pass
+
+        print(f"[WS] COMPLETE SENT → {total_sent} runs")

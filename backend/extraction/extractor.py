@@ -175,14 +175,17 @@ async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.
 
     with open(BUILD_FEATURES_PATH, 'r') as f:
         tail = async_tail(f, cancellation)
-
+        os.makedirs("/tmp/gha_clone", exist_ok=True)
         cmd = [
             "python", "ghaminer/src/GHAMetrics.py",
             "-t", token,
-            "-s", f"https://github.com/{repo_url}",
+            "-s", repo_url,  
+            "--clone-path", "/tmp/gha_clone",                         
             "-fd", from_date.date().isoformat(),
             "-td", to_date.date().isoformat()
         ]
+
+
         gha_miner = await asyncio.create_subprocess_exec(*cmd)
 
         async for item in tail:
@@ -285,21 +288,14 @@ def _generate_models_from_series(line: str, token: str) -> WorkflowRun:
     CREATED_AT = 10
     UPDATED_AT = 11
 
-    # ------------------------------------
-    #  1. Convertir id_build et CHECK doublon
-    # ------------------------------------
+    # 1. Vérifier doublon
     id_build = int(line_values[ID_BUILD])
     existing = WorkflowRun.query.filter_by(id_build=id_build).one_or_none()
 
     if existing:
-        
         return existing
 
-    # enrichissement API GitHub
-    run = enrich_run_with_github(run, token)
-    # ------------------------------------
     # 2. Repository
-    # ------------------------------------
     repo_name = line_values[0]
     repo = Repository.query.filter_by(repo_name=repo_name).one_or_none()
 
@@ -313,11 +309,8 @@ def _generate_models_from_series(line: str, token: str) -> WorkflowRun:
         db.session.add(repo)
         db.session.commit()
 
-    # ------------------------------------
     # 3. Workflow
-    # ------------------------------------
     workflow_name = line_values[WORKFLOW_NAME]
-    
 
     workflow = Workflow.query.filter_by(
         workflow_name=workflow_name,
@@ -334,9 +327,7 @@ def _generate_models_from_series(line: str, token: str) -> WorkflowRun:
         db.session.add(workflow)
         db.session.commit()
 
-    # ------------------------------------
     # 4. Create new WorkflowRun
-    # ------------------------------------
     run = WorkflowRun(
         id_build=id_build,
         workflow_id=workflow.id,
@@ -354,7 +345,17 @@ def _generate_models_from_series(line: str, token: str) -> WorkflowRun:
 
     db.session.add(run)
     db.session.commit()
+
+    #  Fix : charger la relation repository 
+    db.session.refresh(run, ["repository"])
+
+    # 5. Enrichissement GitHub
+    run = enrich_run_with_github(run, token)
+
+    db.session.commit()
     return run
+
+
 def enrich_run_with_github(run: WorkflowRun, token: str):
     """
     Complète un run GHAminer avec les données officielles GitHub Actions.
@@ -385,8 +386,8 @@ def enrich_run_with_github(run: WorkflowRun, token: str):
     created = data.get("created_at")
     updated = data.get("updated_at")
     if created and updated:
-        created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-        updated_dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+        created_dt = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+        updated_dt = datetime.datetime.fromisoformat(updated.replace("Z", "+00:00"))
         run.build_duration = (updated_dt - created_dt).total_seconds()
 
     return run
