@@ -187,11 +187,31 @@ async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.
 
         async for item in tail:
             if item.startswith("repo,"):
-                # GHAMiner added the labels, we cant parse this line
                 continue
 
             try:
-                run = _generate_models_from_series(item)
+                run = _generate_models_from_series(item,token)
+
+                run = enrich_run_with_github(run, token)
+
+                # 3. Vérifier encore s'il existe (au cas où enrichissement modifie un ID)
+                existing = WorkflowRun.query.filter_by(id_build=run.id_build).one_or_none()
+                if existing:
+                    # On met à jour l'existant, on ne crée pas un nouveau
+                    for attr, value in run.__dict__.items():
+                        if not attr.startswith("_") and hasattr(existing, attr):
+                            setattr(existing, attr, value)
+                    db.session.commit()
+                    yield existing
+                    continue
+
+                # 4. Ajouter en BD
+                db.session.add(run)
+                db.session.commit()
+
+                # 5. Stream vers WebSocket
+                yield run
+
             except Exception as e:
                 gha_miner.kill()
                 raise e
@@ -252,7 +272,7 @@ def fetch_all_github_runs(repo, token, max_pages=200):
     print(f" Récupéré {len(all_runs)} workflow runs pour {repo}")
     return pd.DataFrame(all_runs)
 
-def _generate_models_from_series(line: str) -> WorkflowRun:
+def _generate_models_from_series(line: str, token: str) -> WorkflowRun:
     line_values = line.split(",")
 
     ID_BUILD = 1
@@ -275,6 +295,8 @@ def _generate_models_from_series(line: str) -> WorkflowRun:
         
         return existing
 
+    # enrichissement API GitHub
+    run = enrich_run_with_github(run, token)
     # ------------------------------------
     # 2. Repository
     # ------------------------------------
@@ -332,4 +354,39 @@ def _generate_models_from_series(line: str) -> WorkflowRun:
 
     db.session.add(run)
     db.session.commit()
+    return run
+def enrich_run_with_github(run: WorkflowRun, token: str):
+    """
+    Complète un run GHAminer avec les données officielles GitHub Actions.
+    """
+    owner, repo = run.repository.repo_name.split("/")
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs/{run.id_build}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json"
+    }
+
+    r = requests.get(url, headers=headers)
+    if r.status_code != 200:
+        print(f"[WARN] Impossible d'enrichir run {run.id_build}")
+        return run
+
+    data = r.json()
+
+    run.branch = data.get("head_branch")
+    run.commit_sha = data.get("head_sha")
+    run.status = data.get("status")
+    run.conclusion = data.get("conclusion")
+    run.issuer_name = (data.get("actor") or {}).get("login")
+    run.workflow_event_trigger = data.get("event")
+
+    # calcul durée correcte
+    created = data.get("created_at")
+    updated = data.get("updated_at")
+    if created and updated:
+        created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        updated_dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+        run.build_duration = (updated_dt - created_dt).total_seconds()
+
     return run
