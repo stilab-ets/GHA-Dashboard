@@ -59,12 +59,17 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
             cb(dashboardData, true);
           }
           
-          const resolver = _pendingResolves.get(repo);
-          if (resolver) {
-            resolver(dashboardData);
-          }
-          _pendingResolves.delete(repo);
-          _pendingRejects.delete(repo);
+          // Petite pause pour s'assurer que le callback a le temps de se déclencher
+          setTimeout(() => {
+            const resolver = _pendingResolves.get(repo);
+            if (resolver) {
+              resolver(dashboardData);
+            }
+            _pendingResolves.delete(repo);
+            _pendingRejects.delete(repo);
+            _progressCallbacks.delete(repo);
+            console.log(`[WebSocket] Promise resolved for ${repo}`);
+          }, 50);
         });
       }
       

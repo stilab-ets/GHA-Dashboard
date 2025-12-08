@@ -11,6 +11,8 @@ import requests
 from analysis.db_ingest import insert_runs_batch
 
 
+
+
 @dataclass
 class AggregationFilters:
     aggregationPeriod: AggregationPeriod = "day"
@@ -136,6 +138,97 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str 
         
         start_dt = datetime.combine(filters.startDate, dt_time())
         end_dt = datetime.combine(filters.endDate, dt_time(23, 59, 59))
+
+        # Check if this date range has already been synchronized
+        repository = Repository.query.filter_by(repo_name=repo).first()
+        
+        # Determine if we should use short-circuit (return data from DB) or stream from GitHub
+        use_shortcircuit = False
+        if repository and repository.synced_start_date and repository.synced_end_date:
+            # Compare only the DATE part (ignore timezone/time differences)
+            synced_start_date = repository.synced_start_date.date() if hasattr(repository.synced_start_date, 'date') else repository.synced_start_date
+            synced_end_date = repository.synced_end_date.date() if hasattr(repository.synced_end_date, 'date') else repository.synced_end_date
+            
+            # Date range is synced if it's within the synced bounds
+            if filters.startDate >= synced_start_date and filters.endDate <= synced_end_date:
+                use_shortcircuit = True
+                print(f"[DB] Date range {filters.startDate} to {filters.endDate} is within synced range {synced_start_date} to {synced_end_date}")
+
+        if use_shortcircuit:
+            print(f"[DB] Runs found for {repo} between {start_dt} and {end_dt}")
+            print(f"[DB] Filters: author={filters.author}, branch={filters.branch}, workflowName={filters.workflowName}")
+            # Short-circuit: fetch runs from DB and send them immediately instead of
+            # re-streaming from the GitHub API. This avoids unnecessary API calls
+            # when the requested date range is already present in the local DB.
+            
+            try:
+                # import models via wildcard import at top: Repository, WorkflowRun, Workflow, db
+                repository = Repository.query.filter_by(repo_name=repo).first()
+                if repository:
+                    query = WorkflowRun.query.filter(
+                        WorkflowRun.repository_id == repository.id,
+                        WorkflowRun.created_at >= start_dt,
+                        WorkflowRun.created_at <= end_dt
+                    )
+                    # apply optional filters
+                    if filters.author:
+                        query = query.filter(WorkflowRun.issuer_name == filters.author)
+                    if filters.branch:
+                        query = query.filter(WorkflowRun.branch == filters.branch)
+                    if filters.workflowName:
+                        # join workflow to filter by name
+                        query = query.join(Workflow).filter(Workflow.workflow_name == filters.workflowName)
+
+                    runs_in_db = query.order_by(WorkflowRun.created_at.desc()).all()
+                    print(f"[DB] Found {len(runs_in_db)} runs in requested date range")
+
+
+                    processed_runs = []
+                    for r in runs_in_db:
+                        processed_runs.append({
+                            'id': r.id_build,
+                            'workflow_name': r.workflow.workflow_name if r.workflow else None,
+                            'branch': r.branch,
+                            'actor': r.issuer_name,
+                            'status': r.status,
+                            'conclusion': r.conclusion,
+                            'created_at': r.created_at.isoformat() if r.created_at else None,
+                            'updated_at': r.updated_at.isoformat() if r.updated_at else None,
+                            'duration': r.build_duration or 0,
+                            'run_number': None,
+                            'event': r.workflow_event_trigger,
+                            'html_url': None
+                        })
+
+                    # Always send runs message (even if empty) so frontend callback is triggered
+                    msg = {
+                        'type': 'runs',
+                        'data': processed_runs,
+                        'page': 1,
+                        'hasMore': False
+                    }
+                    ws.send(json.dumps(msg, default=json_default))
+
+                    complete_msg = {
+                        'type': 'complete',
+                        'totalRuns': len(processed_runs),
+                        'totalPages': 1 if processed_runs else 0
+                    }
+                    ws.send(json.dumps(complete_msg, default=json_default))
+                    print(f"[WebSocket] Served {len(processed_runs)} runs from DB for {repo}")
+                else:
+                    # repository not present, nothing to send
+                    ws.send(json.dumps({'type': 'complete', 'totalRuns': 0, 'totalPages': 0}))
+            except Exception as e:
+                print(f"[WebSocket] Error reading DB runs: {e}")
+                import traceback
+                traceback.print_exc()
+                ws.send(json.dumps({'type': 'error', 'message': str(e)}, default=json_default))
+            
+            # Short-circuit complete — don't fetch from GitHub
+            return
+        else:
+            print(f"[DB] No runs found for {repo} in that date range")
         
         while page <= max_pages:
             runs, has_more = fetch_github_runs_page(repo, token, page)
@@ -170,6 +263,7 @@ async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str 
                     if oldest_run_date is None or run_date_naive < oldest_run_date:
                         oldest_run_date = run_date_naive
                     
+                    # Comparer les dates naïves (sans timezone)
                     if start_dt <= run_date_naive <= end_dt:
                         processed_runs.append(processed)
                 except:
