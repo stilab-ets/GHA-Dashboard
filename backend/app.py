@@ -6,7 +6,11 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from sqlalchemy import text
 from models import db, Repository, Workflow, WorkflowRun, AggregationPeriod
-from extraction.extractor import BUILD_FEATURES_PATH, extract_data, needs_refresh, run_ghaminer,fetch_all_github_runs
+from extraction.extractor import (
+    async_extract_data,
+    BUILD_FEATURES_PATH
+)
+
 from analysis.endpoint import AggregationFilters, send_data
 from typing import cast
 from datetime import date
@@ -120,53 +124,35 @@ def extraction_api():
     if not repo:
         return jsonify({"error": "repo manquant"}), 400
 
-    token = os.getenv("GITHUB_TOKEN")
+    # GHAminer doit déjà avoir généré builds_features.csv
+    if not os.path.exists(CSV_PATH):
+        return jsonify({"error": "builds_features.csv introuvable — exécute /api/sync"}), 404
 
-    df = fetch_all_github_runs(repo, token)
+    try:
+        df = pd.read_csv(CSV_PATH)
+    except Exception as e:
+        return jsonify({"error": "Erreur lecture CSV", "detail": str(e)}), 500
 
-    # Nettoyage - sélectionner seulement les colonnes existantes
-    expected_columns = [
-        "id",
-        "name",
-        "event",
-        "status",
-        "conclusion",
-        "created_at",
-        "updated_at",
-        "run_number",
-        "actor",
-        "display_title",
-        "head_branch",
-        "path",
-        "run_attempt",
-        "workflow_id"
-    ]
-    df = df[[col for col in expected_columns if col in df.columns]]
+    # Filtrer par repo
+    if "repo" not in df.columns:
+        return jsonify({"error": "CSV invalide: colonne 'repo' manquante"}), 500
 
-    # Renommer les colonnes si elles existent
-    rename_dict = {}
-    if "id" in df.columns:
-        rename_dict["id"] = "id_build"
-    if "name" in df.columns:
-        rename_dict["name"] = "workflow_name"
-    if "head_branch" in df.columns:
-        rename_dict["head_branch"] = "branch"
-    df.rename(columns=rename_dict, inplace=True)
+    repo_df = df[df["repo"] == repo]
 
-    # Convertir timestamps si les colonnes existent
-    if "created_at" in df.columns:
-        df["created_at"] = pd.to_datetime(df["created_at"])
-    if "updated_at" in df.columns:
-        df["updated_at"] = pd.to_datetime(df["updated_at"])
+    if repo_df.empty:
+        return jsonify({"error": f"Aucune donnée trouvée pour {repo}"}), 404
 
-    data_dict = df.to_dict(orient="records")
+    # Convertir timestamps
+    for col in ["created_at", "updated_at"]:
+        if col in repo_df.columns:
+            repo_df[col] = pd.to_datetime(repo_df[col], errors="coerce")
 
     return jsonify({
         "success": True,
         "repo": repo,
-        "runs_extracted": len(df),
-        "columns": list(df.columns),
-        "data": data_dict
+        "rows": len(repo_df),
+        "columns": list(repo_df.columns),
+        "data": repo_df.to_dict(orient="records")
     }), 200
 
 # ============================================
@@ -381,7 +367,7 @@ def sync_repo():
     # 1) Extraction
    
     success = True
-    df, error = extract_data(repo, token, "2024-04-01", "2025-10-31")
+    df, error = async_extract_data(repo, token, "2024-04-01", "2025-10-31")
     if error:
         return jsonify({"error": error}), 400
     if df is None or df.empty:
@@ -406,7 +392,7 @@ def sync_repo():
 
         inserted, skipped = 0, 0
 
-        # IMPORTANT : désactiver l'autoflush
+        # désactiver l'autoflush
         with db.session.no_autoflush:
 
             for _, row in df.iterrows():

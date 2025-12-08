@@ -155,7 +155,10 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
     if (filters.end) {
       wsUrl += `&endDate=${filters.end}`;
     }
-    
+    // Force reset cache for new date selection
+    wsCache.delete(repo);
+    chrome.storage.local.set({ wsRuns: [] });
+
     wsCache.set(repo, { 
       runs: [], 
       isComplete: false, 

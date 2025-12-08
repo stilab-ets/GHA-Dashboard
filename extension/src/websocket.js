@@ -399,6 +399,10 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
     _pendingRejects.set(repo, reject);
     _runsByRepo.set(repo, []);
     
+    // Clear cached runs for fresh date ranges
+    _runsByRepo.set(repo, []);
+    chrome.storage.local.set({ wsRuns: [] });
+
     chrome.runtime.sendMessage({
       action: 'startWebSocketExtraction',
       repo: repo,
