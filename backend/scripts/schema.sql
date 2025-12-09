@@ -6,11 +6,14 @@ CREATE TABLE IF NOT EXISTS repositories (
     repo_name VARCHAR(255) UNIQUE NOT NULL,
     owner VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at TIMESTAMP DEFAULT NOW(),
+    
+    -- Track which date range has been synchronized from GitHub (DATE only, no timezone issues)
+    synced_start_date DATE,
+    synced_end_date DATE
 );
 
 COMMENT ON TABLE repositories IS 'Liste des repositories GitHub suivis';
-
 -- ============================================
 -- Table Workflow
 -- ============================================
@@ -22,6 +25,7 @@ CREATE TABLE IF NOT EXISTS workflows (
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     
+
     CONSTRAINT workflows_unique_name UNIQUE (repository_id, workflow_name)
 );
 
@@ -191,15 +195,6 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION cleanup_old_runs IS 'Supprime les workflow_runs plus anciens que X jours';
 
--- ============================================
--- Données de Test (pour valider)
--- ============================================
-INSERT INTO repositories (repo_name, owner) 
-VALUES 
-    ('facebook/react', 'facebook'),
-    ('microsoft/vscode', 'microsoft')
-ON CONFLICT (repo_name) DO NOTHING;
-
 -- Message de confirmation
 DO $$
 BEGIN
@@ -207,3 +202,5 @@ BEGIN
     RAISE NOTICE 'Tables : repositories, workflows, workflow_runs';
     RAISE NOTICE 'Vues : repo_stats, workflow_stats';
 END $$;
+
+

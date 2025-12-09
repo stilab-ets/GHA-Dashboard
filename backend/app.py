@@ -30,6 +30,11 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 
+# Créer les tables au démarrage si elles n'existent pas
+with app.app_context():
+    db.create_all()
+    print("[DB] Database schema initialized")
+
 CSV_PATH = "builds_features.csv"
 
 # ============================================

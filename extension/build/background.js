@@ -164,8 +164,11 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
       endDate: filters.end
     });
     
-    try {
-      activeWebSocket = new WebSocket(wsUrl);
+    // Add delay to allow backend to perform short-circuit check
+    // This prevents premature WebSocket connection attempts when data might already be in DB
+    setTimeout(() => {
+      try {
+        activeWebSocket = new WebSocket(wsUrl);
       
       activeWebSocket.onopen = () => {
         chrome.storage.local.set({ 
@@ -177,6 +180,13 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         try {
           const message = JSON.parse(event.data);
           const cache = wsCache.get(repo);
+
+          // ---- HANDLE LOG MESSAGES FROM BACKEND ----
+        if (message.type === "log") {
+          console.log("[Background] DB Log:", message.message);
+          return;
+        }
+
           
           if (message.type === 'runs') {
             cache.runs.push(...message.data);
@@ -276,18 +286,19 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         });
       };
       
-    } catch (error) {
-      console.error('[Background] Failed to create WebSocket:', error);
-      
-      chrome.storage.local.set({ 
-        wsStatus: { 
-          isStreaming: false, 
-          isComplete: false, 
-          error: error.message, 
-          repo: repo 
-        }
-      });
-    }
+      } catch (error) {
+        console.error('[Background] Failed to create WebSocket:', error);
+        
+        chrome.storage.local.set({ 
+          wsStatus: { 
+            isStreaming: false, 
+            isComplete: false, 
+            error: error.message, 
+            repo: repo 
+          }
+        });
+      }
+    }, 500); // 500ms delay for backend short-circuit check
   });
 }
 

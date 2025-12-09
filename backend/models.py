@@ -14,6 +14,10 @@ class Repository(db.Model):
     owner = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
+    
+    # Track which date range has been synchronized from GitHub (DATE only, no timezone issues)
+    synced_start_date = db.Column(db.Date, nullable=True)
+    synced_end_date = db.Column(db.Date, nullable=True)
 
     workflows = db.relationship("Workflow", backref="repository", lazy=True)
     runs = db.relationship("WorkflowRun", backref="repository", lazy=True)
