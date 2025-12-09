@@ -403,7 +403,6 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
     _pendingResolves.set(repo, resolve);
     _pendingRejects.set(repo, reject);
     _runsByRepo.set(repo, []);
-    
     chrome.runtime.sendMessage({
       action: 'startWebSocketExtraction',
       repo: repo,
@@ -414,7 +413,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
         reject(new Error(chrome.runtime.lastError.message));
         return;
       }
-      
+
       // If background reports that another repo is already streaming
       if (response && response.busy) {
         const message = response.error || `Another repository (${response.currentRepo}) is currently streaming. Please wait until it finishes before starting a new extraction.`;
