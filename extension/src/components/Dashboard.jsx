@@ -325,6 +325,9 @@ export default function Dashboard() {
 
       clearWebSocketCache(repo);
       
+      // Get current filter values to use in callback (avoid closure issues)
+      const currentFilters = { ...filters, start: dateFiltersRef.current.start, end: dateFiltersRef.current.end };
+      
       const onProgress = (partialData, isComplete) => {
         // Save filter options
         if (partialData.workflows && partialData.workflows.length > 1) {
@@ -335,8 +338,17 @@ export default function Dashboard() {
           });
         }
         
-        // Apply local filters
-        const filteredData = applyLocalFilters(partialData);
+        // Get the latest filter values from ref (including date range)
+        const latestFilters = {
+          workflow: filters.workflow,
+          branch: filters.branch,
+          actor: filters.actor,
+          start: dateFiltersRef.current.start,
+          end: dateFiltersRef.current.end
+        };
+        
+        // Apply local filters using latest filter values (including date range)
+        const filteredData = applyLocalFiltersWithFilters(partialData, latestFilters);
         setData(filteredData);
         
         setProgress({ 
@@ -376,16 +388,43 @@ export default function Dashboard() {
     if (!rawData) return rawData;
     
     // Always apply filters (including date) - filter all collected data client-side
-    const filtered = filterRunsLocally({
+    // Use dateFiltersRef to get the latest date values (preserved during collection)
+    const filterValues = {
       workflow: filters.workflow,
       branch: filters.branch,
       actor: filters.actor,
-      startDate: filters.start,
-      endDate: filters.end
-    }, rawData.repo || currentRepo);
+      startDate: dateFiltersRef.current.start || filters.start,
+      endDate: dateFiltersRef.current.end || filters.end
+    };
+    
+    const filtered = filterRunsLocally(filterValues, rawData.repo || currentRepo);
     
     if (filtered) {
       // Keep original filter options
+      return {
+        ...filtered,
+        workflows: rawData.workflows || availableFilters.workflows,
+        branches: rawData.branches || availableFilters.branches,
+        actors: rawData.actors || availableFilters.actors
+      };
+    }
+    
+    return rawData;
+  };
+
+  // Helper function to apply filters with explicit filter values (for callbacks)
+  const applyLocalFiltersWithFilters = (rawData, explicitFilters) => {
+    if (!rawData) return rawData;
+    
+    const filtered = filterRunsLocally({
+      workflow: explicitFilters.workflow || filters.workflow,
+      branch: explicitFilters.branch || filters.branch,
+      actor: explicitFilters.actor || filters.actor,
+      startDate: explicitFilters.start || dateFiltersRef.current.start || filters.start,
+      endDate: explicitFilters.end || dateFiltersRef.current.end || filters.end
+    }, rawData.repo || currentRepo);
+    
+    if (filtered) {
       return {
         ...filtered,
         workflows: rawData.workflows || availableFilters.workflows,
@@ -487,12 +526,13 @@ export default function Dashboard() {
         });
         
         // Recalculate dashboard data with updated runs (which now include jobs)
+        // Use dateFiltersRef to get the latest date values
         const filtered = filterRunsLocally({
           workflow: filters.workflow,
           branch: filters.branch,
           actor: filters.actor,
-          startDate: filters.start,
-          endDate: filters.end
+          startDate: dateFiltersRef.current.start || filters.start,
+          endDate: dateFiltersRef.current.end || filters.end
         }, currentRepo);
         
         if (filtered) {
@@ -584,13 +624,14 @@ export default function Dashboard() {
     
     // Re-apply all filters if we have a repo (works during collection too)
     // filterRunsLocally reads from _runsByRepo which contains all runs collected so far
+    // Use dateFiltersRef to get the latest date values (preserved during collection)
     if (currentRepo) {
       const filtered = filterRunsLocally({
         workflow: filters.workflow,
         branch: filters.branch,
         actor: filters.actor,
-        startDate: filters.start,
-        endDate: filters.end
+        startDate: dateFiltersRef.current.start || filters.start,
+        endDate: dateFiltersRef.current.end || filters.end
       }, currentRepo);
       
       if (filtered) {
