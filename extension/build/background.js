@@ -175,7 +175,8 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
       isComplete: false, 
       pageCount: 0,
       startDate: null,  // No date filtering - collect all
-      endDate: null
+      endDate: null,
+      phase1_elapsed: null  // Store Phase 1 elapsed time in memory to avoid race conditions
     });
     
     // Add delay to allow backend to perform short-circuit check
@@ -242,44 +243,33 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
               phase: message.phase
             });
             
-            // Get current status to preserve phase1_elapsed if it exists
-            chrome.storage.local.get(['wsStatus'], (result) => {
-              const currentStatus = result.wsStatus || {};
-              // totalRuns from message is the total count (from API), collectedRuns is what we've collected
-              const collectedRuns = cache.runs.length;
-              const statusUpdate = {
-                isStreaming: true, 
-                isComplete: false, 
-                repo: repo, 
-                page: message.page,
-                totalRuns: message.totalRuns || 0, // Total count from API (e.g., 632)
-                collectedRuns: collectedRuns, // What we've collected so far
-                runsWithJobs,
-                totalJobs,
-                phase: message.phase || 'workflow_runs',
-                hasMore: message.hasMore,
-                elapsed_time: message.elapsed_time || null,
-                eta_seconds: message.eta_seconds || null
-              };
-              
-              // Preserve phase1_elapsed if we're in Phase 2 (ALWAYS preserve)
-              if (message.phase === 'jobs' && currentStatus.phase1_elapsed) {
-                statusUpdate.phase1_elapsed = currentStatus.phase1_elapsed;
-              } else if (currentStatus.phase1_elapsed) {
-                // Also preserve if it was set before (even if phase changed)
-                statusUpdate.phase1_elapsed = currentStatus.phase1_elapsed;
-              }
-              
-              // Update phase2_elapsed if in jobs phase
-              if (message.phase === 'jobs' && message.elapsed_time) {
-                statusUpdate.phase2_elapsed = message.elapsed_time;
-                statusUpdate.phase2_eta = message.eta_seconds || null;
-              }
-              
-              chrome.storage.local.set({ 
-                wsRuns: [...cache.runs],
-                wsStatus: statusUpdate
-              });
+            // Use memory cache for phase1_elapsed (NO async race condition!)
+            const collectedRuns = cache.runs.length;
+            const statusUpdate = {
+              isStreaming: true, 
+              isComplete: false, 
+              repo: repo, 
+              page: message.page,
+              totalRuns: message.totalRuns || 0, // Total count from API (e.g., 632)
+              collectedRuns: collectedRuns, // What we've collected so far
+              runsWithJobs,
+              totalJobs,
+              phase: message.phase || 'workflow_runs',
+              hasMore: message.hasMore,
+              elapsed_time: message.elapsed_time || null,
+              eta_seconds: message.eta_seconds || null
+            };
+            
+            // Preserve phase1_elapsed from memory cache if we're in Phase 2
+            if (message.phase === 'jobs' && cache.phase1_elapsed) {
+              statusUpdate.phase1_elapsed = cache.phase1_elapsed;
+              statusUpdate.phase2_elapsed = message.elapsed_time || null;
+              statusUpdate.phase2_eta = message.eta_seconds || null;
+            }
+            
+            chrome.storage.local.set({ 
+              wsRuns: [...cache.runs],
+              wsStatus: statusUpdate
             });
           }
           else if (message.type === 'phase_complete') {
@@ -290,6 +280,9 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
               elapsed_time: message.elapsed_time
             });
             
+            // IMPORTANT: Store phase1_elapsed in memory cache to avoid race conditions
+            cache.phase1_elapsed = message.elapsed_time || null;
+            
             chrome.storage.local.set({ 
               wsStatus: { 
                 isStreaming: true, 
@@ -298,7 +291,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 totalRuns: message.totalRuns, // Total count from API
                 collectedRuns: cache.runs.length, // What we've collected
                 phase: 'jobs',
-                phase1_elapsed: message.elapsed_time || null
+                phase1_elapsed: cache.phase1_elapsed
               }
             });
           }
@@ -306,31 +299,27 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             // Update job collection progress
             const runsWithJobs = cache.runs.filter(r => r.jobs && r.jobs.length > 0).length;
             
-            // Get current status to preserve phase1_elapsed
-            chrome.storage.local.get(['wsStatus'], (result) => {
-              const currentStatus = result.wsStatus || {};
-              
-              chrome.storage.local.set({ 
-                wsRuns: [...cache.runs], // Trigger update
-                wsStatus: { 
-                  isStreaming: true, 
-                  isComplete: false, 
-                  repo: repo, 
-                  totalRuns: message.total_runs || currentStatus.totalRuns || 0,
-                  collectedRuns: cache.runs.length,
-                  runsWithJobs,
-                  totalJobs: message.jobs_collected,
-                  phase: 'jobs',
-                  phase1_elapsed: currentStatus.phase1_elapsed || null, // Always preserve Phase 1 elapsed
-                  phase2_elapsed: message.elapsed_time || null,
-                  phase2_eta: message.eta_seconds || null,
-                  jobsProgress: {
-                    runs_processed: message.runs_processed,
-                    total_runs: message.total_runs,
-                    jobs_collected: message.jobs_collected
-                  }
+            // Use phase1_elapsed from memory cache (NO race condition!)
+            chrome.storage.local.set({ 
+              wsRuns: [...cache.runs], // Trigger update
+              wsStatus: { 
+                isStreaming: true, 
+                isComplete: false, 
+                repo: repo, 
+                totalRuns: message.total_runs || 0,
+                collectedRuns: cache.runs.length,
+                runsWithJobs,
+                totalJobs: message.jobs_collected,
+                phase: 'jobs',
+                phase1_elapsed: cache.phase1_elapsed || null, // From memory cache - no race condition!
+                phase2_elapsed: message.elapsed_time || null,
+                phase2_eta: message.eta_seconds || null,
+                jobsProgress: {
+                  runs_processed: message.runs_processed,
+                  total_runs: message.total_runs,
+                  jobs_collected: message.jobs_collected
                 }
-              });
+              }
             });
           }
           else if (message.type === 'complete') {

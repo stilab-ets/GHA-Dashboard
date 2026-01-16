@@ -355,9 +355,12 @@ export default function Dashboard() {
           isStreaming: status.isStreaming,
           isComplete: status.isComplete,
           totalRuns: status.totalRuns,
+          collectedRuns: status.collectedRuns,
           runsWithJobs: status.runsWithJobs,
           totalJobs: status.totalJobs,
-          phase: status.phase
+          phase: status.phase,
+          phase1_elapsed: status.phase1_elapsed,  // Debug: Phase 1 elapsed time
+          phase2_elapsed: status.phase2_elapsed   // Debug: Phase 2 elapsed time
         });
         
         // Update main progress state (controls the streaming indicator)
