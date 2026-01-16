@@ -2511,91 +2511,74 @@ export default function Dashboard() {
               </div>
             </div>
             {workflowStats.length > 0 ? (
-              <div>
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart 
-                    data={getDurationExplosionData(selectedWorkflowForDuration)} 
-                    margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
-                  >
+              <ResponsiveContainer width="100%" height={320}>
+                <LineChart 
+                  data={getDurationExplosionData(selectedWorkflowForDuration)} 
+                  margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                    <XAxis dataKey="date" stroke="#bcd" angle={-45} textAnchor="end" height={80} />
-                    <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
-                    <Tooltip 
-                      content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
-                          const data = payload[0].payload;
-                          return (
-                            <div style={{ background: '#222', padding: '10px', border: '1px solid #444', borderRadius: '4px' }}>
-                              <p style={{ color: '#fff', margin: 0 }}>Date: {data.date}</p>
-                              <p style={{ color: '#fff', margin: 0 }}>Duration: {data.duration.toFixed(1)}s</p>
-                              {data.explosions && data.explosions.length > 0 && (
-                                <p style={{ color: '#ff9800', margin: '5px 0 0 0', cursor: 'pointer' }} 
-                                   onClick={() => window.open(data.explosions[0].html_url, '_blank')}>
-                                  ⚠️ Duration explosion detected - Click to view run
-                                </p>
-                              )}
-                            </div>
-                          );
+                  <XAxis dataKey="date" stroke="#bcd" angle={-45} textAnchor="end" height={80} />
+                  <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip 
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div style={{ background: '#222', padding: '10px', border: '1px solid #444', borderRadius: '4px' }}>
+                            <p style={{ color: '#fff', margin: 0 }}>Date: {data.date}</p>
+                            <p style={{ color: '#fff', margin: 0 }}>Duration: {data.duration.toFixed(1)}s</p>
+                            {data.explosions && data.explosions.length > 0 && (
+                              <p style={{ color: '#ff9800', margin: '5px 0 0 0', cursor: 'pointer' }} 
+                                 onClick={() => window.open(data.explosions[0].html_url, '_blank')}>
+                                ⚠️ Duration explosion detected - Click to view run
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="duration" 
+                    stroke="#2196f3" 
+                    strokeWidth={2} 
+                    name="Duration" 
+                    dot={{ r: 4, fill: '#2196f3' }}
+                    activeDot={{
+                      r: 6,
+                      fill: '#2196f3',
+                      stroke: '#fff',
+                      strokeWidth: 2,
+                      cursor: 'pointer',
+                      onClick: (_, payload) => {
+                        const point = payload?.payload;
+                        if (point?.explosions?.length > 0 && point.explosions[0].html_url) {
+                          window.open(point.explosions[0].html_url, '_blank');
                         }
-                        return null;
-                      }}
-                    />
-                    <Legend />
-                    <Line 
-                      type="monotone" 
-                      dataKey="duration" 
-                      stroke="#2196f3" 
-                      strokeWidth={2} 
-                      name="Duration" 
-                      dot={{ r: 4, fill: '#2196f3' }}
-                      activeDot={{
-                        r: 6,
-                        fill: '#2196f3',
-                        stroke: '#fff',
-                        strokeWidth: 2,
-                        cursor: 'pointer',
-                        onClick: (_, payload) => {
-                          const point = payload?.payload;
-                          if (point?.explosions?.length > 0 && point.explosions[0].html_url) {
-                            window.open(point.explosions[0].html_url, '_blank');
-                          }
-                        }
-                      }}
-                    />
-                    <Line type="monotone" dataKey="median" stroke="#4caf50" strokeWidth={2} strokeDasharray="5 5" name="Median" />
-                    <Line type="monotone" dataKey="threshold" stroke="#ff9800" strokeWidth={2} strokeDasharray="3 3" name="2x Median Threshold" />
-                    <Brush 
-                      dataKey="date" 
-                      height={30}
-                      stroke="#8884d8"
-                      startIndex={durationExplosionZoom?.startIndex ?? undefined}
-                      endIndex={durationExplosionZoom?.endIndex ?? undefined}
-                      onChange={(newIndices) => {
-                        // Handle different event formats from Recharts Brush
-                        let startIdx, endIdx;
-                        if (Array.isArray(newIndices)) {
-                          // Array format: [startIndex, endIndex]
-                          [startIdx, endIdx] = newIndices;
-                        } else if (newIndices && typeof newIndices === 'object') {
-                          // Object format: { startIndex, endIndex }
-                          startIdx = newIndices.startIndex;
-                          endIdx = newIndices.endIndex;
-                        } else {
-                          // Invalid format, reset zoom
-                          setDurationExplosionZoom(null);
-                          return;
-                        }
-                        
-                        if (typeof startIdx === 'number' && typeof endIdx === 'number' && startIdx >= 0 && endIdx >= 0) {
-                          setDurationExplosionZoom({ startIndex: startIdx, endIndex: endIdx });
-                        } else {
-                          setDurationExplosionZoom(null);
-                        }
-                      }}
-                    />
-                  </LineChart>
+                      }
+                    }}
+                  />
+                  <Line type="monotone" dataKey="median" stroke="#4caf50" strokeWidth={2} strokeDasharray="5 5" name="Median" />
+                  <Line type="monotone" dataKey="threshold" stroke="#ff9800" strokeWidth={2} strokeDasharray="3 3" name="2x Median Threshold" />
+                  <Brush 
+                    dataKey="date" 
+                    height={30}
+                    stroke="#8884d8"
+                    startIndex={durationExplosionZoom?.startIndex}
+                    endIndex={durationExplosionZoom?.endIndex}
+                    onChange={(e) => {
+                      if (e && typeof e.startIndex === 'number' && typeof e.endIndex === 'number') {
+                        setDurationExplosionZoom({ startIndex: e.startIndex, endIndex: e.endIndex });
+                      } else {
+                        setDurationExplosionZoom(null);
+                      }
+                    }}
+                  />
+                </LineChart>
               </ResponsiveContainer>
-              </div>
             ) : (
               <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
                 No workflow data available
@@ -2679,26 +2662,11 @@ export default function Dashboard() {
                     dataKey="date" 
                     height={30}
                     stroke="#8884d8"
-                    startIndex={failureWorseningZoom?.startIndex ?? undefined}
-                    endIndex={failureWorseningZoom?.endIndex ?? undefined}
-                    onChange={(newIndices) => {
-                      // Handle different event formats from Recharts Brush
-                      let startIdx, endIdx;
-                      if (Array.isArray(newIndices)) {
-                        // Array format: [startIndex, endIndex]
-                        [startIdx, endIdx] = newIndices;
-                      } else if (newIndices && typeof newIndices === 'object') {
-                        // Object format: { startIndex, endIndex }
-                        startIdx = newIndices.startIndex;
-                        endIdx = newIndices.endIndex;
-                      } else {
-                        // Invalid format, reset zoom
-                        setFailureWorseningZoom(null);
-                        return;
-                      }
-                      
-                      if (typeof startIdx === 'number' && typeof endIdx === 'number' && startIdx >= 0 && endIdx >= 0) {
-                        setFailureWorseningZoom({ startIndex: startIdx, endIndex: endIdx });
+                    startIndex={failureWorseningZoom?.startIndex}
+                    endIndex={failureWorseningZoom?.endIndex}
+                    onChange={(e) => {
+                      if (e && typeof e.startIndex === 'number' && typeof e.endIndex === 'number') {
+                        setFailureWorseningZoom({ startIndex: e.startIndex, endIndex: e.endIndex });
                       } else {
                         setFailureWorseningZoom(null);
                       }
