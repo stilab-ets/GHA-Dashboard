@@ -2,10 +2,10 @@ Flask
 flask-cors
 requests
 pandas
+numpy
 flask-sock
 python-dotenv
-Flask-SQLAlchemy
-SQLAlchemy
-psycopg2-binary
 PyYAML
 pytest
+gevent
+gevent-websocket

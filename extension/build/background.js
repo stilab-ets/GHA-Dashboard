@@ -39,7 +39,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     // Check cache (only if same dates)
     const cached = wsCache.get(repo);
-    if (cached && cached.isComplete && cached.startDate === filters.start && cached.endDate === filters.end) {
+    // Check cache - if we have complete data for this repo, use it (regardless of date filters)
+    // Date filtering is done client-side, so we don't need to check dates here
+    if (cached && cached.isComplete) {
       sendResponse({ 
         success: true, 
         cached: true, 
@@ -146,22 +148,24 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
     }
     
     // Build WebSocket URL with token
+    // Don't send date filters - collect ALL runs regardless of date
+    // Date filtering will be done client-side
     const encodedRepo = encodeURIComponent(repo);
-    let wsUrl = `ws://localhost:3000/data/${encodedRepo}?aggregationPeriod=day&token=${encodeURIComponent(token)}`;
+    // Use a wide date range to ensure we get all runs, but backend will ignore it anyway
+    const now = new Date();
+    const farPast = new Date(2000, 0, 1);
+    const farFuture = new Date(2100, 0, 1);
+    const startDate = farPast.toISOString().split('T')[0];
+    const endDate = farFuture.toISOString().split('T')[0];
     
-    if (filters.start) {
-      wsUrl += `&startDate=${filters.start}`;
-    }
-    if (filters.end) {
-      wsUrl += `&endDate=${filters.end}`;
-    }
+    let wsUrl = `ws://localhost:3000/data/${encodedRepo}?aggregationPeriod=day&token=${encodeURIComponent(token)}&startDate=${startDate}&endDate=${endDate}`;
     
     wsCache.set(repo, { 
       runs: [], 
       isComplete: false, 
       pageCount: 0,
-      startDate: filters.start,
-      endDate: filters.end
+      startDate: null,  // No date filtering - collect all
+      endDate: null
     });
     
     // Add delay to allow backend to perform short-circuit check
@@ -189,8 +193,43 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
 
           
           if (message.type === 'runs') {
-            cache.runs.push(...message.data);
+            // GHAminer sends runs with jobs already attached, so handle both cases:
+            // 1. New runs to add
+            // 2. Existing runs to update (if they come again)
+            const newRuns = [];
+            const updatedRunIds = new Set();
+            
+            message.data.forEach(run => {
+              const index = cache.runs.findIndex(r => r.id === run.id);
+              if (index >= 0) {
+                // Update existing run
+                cache.runs[index] = run;
+                updatedRunIds.add(run.id);
+              } else {
+                // Add new run
+                newRuns.push(run);
+              }
+            });
+            
+            // Add new runs
+            if (newRuns.length > 0) {
+              cache.runs.push(...newRuns);
+            }
+            
             cache.pageCount = message.page;
+            
+            const runsWithJobs = cache.runs.filter(r => r.jobs && r.jobs.length > 0).length;
+            const totalJobs = cache.runs.reduce((sum, r) => sum + (r.jobs ? r.jobs.length : 0), 0);
+            
+            console.log('[Background] Received runs', {
+              page: message.page,
+              runsInPage: message.data.length,
+              newRuns: newRuns.length,
+              updatedRuns: updatedRunIds.size,
+              totalRuns: cache.runs.length,
+              runsWithJobs,
+              totalJobs
+            });
             
             chrome.storage.local.set({ 
               wsRuns: [...cache.runs],
@@ -200,20 +239,75 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 repo: repo, 
                 page: message.page,
                 totalRuns: cache.runs.length,
+                runsWithJobs,
+                totalJobs,
+                phase: message.phase || 'jobs',
                 hasMore: message.hasMore
+              }
+            });
+          }
+          else if (message.type === 'phase_complete') {
+            // Phase 1 (runs) complete, Phase 2 (jobs) starting
+            console.log('[Background] Phase complete', {
+              phase: message.phase,
+              totalRuns: message.totalRuns
+            });
+            
+            chrome.storage.local.set({ 
+              wsStatus: { 
+                isStreaming: true, 
+                isComplete: false, 
+                repo: repo, 
+                totalRuns: message.totalRuns,
+                phase: 'jobs'
+              }
+            });
+          }
+          else if (message.type === 'job_progress') {
+            // Update job collection progress
+            const runsWithJobs = cache.runs.filter(r => r.jobs && r.jobs.length > 0).length;
+            
+            chrome.storage.local.set({ 
+              wsRuns: [...cache.runs], // Trigger update
+              wsStatus: { 
+                isStreaming: true, 
+                isComplete: false, 
+                repo: repo, 
+                totalRuns: message.total_runs,
+                runsWithJobs,
+                totalJobs: message.jobs_collected,
+                phase: 'jobs',
+                jobsProgress: {
+                  runs_processed: message.runs_processed,
+                  total_runs: message.total_runs,
+                  jobs_collected: message.jobs_collected
+                }
               }
             });
           }
           else if (message.type === 'complete') {
             cache.isComplete = true;
             
+            const runsWithJobs = cache.runs.filter(r => r.jobs && r.jobs.length > 0).length;
+            const totalJobs = cache.runs.reduce((sum, r) => sum + (r.jobs ? r.jobs.length : 0), 0);
+            
+            console.log('[Background] Collection complete', {
+              totalRuns: cache.runs.length,
+              runsWithJobs,
+              totalJobs,
+              totalPages: message.totalPages
+            });
+            
             chrome.storage.local.set({ 
+              wsRuns: [...cache.runs], // Ensure final state is saved
               wsStatus: { 
                 isStreaming: false, 
                 isComplete: true, 
                 repo: repo, 
                 totalRuns: cache.runs.length,
-                totalPages: message.totalPages
+                totalPages: message.totalPages,
+                totalJobs: message.totalJobs || totalJobs,
+                runsWithJobs
               }
             });
           }
@@ -235,8 +329,24 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
       };
       
       activeWebSocket.onclose = (event) => {
+        console.log('[Background] DEBUG: WebSocket closed', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+          repo: repo
+        });
+        
         const cache = wsCache.get(repo);
         const hadData = cache?.runs?.length > 0;
+        const runsWithJobs = cache?.runs?.filter(r => r.jobs && r.jobs.length > 0).length || 0;
+        
+        console.log('[Background] DEBUG: onclose - cache state', {
+          hadData,
+          totalRuns: cache?.runs?.length || 0,
+          runsWithJobs,
+          cacheIsComplete: cache?.isComplete
+        });
+        
         if (cache) {
           cache.isComplete = true;
         }

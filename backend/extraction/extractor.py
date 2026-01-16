@@ -16,7 +16,6 @@ import asyncio
 # ---------------------------------------------------------------------------
 #  Configuration de base
 # ---------------------------------------------------------------------------
-GHAMINER_PATH = os.path.join("ghaminer", "src", "GHAMetrics.py")
 BUILD_FEATURES_PATH = os.path.join("builds_features.csv")
 MERGED_PATH = os.path.join("extraction", "all_builds.csv")
 LAST_REPO_FILE = os.path.join("last_repo.txt")
@@ -30,28 +29,6 @@ def needs_refresh(csv_path, max_age_days=1):
         return True
     mtime = datetime.datetime.fromtimestamp(os.path.getmtime(csv_path))
     return (datetime.datetime.now() - mtime).days > max_age_days
-
-# --- Lance GHAminer si besoin ---
-def run_ghaminer(repo_url, token):
-    try:
-        print(f" Lancement GHAminer pour {repo_url}...")
-        result = subprocess.run([
-            "python", "ghaminer/src/GHAMetrics.py",
-            "-t", token,
-            "-s", f"https://github.com/{repo_url}",
-            "-fd", "2022-04-03",
-            "-td", "2025-10-31"
-        ], capture_output=True, text=True, check=True)
-
-        print(" GHAminer terminé :", result.stdout)
-        return True
-
-    except subprocess.CalledProcessError as e:
-        print(" GHAminer FAILED")
-        print("STDOUT:", e.stdout)
-        print("STDERR:", e.stderr)
-        return False
-
 
 def extract_data(repo_url, token, from_date, to_date):
     if not os.path.exists(BUILD_FEATURES_PATH):
@@ -89,52 +66,6 @@ def extract_data(repo_url, token, from_date, to_date):
 
     return repo_df, None
 
-def async_extract_data(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime, cancellation: asyncio.Event) -> tuple[list[WorkflowRun], AsyncIterator[WorkflowRun]]:
-    """
-    Returns a list of raw workflow runs that were already in the database,
-    and returns an asynchronous iterator that yields the data that was not in
-    the database, coming from GHAMiner.
-
-    This function will also add the new data to the database.
-
-    Args:
-        repo_url (str): The name of the GitHub repository.
-        token (str): The GitHub API token to use for GHAMiner.
-        from_date (datetime): The start time of the search.
-        to_date (datetime): The end time of the search (non-inclusive).
-        cancellation (asyncio.Event): An event to stop the search at any time.
-
-    Returns:
-        A tuple whose first element is a list of raw workflow runs that were
-        already in the database, and whose second element is an asynchronous
-        iterator that yields the data that was not in the database, coming from
-        GHAMiner.
-    """
-
-    db_data = _get_data_from_db(repo_url, from_date, to_date)
-    if len(db_data) > 0:
-        miner_start_date: datetime.datetime = db_data[-1].created_at
-    else:
-        miner_start_date = from_date
-
-    miner_end_date = to_date
-
-    if miner_start_date >= miner_end_date:
-        class EmptyAsyncIter:
-            def __aiter__(self) -> 'EmptyAsyncIter':
-                return self
-
-            async def __anext__(self) -> WorkflowRun:
-                raise StopAsyncIteration
-
-        return (db_data, EmptyAsyncIter())
-
-    # FIXME: It could happen that we're missing data BEFORE, we're only
-    # checking for missing data after
-    iter = _execute_ghaminer_async(repo_url, token, miner_start_date, miner_end_date, cancellation)
-    return (db_data, iter)
-
-
 def _get_data_from_db(repo_url: str, from_date: datetime.datetime, to_date: datetime.datetime) -> list[WorkflowRun]:
     """
     Returns a list of raw workflow runs from the database, in chronological
@@ -157,59 +88,6 @@ def _get_data_from_db(repo_url: str, from_date: datetime.datetime, to_date: date
         return []
 
     return list(repo.runs)
-
-async def _execute_ghaminer_async(repo_url: str, token:str, from_date: datetime.datetime, to_date: datetime.datetime, cancellation: asyncio.Event) -> AsyncIterator[WorkflowRun]:
-    """
-    Returns an asynchronous iterator that yields the data coming from GHAMiner.
-
-    Args:
-        repo_url (str): The name of the GitHub repository.
-        token (str): The GitHub API token to use for GHAMiner.
-        from_date (datetime): The start time of the search.
-        to_date (datetime): The end time of the search (non-inclusive).
-        cancellation (asyncio.Event): An event to stop the search at any time.
-
-    Returns:
-        An asynchronous iterator that yields the data coming from GHAMiner.
-    """
-
-    with open(BUILD_FEATURES_PATH, 'r') as f:
-        tail = async_tail(f, cancellation)
-
-        cmd = [
-            "python", "ghaminer/src/GHAMetrics.py",
-            "-t", token,
-            "-s", f"https://github.com/{repo_url}",
-            "-fd", from_date.date().isoformat(),
-            "-td", to_date.date().isoformat()
-        ]
-        gha_miner = await asyncio.create_subprocess_exec(*cmd)
-
-        async for item in tail:
-            if item.startswith("repo,"):
-                # GHAMiner added the labels, we cant parse this line
-                continue
-
-            try:
-                run = _generate_models_from_series(item)
-            except Exception as e:
-                gha_miner.kill()
-                raise e
-
-            # Failsafe, if GHAminer returns runs outside the range for some reason
-            # NOTE: GHAminer returns runs in reverse chronological order
-            if run.created_at >= to_date:
-                continue
-
-            if run.created_at < from_date:
-                logging.getLogger('flask.app').warning(f"created_at ({run.created_at.isoformat()}) < from_date({from_date.isoformat()})");
-                break
-
-            yield run
-
-        gha_miner.kill()
-
-
 
 def fetch_all_github_runs(repo, token, max_pages=200):
     """
@@ -254,7 +132,7 @@ def fetch_all_github_runs(repo, token, max_pages=200):
 
 def _generate_models_from_series(line: str) -> WorkflowRun:
     """
-    Takes a line from a CSV file generated by GHAMiner and adds all the
+    Takes a line from a CSV file and adds all the
     necessary entries in the database. Returns the final, parsed workflow run.
 
     Args:
@@ -302,7 +180,7 @@ def _generate_models_from_series(line: str) -> WorkflowRun:
 
     workflow_name = line_values[WORKFLOW_NAME]
 
-    # On ignore workflow_id qui n’est pas fiable dans GHAMiner
+    # On ignore workflow_id qui n'est pas fiable
     workflow = Workflow.query.filter_by(workflow_name=workflow_name,
                                         repository_id=repo.id).one_or_none()
 

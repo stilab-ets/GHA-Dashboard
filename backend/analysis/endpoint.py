@@ -1,21 +1,25 @@
-from models import *
-from extraction.extractor import fetch_all_github_runs
+"""
+WebSocket endpoint for streaming GitHub Actions data using GHAminer
+"""
 import json
 import os
-import pandas as pd
+import sys
 from datetime import date, datetime, time as dt_time
 from typing import Any
 from dataclasses import dataclass
-import time as time_module
-import requests
-from analysis.db_ingest import insert_runs_batch
 
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
 
+# Import GHAminer streaming wrapper
+from ghaminer_stream import stream_workflow_runs_phase1, stream_job_details_phase2, load_config
+import time
 
 
 @dataclass
 class AggregationFilters:
-    aggregationPeriod: AggregationPeriod = "day"
+    aggregationPeriod: str = "day"
     startDate: date = date(2000, 1, 1)
     endDate: date = date(2100, 1, 1)
     author: str | None = None
@@ -24,301 +28,237 @@ class AggregationFilters:
 
 
 def json_default(o: Any):
+    """JSON serializer for datetime objects"""
     if isinstance(o, datetime):
         return o.isoformat()
     elif isinstance(o, date):
         return o.isoformat()
-    elif isinstance(o, pd.Timestamp):
-        return o.isoformat()
-    elif hasattr(o, '__dict__'):
-        return o.__dict__
     else:
         return str(o)
 
 
-def fetch_github_runs_page(repo: str, token: str, page: int = 1, per_page: int = 100) -> tuple[list, bool]:
-    owner, repo_name = repo.split("/")
-    url = f"https://api.github.com/repos/{owner}/{repo_name}/actions/runs"
-    
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json"
-    }
-    
-    params = {
-        "per_page": per_page,
-        "page": page
-    }
-    
-    r = requests.get(url, headers=headers, params=params)
-    
-    if r.status_code != 200:
-        raise Exception(f"GitHub API error: {r.status_code}")
-    
-    data = r.json()
-    
-    runs = data.get("workflow_runs", [])
-    has_more = len(runs) == per_page
-    
-    return runs, has_more
-
-
-def process_run(run: dict) -> dict:
+def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None):
     """
-    Extrait les champs utiles d'un run GitHub Actions.
-    Retourne un dictionnaire simplifie pour le frontend.
+    Stream workflow runs and jobs from GHAminer via WebSocket
     """
-    duration = 0
-    if run.get('updated_at') and run.get('created_at'):
-        try:
-            created = datetime.fromisoformat(run['created_at'].replace('Z', '+00:00'))
-            updated = datetime.fromisoformat(run['updated_at'].replace('Z', '+00:00'))
-            duration = (updated - created).total_seconds()
-        except:
-            duration = 0
+    print(f"[WebSocket] ========================================")
+    print(f"[WebSocket] Starting GHAminer collection for {repo}")
+    print(f"[WebSocket] ========================================")
     
-    actor = run.get('actor')
-    actor_login = None
-    if isinstance(actor, dict):
-        actor_login = actor.get('login')
-    elif actor:
-        actor_login = str(actor)
-    
-    return {
-        'id': run.get('id'),
-        'workflow_name': run.get('name'),
-        'branch': run.get('head_branch'),
-        'actor': actor_login,
-        'status': run.get('status'),
-        'conclusion': run.get('conclusion'),
-        'created_at': run.get('created_at'),
-        'updated_at': run.get('updated_at'),
-        'duration': duration,
-        'run_number': run.get('run_number'),
-        'event': run.get('event'),
-        'html_url': run.get('html_url')
-    }
-
-
-async def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None):
-    """
-    Recupere les donnees depuis l'API GitHub PAGE PAR PAGE
-    et envoie les RUNS BRUTS (pas agreges) au frontend.
-    
-    
-    Args:
-        ws: WebSocket connection
-        repo: Repository name (owner/repo)
-        filters: Aggregation filters
-        token: GitHub token (from extension or fallback to env)
-    """
-    print(f"[WebSocket] Connection for {repo}")
-    print(f"[WebSocket] Date filters: {filters.startDate} to {filters.endDate}")
-    
-    # Utiliser le token passé en paramètre, sinon fallback sur .env
     if not token:
         token = os.getenv("GITHUB_TOKEN")
     
     if not token:
         error_msg = {
             "type": "error",
-            "message": "GitHub token required. Please configure it in the Chrome extension popup (click the extension icon and enter your token)."
+            "message": "GitHub token required. Please configure it in the Chrome extension popup."
         }
         ws.send(json.dumps(error_msg))
         ws.close()
         return
     
     try:
-        page = 1
-        max_pages = 100
-        total_runs_sent = 0
-
-        # initialisation du batch BD
+        # Load GHAminer config
+        config = load_config()
+        print(f"[WebSocket] GHAminer config loaded: fetch_job_details={config.get('fetch_job_details', True)}")
+        
+        batch_size = 50
+        all_runs_list = []
+        
+        # ========================================
+        # PHASE 1: Collect all workflow runs (without jobs)
+        # ========================================
+        print(f"[WebSocket] Starting Phase 1: Workflow runs collection")
+        phase1_start_time = time.time()
+        total_runs = 0
         batch = []
+        last_keepalive = 0
+        estimated_total = 0
         
-        start_dt = datetime.combine(filters.startDate, dt_time())
-        end_dt = datetime.combine(filters.endDate, dt_time(23, 59, 59))
-
-        # Check if this date range has already been synchronized
-        repository = Repository.query.filter_by(repo_name=repo).first()
-        
-        # Determine if we should use short-circuit (return data from DB) or stream from GitHub
-        use_shortcircuit = False
-        if repository and repository.synced_start_date and repository.synced_end_date:
-            # Compare only the DATE part (ignore timezone/time differences)
-            synced_start_date = repository.synced_start_date.date() if hasattr(repository.synced_start_date, 'date') else repository.synced_start_date
-            synced_end_date = repository.synced_end_date.date() if hasattr(repository.synced_end_date, 'date') else repository.synced_end_date
+        for dashboard_run, current_count, estimated, all_runs in stream_workflow_runs_phase1(repo, token, config):
+            all_runs_list = all_runs  # Keep updating
+            total_runs = current_count
+            estimated_total = estimated
+            batch.append(dashboard_run)
             
-            # Date range is synced if it's within the synced bounds
-            if filters.startDate >= synced_start_date and filters.endDate <= synced_end_date:
-                use_shortcircuit = True
-                print(f"[DB] Date range {filters.startDate} to {filters.endDate} is within synced range {synced_start_date} to {synced_end_date}")
-
-        if use_shortcircuit:
-            print(f"[DB] Runs found for {repo} between {start_dt} and {end_dt}")
-            print(f"[DB] Filters: author={filters.author}, branch={filters.branch}, workflowName={filters.workflowName}")
-            # Short-circuit: fetch runs from DB and send them immediately instead of
-            # re-streaming from the GitHub API. This avoids unnecessary API calls
-            # when the requested date range is already present in the local DB.
+            # Calculate elapsed time and ETA for Phase 1
+            elapsed_time = time.time() - phase1_start_time
+            runs_per_second = total_runs / elapsed_time if elapsed_time > 0 else 0
+            eta_seconds = (estimated_total - total_runs) / runs_per_second if runs_per_second > 0 and estimated_total > total_runs else None
             
-            try:
-                # import models via wildcard import at top: Repository, WorkflowRun, Workflow, db
-                repository = Repository.query.filter_by(repo_name=repo).first()
-                if repository:
-                    query = WorkflowRun.query.filter(
-                        WorkflowRun.repository_id == repository.id,
-                        WorkflowRun.created_at >= start_dt,
-                        WorkflowRun.created_at <= end_dt
-                    )
-                    # apply optional filters
-                    if filters.author:
-                        query = query.filter(WorkflowRun.issuer_name == filters.author)
-                    if filters.branch:
-                        query = query.filter(WorkflowRun.branch == filters.branch)
-                    if filters.workflowName:
-                        # join workflow to filter by name
-                        query = query.join(Workflow).filter(Workflow.workflow_name == filters.workflowName)
-
-                    runs_in_db = query.order_by(WorkflowRun.created_at.desc()).all()
-                    print(f"[DB] Found {len(runs_in_db)} runs in requested date range")
-
-
-                    processed_runs = []
-                    for r in runs_in_db:
-                        processed_runs.append({
-                            'id': r.id_build,
-                            'workflow_name': r.workflow.workflow_name if r.workflow else None,
-                            'branch': r.branch,
-                            'actor': r.issuer_name,
-                            'status': r.status,
-                            'conclusion': r.conclusion,
-                            'created_at': r.created_at.isoformat() if r.created_at else None,
-                            'updated_at': r.updated_at.isoformat() if r.updated_at else None,
-                            'duration': r.build_duration or 0,
-                            'run_number': None,
-                            'event': r.workflow_event_trigger,
-                            'html_url': None
-                        })
-
-                    # Always send runs message (even if empty) so frontend callback is triggered
-                    msg = {
-                        'type': 'runs',
-                        'data': processed_runs,
-                        'page': 1,
-                        'hasMore': False
-                    }
-                    ws.send(json.dumps(msg, default=json_default))
-
-                    complete_msg = {
-                        'type': 'complete',
-                        'totalRuns': len(processed_runs),
-                        'totalPages': 1 if processed_runs else 0
-                    }
-                    ws.send(json.dumps(complete_msg, default=json_default))
-                    print(f"[WebSocket] Served {len(processed_runs)} runs from DB for {repo}")
-                else:
-                    # repository not present, nothing to send
-                    ws.send(json.dumps({'type': 'complete', 'totalRuns': 0, 'totalPages': 0}))
-            except Exception as e:
-                print(f"[WebSocket] Error reading DB runs: {e}")
-                import traceback
-                traceback.print_exc()
-                ws.send(json.dumps({'type': 'error', 'message': str(e)}, default=json_default))
-            
-            # Short-circuit complete — don't fetch from GitHub
-            return
-        else:
-            print(f"[DB] No runs found for {repo} in that date range")
-        
-        while page <= max_pages:
-            runs, has_more = fetch_github_runs_page(repo, token, page)
-            
-            if not runs:
-                break
-            
-            processed_runs = []
-            oldest_run_date = None
-            
-            for run in runs:
-                processed = process_run(run)
-                #ajout au  batch BD
-                batch.append(processed)
-
-                # insertion par lot toutes les 50 entrées
-                if len(batch) >= 50:
-                    inserted = insert_runs_batch(repo, batch)
-                    print(f"[WebSocket] Inserted {inserted} runs into DB")
-                    #notify frontend
-                    ws.send(json.dumps({
-                        "type": "log",
-                        "message": f"Inserted {inserted} runs into DB"
-                    }))
-                    
-                    batch.clear()
-                
-                try:
-                    run_date = datetime.fromisoformat(processed['created_at'].replace('Z', '+00:00'))
-                    run_date_naive = run_date.replace(tzinfo=None)
-                    
-                    if oldest_run_date is None or run_date_naive < oldest_run_date:
-                        oldest_run_date = run_date_naive
-                    
-                    # Comparer les dates naïves (sans timezone)
-                    if start_dt <= run_date_naive <= end_dt:
-                        processed_runs.append(processed)
-                except:
-                    pass
-            
-            if processed_runs:
+            # Send batch to frontend
+            if len(batch) >= batch_size:
                 msg = {
                     "type": "runs",
-                    "data": processed_runs,
-                    "page": page,
-                    "hasMore": has_more
+                    "data": batch,
+                    "page": (total_runs // batch_size) + 1,
+                    "hasMore": True,
+                    "phase": "workflow_runs",
+                    "totalRuns": estimated_total,
+                    "elapsed_time": elapsed_time,
+                    "eta_seconds": eta_seconds
                 }
                 ws.send(json.dumps(msg, default=json_default))
-                total_runs_sent += len(processed_runs)
-                print(f"[WebSocket] Page {page}: sent {len(processed_runs)} runs (total: {total_runs_sent})")
+                print(f"[WebSocket] Sent batch: {len(batch)} runs (total: {total_runs}/{estimated_total} runs)")
+                batch.clear()
+                last_keepalive = total_runs
             
-            if not has_more:
-                break
-            
-            if oldest_run_date and oldest_run_date < start_dt:
-                print(f"[WebSocket] Runs older than start date, stopping")
-                break
-            
-            page += 1
-            time_module.sleep(0.1)
-
-        # insérer le reste du batch BD
+            # Send keepalive every 100 runs to prevent timeout
+            if total_runs - last_keepalive >= 100:
+                keepalive_msg = {
+                    "type": "log",
+                    "message": f"Phase 1: Still collecting... {total_runs} runs processed so far"
+                }
+                try:
+                    ws.send(json.dumps(keepalive_msg, default=json_default))
+                    last_keepalive = total_runs
+                except:
+                    pass
+        
+        # Send remaining Phase 1 batch
         if batch:
-            print(f"[BACKEND] Inserting batch of {len(batch)} runs into database…")
-            inserted = insert_runs_batch(repo, batch)
-            print(f"[WebSocket] Final insert : {inserted} runs into DB")
-            print(f"[BACKEND] Batch inserted: {inserted} runs")
-            # --- notify frontend ---
-            log_msg = {
-                "type": "log",
-                "message": f"Inserted {inserted} runs into DB"
+            elapsed_time = time.time() - phase1_start_time
+            msg = {
+                "type": "runs",
+                "data": batch,
+                "page": (total_runs // batch_size) + 1,
+                "hasMore": False,
+                "phase": "workflow_runs",
+                "totalRuns": total_runs,
+                "elapsed_time": elapsed_time,
+                "eta_seconds": None
             }
-            ws.send(json.dumps(log_msg))
-
-
+            ws.send(json.dumps(msg, default=json_default))
+            print(f"[WebSocket] Sent final Phase 1 batch: {len(batch)} runs")
+        
+        # Send Phase 1 completion message
+        phase1_elapsed = time.time() - phase1_start_time
+        phase1_complete_msg = {
+            "type": "phase_complete",
+            "phase": "workflow_runs",
+            "totalRuns": total_runs,
+            "elapsed_time": phase1_elapsed
+        }
+        ws.send(json.dumps(phase1_complete_msg, default=json_default))
+        print(f"[WebSocket] Phase 1 complete: {total_runs} runs collected in {phase1_elapsed:.2f} seconds")
+        
+        # ========================================
+        # PHASE 2: Collect job details (if enabled)
+        # ========================================
+        if config.get("fetch_job_details", True) and all_runs_list:
+            print(f"[WebSocket] Starting Phase 2: Job details collection")
+            phase2_start_time = time.time()
+            batch = []
+            jobs_collected = 0
+            last_keepalive = 0
+            
+            for updated_run, current_count, total_runs_count in stream_job_details_phase2(repo, token, all_runs_list, config):
+                # Count jobs
+                if updated_run.get('jobs'):
+                    jobs_collected += len(updated_run['jobs'])
+                
+                batch.append(updated_run)
+                
+                # Calculate elapsed time and ETA for Phase 2
+                elapsed_time = time.time() - phase2_start_time
+                runs_per_second = current_count / elapsed_time if elapsed_time > 0 else 0
+                eta_seconds = (total_runs_count - current_count) / runs_per_second if runs_per_second > 0 and total_runs_count > current_count else None
+                
+                # Send batch to frontend
+                if len(batch) >= batch_size:
+                    msg = {
+                        "type": "runs",
+                        "data": batch,
+                        "page": (current_count // batch_size) + 1,
+                        "hasMore": True,
+                        "phase": "jobs",
+                        "totalRuns": total_runs_count,
+                        "elapsed_time": elapsed_time,
+                        "eta_seconds": eta_seconds
+                    }
+                    ws.send(json.dumps(msg, default=json_default))
+                    print(f"[WebSocket] Sent batch: {len(batch)} runs (total: {current_count}/{total_runs_count} runs, {jobs_collected} jobs)")
+                    batch.clear()
+                    last_keepalive = current_count
+                
+                # Send job progress update
+                if current_count % 10 == 0 or current_count == total_runs_count:
+                    job_progress_msg = {
+                        "type": "job_progress",
+                        "runs_processed": current_count,
+                        "total_runs": total_runs_count,
+                        "jobs_collected": jobs_collected,
+                        "elapsed_time": elapsed_time,
+                        "eta_seconds": eta_seconds
+                    }
+                    try:
+                        ws.send(json.dumps(job_progress_msg, default=json_default))
+                    except:
+                        pass
+                
+                # Send keepalive every 50 runs to prevent timeout
+                if current_count - last_keepalive >= 50:
+                    keepalive_msg = {
+                        "type": "log",
+                        "message": f"Phase 2: Still collecting job details... {current_count}/{total_runs_count} runs processed"
+                    }
+                    try:
+                        ws.send(json.dumps(keepalive_msg, default=json_default))
+                        last_keepalive = current_count
+                    except:
+                        pass
+            
+            # Send remaining Phase 2 batch
+            if batch:
+                elapsed_time = time.time() - phase2_start_time
+                msg = {
+                    "type": "runs",
+                    "data": batch,
+                    "page": (len(all_runs_list) // batch_size) + 1,
+                    "hasMore": False,
+                    "phase": "jobs",
+                    "totalRuns": len(all_runs_list),
+                    "elapsed_time": elapsed_time,
+                    "eta_seconds": None
+                }
+                ws.send(json.dumps(msg, default=json_default))
+                print(f"[WebSocket] Sent final Phase 2 batch: {len(batch)} runs")
+            
+            phase2_elapsed = time.time() - phase2_start_time
+            total_jobs = jobs_collected
+        else:
+            phase2_elapsed = 0
+            total_jobs = 0
+        
+        # Send final completion message
         complete_msg = {
             "type": "complete",
-            "totalRuns": total_runs_sent,
-            "totalPages": page
+            "phase": "jobs" if config.get('fetch_job_details', True) else "workflow_runs",
+            "totalRuns": total_runs,
+            "totalJobs": total_jobs,
+            "elapsed_time": phase1_elapsed + phase2_elapsed
         }
         ws.send(json.dumps(complete_msg, default=json_default))
         
-        print(f"[WebSocket] Complete for {repo}: {total_runs_sent} runs, {page} pages")
+        print(f"[WebSocket] ========================================")
+        print(f"[WebSocket] Collection complete!")
+        print(f"[WebSocket] Total runs: {total_runs}")
+        print(f"[WebSocket] Total jobs: {total_jobs}")
+        print(f"[WebSocket] Phase 1 time: {phase1_elapsed:.2f} seconds")
+        print(f"[WebSocket] Phase 2 time: {phase2_elapsed:.2f} seconds")
+        print(f"[WebSocket] Total time: {phase1_elapsed + phase2_elapsed:.2f} seconds")
+        print(f"[WebSocket] ========================================")
         
     except Exception as e:
-        print(f"[WebSocket] Error: {e}")
+        print(f"[WebSocket] ERROR: {e}")
         import traceback
         traceback.print_exc()
-        error_msg = {"type": "error", "message": str(e)}
-        ws.send(json.dumps(error_msg, default=json_default))
+        try:
+            error_msg = {"type": "error", "message": str(e)}
+            ws.send(json.dumps(error_msg, default=json_default))
+        except:
+            print("[WebSocket] Failed to send error message")
     
     finally:
+        print(f"[WebSocket] Closing connection")
         ws.close()

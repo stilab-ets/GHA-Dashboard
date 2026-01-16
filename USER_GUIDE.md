@@ -9,8 +9,8 @@ It includes:
 - an automatic GitHub Actions extraction system.
 
 This guide explains how to install, run, and use the dashboard.
----
 
+---
 ##  1. Prerequisites
 
 ###  Required Software
