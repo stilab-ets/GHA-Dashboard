@@ -652,6 +652,7 @@ function convertRunsToDashboard(runs, repo, filters) {
     return {
       repo,
       totalRuns: 0,
+      originalTotalRuns: 0,
       successRate: 0,
       medianDuration: 0,
       mad: 0,
