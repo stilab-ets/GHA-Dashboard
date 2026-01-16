@@ -75,7 +75,7 @@ async function main() {
         // Keep src/dashboard/dashboard.html as is (Vite places it there)
         // Keep react_page/* as is
         return r;
-      })
+      }).concat(['assets/*.js', 'assets/*.css', 'src/dashboard/loader.js']) // Add JS and CSS assets for module loading
     }));
   }
 
@@ -88,6 +88,38 @@ async function main() {
 
   await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
   console.log('updated manifest paths for build');
+
+  // Fix absolute paths in HTML files (Vite generates absolute paths that don't work in extensions)
+  const dashboardHtmlPath = path.join(buildDir, 'src', 'dashboard', 'dashboard.html');
+  const popupHtmlPath = path.join(buildDir, 'src', 'popup', 'popup.html');
+  
+  try {
+    // Fix dashboard.html - use relative paths for assets
+    if (await fsp.access(dashboardHtmlPath).then(() => true).catch(() => false)) {
+      let dashboardHtml = await fsp.readFile(dashboardHtmlPath, 'utf8');
+      
+      // Fix absolute paths to relative paths
+      dashboardHtml = dashboardHtml.replace(/src="\/assets\//g, 'src="../../assets/');
+      dashboardHtml = dashboardHtml.replace(/href="\/assets\//g, 'href="../../assets/');
+      
+      // Keep the static script tags - they should work with relative paths
+      // and proper web_accessible_resources declaration
+      
+      await fsp.writeFile(dashboardHtmlPath, dashboardHtml);
+      console.log('fixed paths in dashboard.html');
+    }
+    
+    // Fix popup.html
+    if (await fsp.access(popupHtmlPath).then(() => true).catch(() => false)) {
+      let popupHtml = await fsp.readFile(popupHtmlPath, 'utf8');
+      popupHtml = popupHtml.replace(/src="\/assets\//g, 'src="../../assets/');
+      popupHtml = popupHtml.replace(/href="\/assets\//g, 'href="../../assets/');
+      await fsp.writeFile(popupHtmlPath, popupHtml);
+      console.log('fixed absolute paths in popup.html');
+    }
+  } catch (err) {
+    console.warn('Warning: Could not fix HTML paths:', err.message);
+  }
 
   // copy styles/dashboardStyles.css to build root as manifest referenced it
   const stylesSrc = path.join(extDir, 'src', 'styles', 'dashboardStyles.css');

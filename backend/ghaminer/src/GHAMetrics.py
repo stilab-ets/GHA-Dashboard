@@ -23,9 +23,10 @@ from repo_info_collector import get_repository_languages , get_workflow_ids , co
 from metrics_aggregator import save_builds_to_file
 from build_run_analyzer import get_jobs_for_run , get_builds_info_from_build_yml , calculate_description_complexity
 from request_github import get_request
+from streaming_collector import StreamingCollector
 
 
-github_token = 'your_github_token'  
+github_token = ''  
 output_csv = 'builds_features.csv'
 from_date = None
 to_date = None
@@ -204,8 +205,9 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex , config)
     # Get already recorded build IDs
     existing_build_ids = get_existing_build_ids(repo_full_name, output_csv)
 
-    # Fetch all workflows
-    build_workflow_ids = get_workflow_all_ids(repo_full_name, token)
+    # Fetch workflows (filtered by config if specified, otherwise all)
+    specific_workflow_ids = config.get("workflow_ids", [])
+    build_workflow_ids = get_workflow_ids(repo_full_name, token, specific_workflow_ids)
 
     languages = get_repository_languages(repo_full_name, token)
     #commit_cache = LRUCache(capacity=10000)
@@ -328,8 +330,11 @@ def get_builds_info(repo_full_name, token, output_csv, framework_regex , config)
 
 def compile_build_info(run, repo_full_name, commit_data, sloc_initial, test_lines_per_1000_sloc, commit_sha, languages, total_builds,
                        build_language, test_frameworks , dependency_count , workflow_size , framework_regex , workflow_name, event_trigger, issuer, workflow_id, duration_to_fetch , config):
-    # Parsing build start and end times
-    start_time = datetime.strptime(run['created_at'], '%Y-%m-%dT%H:%M:%SZ')
+    # Parsing build start and end times for the LATEST attempt
+    # run_started_at gives the start time of the latest attempt (not created_at which is the first attempt)
+    run_attempt = run.get('run_attempt', 1)
+    latest_attempt_start = run.get('run_started_at') or run['created_at']  # Fallback to created_at if not available
+    start_time = datetime.strptime(latest_attempt_start, '%Y-%m-%dT%H:%M:%SZ')
     end_time = datetime.strptime(run['updated_at'], '%Y-%m-%dT%H:%M:%SZ')
     duration = (end_time - start_time).total_seconds()
 
@@ -401,8 +406,9 @@ def compile_build_info(run, repo_full_name, commit_data, sloc_initial, test_line
         'status': run['status'],
         'workflow_event_trigger': event_trigger,
         'conclusion': run['conclusion'],
-        'created_at': run['created_at'],
-        'updated_at': run['updated_at'],
+        'run_attempt': run_attempt,
+        'created_at': latest_attempt_start,  # Start time of the latest attempt
+        'updated_at': run['updated_at'],     # End time of the latest attempt
         'build_duration': duration,
         'total_builds': total_builds,
 
@@ -510,11 +516,19 @@ def main():
 
     config = load_config()
     
+    # Check if streaming mode is enabled
+    streaming_mode = config.get("streaming_mode", False)
+    
     # Handle single project or projects file
     if single_project:
         # If a single project is specified, process only that
         repo_full_name = single_project.split('/')[-2] + '/' + single_project.split('/')[-1]
-        get_builds_info(repo_full_name, github_token, output_csv, framework_regex, config)
+        
+        if streaming_mode:
+            logging.info("Streaming mode enabled - using streaming collector")
+            run_streaming_mode(repo_full_name, github_token, output_csv)
+        else:
+            get_builds_info(repo_full_name, github_token, output_csv, framework_regex, config)
     else:
         # If a CSV file is provided, process all projects in the file
         with open(projects_file, 'r') as csvfile:
@@ -529,12 +543,54 @@ def main():
             # Check if the URL is valid before proceeding
             if len(name) >= 2:
                 repo_full_name = f"{name[-2]}/{name[-1]}"
-                get_builds_info(repo_full_name, github_token, output_csv, framework_regex, config)
+                
+                if streaming_mode:
+                    logging.info(f"Streaming mode enabled - using streaming collector for {repo_full_name}")
+                    run_streaming_mode(repo_full_name, github_token, output_csv)
+                else:
+                    get_builds_info(repo_full_name, github_token, output_csv, framework_regex, config)
             else:
                 print(name)
                 logging.error(f"Invalid URL format for project: {project}")
     
     logging.info("Build information processed and saved to output CSV.")
+
+
+def run_streaming_mode(repo_full_name: str, token: str, output_csv: str, websocket_callback=None):
+    """
+    Run GHAminer in streaming mode.
+    Collects workflow runs page by page, streams to WebSocket,
+    then collects job details and updates CSV.
+    
+    Args:
+        repo_full_name: Repository name (owner/repo)
+        token: GitHub API token
+        output_csv: Path to output CSV file
+        websocket_callback: Optional callback function to send WebSocket messages (receives JSON string)
+    """
+    logging.info(f"Starting streaming mode for {repo_full_name}")
+    
+    collector = StreamingCollector(
+        repo_full_name=repo_full_name,
+        token=token,
+        output_csv=output_csv,
+        websocket_callback=websocket_callback
+    )
+    
+    # Step 1: Collect all workflow runs page by page
+    total_runs = collector.collect_workflow_runs(max_pages=200)
+    
+    if total_runs == 0:
+        logging.warning("No new runs collected")
+        return
+    
+    # Save initial runs to CSV (without job details)
+    collector.save_initial_runs_to_csv()
+    
+    # Step 2: Collect job details for all runs
+    collector.collect_job_details()
+    
+    logging.info(f"Streaming mode complete for {repo_full_name}")
 
 
 if __name__ == "__main__":

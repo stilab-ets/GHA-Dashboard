@@ -35,7 +35,10 @@
         "src/dashboard/dashboard.html",
         "dashboardStyles.css",
         "react_page/*",
-        "assets/dashboard.png"
+        "assets/dashboard.png",
+        "assets/*.js",
+        "assets/*.css",
+        "src/dashboard/loader.js"
       ],
       "matches": [
         "https://github.com/*"

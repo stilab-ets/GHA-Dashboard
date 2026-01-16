@@ -73,6 +73,8 @@ def insert_runs_batch(repo_name: str, runs: list[dict]) -> int:
             branch=r.get("branch"),
             issuer_name=r.get("actor"),
             workflow_event_trigger=r.get("event"),
+            gh_pull_req_number=r.get("pull_request_number"),
+            gh_is_pr=r.get("pull_request_number") is not None,
         )
 
         db.session.add(run)

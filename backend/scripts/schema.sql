@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     -- Jobs
     total_jobs INTEGER DEFAULT 0,
     
-    -- Métriques de code (GHAminer)
+    -- Métriques de code
     gh_files_added INTEGER DEFAULT 0,
     gh_files_deleted INTEGER DEFAULT 0,
     gh_files_modified INTEGER DEFAULT 0,
