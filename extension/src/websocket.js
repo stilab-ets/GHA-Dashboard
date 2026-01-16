@@ -684,6 +684,9 @@ function convertRunsToDashboard(runs, repo, filters) {
   // Apply filters if provided (workflow, branch, actor, and date)
   let filteredRuns = runs;
   
+  // Store original total runs count (before any filtering) for the "Total runs" KPI
+  const originalTotalRuns = runs.length;
+  
   if (filters) {
     // Filter by workflow
     if (filters.workflow && !filters.workflow.includes('all')) {
@@ -711,18 +714,26 @@ function convertRunsToDashboard(runs, repo, filters) {
     }
   }
 
-  // Calculate statistics using helper functions
-  const { totalRuns, successRuns, failureRuns, cancelledRuns, successRate } = calculateRunStats(filteredRuns);
-  const { medianDuration, avgDuration, mad } = calculateDurationStats(filteredRuns);
+  // Filter out runs with duration > 30 million seconds (347 days) for charts/stats
+  // But keep them in the original total count for the "Total runs" KPI
+  const MAX_DURATION_SECONDS = 30000000;
+  const runsForStats = filteredRuns.filter(run => {
+    const duration = run.duration || 0;
+    return duration <= MAX_DURATION_SECONDS;
+  });
 
-  const runsOverTime = aggregateRunsByDate(filteredRuns);
-  const branchComparison = calculateBranchStats(filteredRuns);
-  const workflowStats = calculateWorkflowStats(filteredRuns);
-  const jobStats = calculateJobStats(filteredRuns);
-  const branchStatsGrouped = calculateBranchStatsGrouped(filteredRuns);
-  const eventStats = calculateEventStats(filteredRuns);
-  const contributorStats = calculateContributorStats(filteredRuns);
-  const timeToFix = calculateTimeToFix(filteredRuns);
+  // Calculate statistics using helper functions (using filtered runs without long durations)
+  const { totalRuns, successRuns, failureRuns, cancelledRuns, successRate } = calculateRunStats(runsForStats);
+  const { medianDuration, avgDuration, mad } = calculateDurationStats(runsForStats);
+
+  const runsOverTime = aggregateRunsByDate(runsForStats);
+  const branchComparison = calculateBranchStats(runsForStats);
+  const workflowStats = calculateWorkflowStats(runsForStats);
+  const jobStats = calculateJobStats(runsForStats);
+  const branchStatsGrouped = calculateBranchStatsGrouped(runsForStats);
+  const eventStats = calculateEventStats(runsForStats);
+  const contributorStats = calculateContributorStats(runsForStats);
+  const timeToFix = calculateTimeToFix(runsForStats);
 
   // Status breakdown
   const statusBreakdown = [
@@ -732,7 +743,7 @@ function convertRunsToDashboard(runs, repo, filters) {
   ];
 
   // Top failed jobs
-  const failedRuns = filteredRuns.filter(r => r.conclusion === 'failure');
+  const failedRuns = runsForStats.filter(r => r.conclusion === 'failure');
   const failedByWorkflow = {};
   failedRuns.forEach(run => {
     const wf = run.workflow_name || 'unknown';
@@ -750,7 +761,7 @@ function convertRunsToDashboard(runs, repo, filters) {
   // Cumulative duration of failures
   let cumulativeFailureDuration = 0;
   const failureDurationOverTime = runsOverTime.map(day => {
-    const dayFailures = filteredRuns.filter(r => 
+    const dayFailures = runsForStats.filter(r => 
       r.created_at?.startsWith(day.date) && r.conclusion === 'failure'
     );
     const dayFailureDuration = dayFailures.reduce((sum, r) => sum + (r.duration || 0), 0);
@@ -764,7 +775,8 @@ function convertRunsToDashboard(runs, repo, filters) {
 
   return {
     repo,
-    totalRuns,
+    totalRuns, // Filtered count (without long-duration runs) for stats
+    originalTotalRuns: originalTotalRuns, // Original total count including long-duration runs for "Total runs" KPI
     successRate,
     failureRate: totalRuns > 0 ? failureRuns / totalRuns : 0,
     avgDuration,
@@ -781,7 +793,7 @@ function convertRunsToDashboard(runs, repo, filters) {
     timeToFix: timeToFix,
     topFailedWorkflows,
     failureDurationOverTime,
-    rawRuns: filteredRuns, // For charts that need individual data
+    rawRuns: runsForStats, // For charts that need individual data (filtered out long durations)
     workflows: ['all', ...Array.from(allWorkflows).sort()],
     branches: ['all', ...Array.from(allBranches).sort()],
     actors: ['all', ...Array.from(allActors).sort()]

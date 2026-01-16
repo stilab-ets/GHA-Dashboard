@@ -1534,7 +1534,7 @@ export default function Dashboard() {
         <div className="stats-row">
           <div className="stat-card card">
             <div className="title">Total runs</div>
-            <div className="value">{data.totalRuns}</div>
+            <div className="value">{data.originalTotalRuns !== undefined ? data.originalTotalRuns : data.totalRuns}</div>
           </div>
           <div className="stat-card card">
             <div className="title">Success rate</div>
