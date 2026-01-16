@@ -262,8 +262,11 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 eta_seconds: message.eta_seconds || null
               };
               
-              // Preserve phase1_elapsed if we're in Phase 2
+              // Preserve phase1_elapsed if we're in Phase 2 (ALWAYS preserve)
               if (message.phase === 'jobs' && currentStatus.phase1_elapsed) {
+                statusUpdate.phase1_elapsed = currentStatus.phase1_elapsed;
+              } else if (currentStatus.phase1_elapsed) {
+                // Also preserve if it was set before (even if phase changed)
                 statusUpdate.phase1_elapsed = currentStatus.phase1_elapsed;
               }
               
@@ -313,11 +316,12 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                   isStreaming: true, 
                   isComplete: false, 
                   repo: repo, 
-                  totalRuns: message.total_runs,
+                  totalRuns: message.total_runs || currentStatus.totalRuns || 0,
+                  collectedRuns: cache.runs.length,
                   runsWithJobs,
                   totalJobs: message.jobs_collected,
                   phase: 'jobs',
-                  phase1_elapsed: currentStatus.phase1_elapsed || null,
+                  phase1_elapsed: currentStatus.phase1_elapsed || null, // Always preserve Phase 1 elapsed
                   phase2_elapsed: message.elapsed_time || null,
                   phase2_eta: message.eta_seconds || null,
                   jobsProgress: {
