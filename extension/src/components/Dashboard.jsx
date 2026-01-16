@@ -43,6 +43,41 @@ function formatDateForInput(d) {
   return `${year}-${month}-${day}`;
 }
 
+function formatDateDisplay(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function parseDateStr(dateStr) {
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+}
+
+function getDaysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function getFirstDayOfMonth(year, month) {
+  return new Date(year, month, 1).getDay();
+}
+
+function isSameDay(date1, date2) {
+  if (!date1 || !date2) return false;
+  return date1.getFullYear() === date2.getFullYear() &&
+         date1.getMonth() === date2.getMonth() &&
+         date1.getDate() === date2.getDate();
+}
+
+function isDateInRange(date, start, end) {
+  if (!start || !end || !date) return false;
+  const d = date.getTime();
+  const s = new Date(start).getTime();
+  const e = new Date(end).getTime();
+  return d >= s && d <= e;
+}
+
 export default function Dashboard() {
   // ============================================
   // State Management
@@ -112,6 +147,9 @@ export default function Dashboard() {
   const [contributorSearchQuery, setContributorSearchQuery] = useState('');
   const [activeBranchEventTab, setActiveBranchEventTab] = useState('all');
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+  const [selectingStart, setSelectingStart] = useState(true);
   const [selectedWorkflowForDuration, setSelectedWorkflowForDuration] = useState('all');
   const [tooltipData, setTooltipData] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
@@ -1141,168 +1179,296 @@ export default function Dashboard() {
                 <span style={{ fontSize: '12px', opacity: 0.7 }}>▼</span>
               </button>
               
-              {datePickerOpen && (
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  marginTop: '5px',
-                  background: '#1a1a1a',
-                  border: '1px solid #444',
-                  borderRadius: '8px',
-                  padding: '20px',
-                  zIndex: 1000,
-                  minWidth: '320px',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)'
-                }}>
-                  {/* Quick Action Buttons */}
-                  <div style={{ marginBottom: '20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={() => {
-                        const now = new Date();
-                        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-                        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                        handleFilterChange('start', formatDateForInput(firstDay));
-                        handleFilterChange('end', formatDateForInput(lastDay));
-                      }}
-                      style={{
-                        padding: '8px 16px',
-                        background: '#4caf50',
-                        border: 'none',
-                        borderRadius: '4px',
-                        color: '#fff',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        fontWeight: '500',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onMouseOver={(e) => e.target.style.background = '#45a049'}
-                      onMouseOut={(e) => e.target.style.background = '#4caf50'}
-                    >
-                      Current Month
-                    </button>
-                    <button
-                      onClick={() => {
-                        const now = new Date();
-                        const firstDay = new Date(now.getFullYear(), 0, 1);
-                        const lastDay = new Date(now.getFullYear(), 11, 31);
-                        handleFilterChange('start', formatDateForInput(firstDay));
-                        handleFilterChange('end', formatDateForInput(lastDay));
-                      }}
-                      style={{
-                        padding: '8px 16px',
-                        background: '#2196f3',
-                        border: 'none',
-                        borderRadius: '4px',
-                        color: '#fff',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        fontWeight: '500',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onMouseOver={(e) => e.target.style.background = '#1976d2'}
-                      onMouseOut={(e) => e.target.style.background = '#2196f3'}
-                    >
-                      Current Year
-                    </button>
-                    <button
-                      onClick={() => {
-                        const farPast = new Date(2000, 0, 1);
-                        const farFuture = new Date(2100, 0, 1);
-                        handleFilterChange('start', formatDateForInput(farPast));
-                        handleFilterChange('end', formatDateForInput(farFuture));
-                      }}
-                      style={{
-                        padding: '8px 16px',
-                        background: '#ff9800',
-                        border: 'none',
-                        borderRadius: '4px',
-                        color: '#fff',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        fontWeight: '500',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onMouseOver={(e) => e.target.style.background = '#f57c00'}
-                      onMouseOut={(e) => e.target.style.background = '#ff9800'}
-                    >
-                      All Time
-                    </button>
-                  </div>
+              {datePickerOpen && (() => {
+                const handleSetDates = (startDate, endDate) => {
+                  setFilters(prev => ({ ...prev, start: formatDateForInput(startDate), end: formatDateForInput(endDate) }));
+                };
+
+                const handleDateClick = (day) => {
+                  const clickedDate = new Date(calendarYear, calendarMonth, day);
+                  const clickedDateStr = formatDateForInput(clickedDate);
                   
-                  {/* Date Inputs */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                    <div>
-                      <label style={{ display: 'block', marginBottom: '8px', color: '#ccc', fontSize: '13px', fontWeight: '500' }}>
-                        Start Date
-                      </label>
-              <input
-                type="date"
-                value={filters.start}
-                max={filters.end || defaultEnd}
-                onChange={(e) => handleFilterChange('start', e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '10px 12px',
-                          background: '#222',
-                          border: '1px solid #444',
-                          borderRadius: '4px',
-                          color: '#fff',
-                          fontSize: '14px'
+                  if (selectingStart || !filters.start || clickedDateStr < filters.start) {
+                    handleSetDates(clickedDate, clickedDate);
+                    setSelectingStart(false);
+                  } else {
+                    handleSetDates(parseDateStr(filters.start), clickedDate);
+                    setSelectingStart(true);
+                  }
+                };
+
+                const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const daysInMonth = getDaysInMonth(calendarYear, calendarMonth);
+                const firstDay = getFirstDayOfMonth(calendarYear, calendarMonth);
+                const today = new Date();
+                const selectedStart = filters.start ? parseDateStr(filters.start) : null;
+                const selectedEnd = filters.end ? parseDateStr(filters.end) : null;
+
+                // Generate calendar grid
+                const calendarDays = [];
+                for (let i = 0; i < firstDay; i++) {
+                  calendarDays.push(null);
+                }
+                for (let day = 1; day <= daysInMonth; day++) {
+                  calendarDays.push(day);
+                }
+
+                return (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: '5px',
+                    background: '#1a1a1a',
+                    border: '1px solid #444',
+                    borderRadius: '12px',
+                    padding: '20px',
+                    zIndex: 1000,
+                    width: '340px',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
+                  }}>
+                    {/* Quick Action Buttons */}
+                    <div style={{ marginBottom: '20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const now = new Date();
+                          const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+                          const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                          handleSetDates(firstDay, lastDay);
                         }}
-              />
-            </div>
-                    <div>
-                      <label style={{ display: 'block', marginBottom: '8px', color: '#ccc', fontSize: '13px', fontWeight: '500' }}>
-                        End Date
-                      </label>
-              <input
-                type="date"
-                value={filters.end}
-                min={filters.start}
-                max={defaultEnd}
-                onChange={(e) => handleFilterChange('end', e.target.value)}
                         style={{
-                          width: '100%',
-                          padding: '10px 12px',
-                          background: '#222',
-                          border: '1px solid #444',
-                          borderRadius: '4px',
+                          padding: '8px 14px',
+                          background: '#4caf50',
+                          border: 'none',
+                          borderRadius: '6px',
                           color: '#fff',
-                          fontSize: '14px'
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: '500',
+                          transition: 'all 0.2s ease'
                         }}
-                      />
+                        onMouseOver={(e) => e.target.style.background = '#45a049'}
+                        onMouseOut={(e) => e.target.style.background = '#4caf50'}
+                      >
+                        Current Month
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const now = new Date();
+                          const firstDay = new Date(now.getFullYear(), 0, 1);
+                          const lastDay = new Date(now.getFullYear(), 11, 31);
+                          handleSetDates(firstDay, lastDay);
+                        }}
+                        style={{
+                          padding: '8px 14px',
+                          background: '#2196f3',
+                          border: 'none',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: '500',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseOver={(e) => e.target.style.background = '#1976d2'}
+                        onMouseOut={(e) => e.target.style.background = '#2196f3'}
+                      >
+                        Current Year
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const farPast = new Date(2000, 0, 1);
+                          const farFuture = new Date(2100, 0, 1);
+                          handleSetDates(farPast, farFuture);
+                        }}
+                        style={{
+                          padding: '8px 14px',
+                          background: '#ff9800',
+                          border: 'none',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: '500',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseOver={(e) => e.target.style.background = '#f57c00'}
+                        onMouseOut={(e) => e.target.style.background = '#ff9800'}
+                      >
+                        All Time
+                      </button>
+                    </div>
+
+                    {/* Calendar Header - Month/Year Navigation */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (calendarMonth === 0) {
+                            setCalendarMonth(11);
+                            setCalendarYear(calendarYear - 1);
+                          } else {
+                            setCalendarMonth(calendarMonth - 1);
+                          }
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid #444',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          padding: '6px 12px',
+                          fontSize: '14px',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseOver={(e) => { e.target.style.background = '#2a2a2a'; e.target.style.borderColor = '#666'; }}
+                        onMouseOut={(e) => { e.target.style.background = 'transparent'; e.target.style.borderColor = '#444'; }}
+                      >
+                        ←
+                      </button>
+                      <div style={{ color: '#fff', fontSize: '16px', fontWeight: '600' }}>
+                        {monthNames[calendarMonth]} {calendarYear}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (calendarMonth === 11) {
+                            setCalendarMonth(0);
+                            setCalendarYear(calendarYear + 1);
+                          } else {
+                            setCalendarMonth(calendarMonth + 1);
+                          }
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid #444',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          padding: '6px 12px',
+                          fontSize: '14px',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseOver={(e) => { e.target.style.background = '#2a2a2a'; e.target.style.borderColor = '#666'; }}
+                        onMouseOut={(e) => { e.target.style.background = 'transparent'; e.target.style.borderColor = '#444'; }}
+                      >
+                        →
+                      </button>
+                    </div>
+
+                    {/* Calendar Grid */}
+                    <div style={{ marginBottom: '15px' }}>
+                      {/* Day Headers */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginBottom: '8px' }}>
+                        {dayNames.map(day => (
+                          <div key={day} style={{ textAlign: 'center', color: '#888', fontSize: '12px', fontWeight: '600', padding: '8px 0' }}>
+                            {day}
+                          </div>
+                        ))}
+                      </div>
+                      {/* Calendar Days */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                        {calendarDays.map((day, idx) => {
+                          if (day === null) {
+                            return <div key={`empty-${idx}`} style={{ height: '36px' }}></div>;
+                          }
+                          const cellDate = new Date(calendarYear, calendarMonth, day);
+                          const cellDateStr = formatDateForInput(cellDate);
+                          const isToday = isSameDay(cellDate, today);
+                          const isStart = selectedStart && isSameDay(cellDate, selectedStart);
+                          const isEnd = selectedEnd && isSameDay(cellDate, selectedEnd);
+                          const isInRange = selectedStart && selectedEnd && isDateInRange(cellDate, filters.start, filters.end);
+                          const isSelected = isStart || isEnd;
+
+                          return (
+                            <button
+                              key={day}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDateClick(day);
+                              }}
+                              style={{
+                                height: '36px',
+                                background: isSelected ? '#4caf50' : isInRange ? 'rgba(76, 175, 80, 0.2)' : isToday ? 'rgba(33, 150, 243, 0.2)' : 'transparent',
+                                border: isToday ? '1px solid #2196f3' : isSelected ? '1px solid #4caf50' : '1px solid transparent',
+                                borderRadius: '6px',
+                                color: isSelected ? '#fff' : isToday ? '#2196f3' : '#fff',
+                                cursor: 'pointer',
+                                fontSize: '13px',
+                                fontWeight: isSelected || isToday ? '600' : '400',
+                                transition: 'all 0.2s ease',
+                                position: 'relative'
+                              }}
+                              onMouseOver={(e) => {
+                                if (!isSelected) {
+                                  e.target.style.background = isInRange ? 'rgba(76, 175, 80, 0.3)' : '#2a2a2a';
+                                  e.target.style.borderColor = '#555';
+                                }
+                              }}
+                              onMouseOut={(e) => {
+                                if (!isSelected) {
+                                  e.target.style.background = isInRange ? 'rgba(76, 175, 80, 0.2)' : 'transparent';
+                                  e.target.style.borderColor = isToday ? '#2196f3' : 'transparent';
+                                }
+                              }}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Selected Range Display */}
+                    <div style={{ 
+                      padding: '12px', 
+                      background: '#222', 
+                      borderRadius: '6px', 
+                      marginBottom: '15px',
+                      fontSize: '13px',
+                      color: '#ccc'
+                    }}>
+                      <div><strong>From:</strong> {selectedStart ? formatDateDisplay(filters.start) : 'Not selected'}</div>
+                      <div style={{ marginTop: '4px' }}><strong>To:</strong> {selectedEnd ? formatDateDisplay(filters.end) : 'Not selected'}</div>
+                    </div>
+
+                    {/* Close Button */}
+                    <div style={{ textAlign: 'right' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDatePickerOpen(false);
+                        }}
+                        style={{
+                          padding: '8px 20px',
+                          background: '#333',
+                          border: '1px solid #555',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          fontWeight: '500',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseOver={(e) => {
+                          e.target.style.background = '#444';
+                          e.target.style.borderColor = '#666';
+                        }}
+                        onMouseOut={(e) => {
+                          e.target.style.background = '#333';
+                          e.target.style.borderColor = '#555';
+                        }}
+                      >
+                        Done
+                      </button>
                     </div>
                   </div>
-                  
-                  {/* Close Button */}
-                  <div style={{ marginTop: '15px', textAlign: 'right' }}>
-                    <button
-                      onClick={() => setDatePickerOpen(false)}
-                      style={{
-                        padding: '8px 20px',
-                        background: '#333',
-                        border: '1px solid #555',
-                        borderRadius: '4px',
-                        color: '#fff',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        transition: 'all 0.2s ease'
-                      }}
-                      onMouseOver={(e) => {
-                        e.target.style.background = '#444';
-                        e.target.style.borderColor = '#666';
-                      }}
-                      onMouseOut={(e) => {
-                        e.target.style.background = '#333';
-                        e.target.style.borderColor = '#555';
-                      }}
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           </div>
         </div>
