@@ -409,7 +409,7 @@ export default function Dashboard() {
       };
     }
     
-    return rawData;
+      return rawData;
   };
 
   // Helper function to apply filters with explicit filter values (for callbacks)
@@ -527,21 +527,21 @@ export default function Dashboard() {
         
         // Recalculate dashboard data with updated runs (which now include jobs)
         // Use dateFiltersRef to get the latest date values
-        const filtered = filterRunsLocally({
-          workflow: filters.workflow,
-          branch: filters.branch,
+    const filtered = filterRunsLocally({
+      workflow: filters.workflow,
+      branch: filters.branch,
           actor: filters.actor,
           startDate: dateFiltersRef.current.start || filters.start,
           endDate: dateFiltersRef.current.end || filters.end
         }, currentRepo);
-        
-        if (filtered) {
+    
+    if (filtered) {
           console.log('[Dashboard] Filtered data updated', {
             jobStatsCount: filtered.jobStats?.length || 0
           });
           
           setData(prev => ({
-            ...filtered,
+        ...filtered,
             workflows: prev?.workflows || availableFilters.workflows,
             branches: prev?.branches || availableFilters.branches,
             actors: prev?.actors || availableFilters.actors
@@ -1358,7 +1358,7 @@ export default function Dashboard() {
                       >
                         All Time
                       </button>
-                    </div>
+            </div>
 
                     {/* Calendar Header - Month/Year Navigation */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
@@ -1389,7 +1389,7 @@ export default function Dashboard() {
                       </button>
                       <div style={{ color: '#fff', fontSize: '16px', fontWeight: '600' }}>
                         {monthNames[calendarMonth]} {calendarYear}
-                      </div>
+            </div>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1415,7 +1415,7 @@ export default function Dashboard() {
                       >
                         →
                       </button>
-                    </div>
+          </div>
 
                     {/* Calendar Grid */}
                     <div style={{ marginBottom: '15px' }}>
@@ -2516,14 +2516,6 @@ export default function Dashboard() {
                   <LineChart 
                     data={getDurationExplosionData(selectedWorkflowForDuration)} 
                     margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
-                    onClick={(data) => {
-                      if (data && data.activePayload && data.activePayload[0]) {
-                        const point = data.activePayload[0].payload;
-                        if (point.explosions && point.explosions.length > 0 && point.explosions[0].html_url) {
-                          window.open(point.explosions[0].html_url, '_blank');
-                        }
-                      }
-                    }}
                   >
                   <CartesianGrid strokeDasharray="3 3" stroke="#122" />
                     <XAxis dataKey="date" stroke="#bcd" angle={-45} textAnchor="end" height={80} />
@@ -2549,7 +2541,27 @@ export default function Dashboard() {
                       }}
                     />
                     <Legend />
-                    <Line type="monotone" dataKey="duration" stroke="#2196f3" strokeWidth={2} name="Duration" dot={{ r: 4, fill: '#2196f3' }} />
+                    <Line 
+                      type="monotone" 
+                      dataKey="duration" 
+                      stroke="#2196f3" 
+                      strokeWidth={2} 
+                      name="Duration" 
+                      dot={{ r: 4, fill: '#2196f3' }}
+                      activeDot={{
+                        r: 6,
+                        fill: '#2196f3',
+                        stroke: '#fff',
+                        strokeWidth: 2,
+                        cursor: 'pointer',
+                        onClick: (_, payload) => {
+                          const point = payload?.payload;
+                          if (point?.explosions?.length > 0 && point.explosions[0].html_url) {
+                            window.open(point.explosions[0].html_url, '_blank');
+                          }
+                        }
+                      }}
+                    />
                     <Line type="monotone" dataKey="median" stroke="#4caf50" strokeWidth={2} strokeDasharray="5 5" name="Median" />
                     <Line type="monotone" dataKey="threshold" stroke="#ff9800" strokeWidth={2} strokeDasharray="3 3" name="2x Median Threshold" />
                     <Brush 
@@ -2612,20 +2624,12 @@ export default function Dashboard() {
               >
                 Reset Zoom
               </button>
-            </div>
+        </div>
             {workflowStats.length > 0 ? (
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart 
                   data={getFailureWorseningData()} 
                   margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
-                  onClick={(data) => {
-                    if (data && data.activePayload && data.activePayload[0]) {
-                      const point = data.activePayload[0].payload;
-                      if (point.worsening > 0 && point.firstFailureUrl) {
-                        window.open(point.firstFailureUrl, '_blank');
-                      }
-                    }
-                  }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#122" />
                   <XAxis 
@@ -2660,7 +2664,17 @@ export default function Dashboard() {
                   <Legend />
                   <Area type="monotone" dataKey="failureRate" fill="#f44336" fillOpacity={0.3} stroke="#f44336" name="Failure Rate" />
                   <Line type="monotone" dataKey="threshold" stroke="#ff9800" strokeWidth={2} strokeDasharray="5 5" name="50% Threshold" />
-                  <Bar dataKey="worsening" fill="#ff5722" name="Worsening Period" />
+                  <Bar 
+                    dataKey="worsening" 
+                    fill="#ff5722" 
+                    name="Worsening Period"
+                    cursor="pointer"
+                    onClick={(data) => {
+                      if (data?.payload?.worsening > 0 && data?.payload?.firstFailureUrl) {
+                        window.open(data.payload.firstFailureUrl, '_blank');
+                      }
+                    }}
+                  />
                   <Brush 
                     dataKey="date" 
                     height={30}
