@@ -111,6 +111,7 @@ export default function Dashboard() {
   const [activeStatsTab, setActiveStatsTab] = useState('workflows');
   const [contributorSearchQuery, setContributorSearchQuery] = useState('');
   const [activeBranchEventTab, setActiveBranchEventTab] = useState('all');
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [selectedWorkflowForDuration, setSelectedWorkflowForDuration] = useState('all');
   const [tooltipData, setTooltipData] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
@@ -126,6 +127,7 @@ export default function Dashboard() {
     branch: useRef(null),
     actor: useRef(null)
   };
+  const datePickerRef = useRef(null);
 
   // ============================================
   // Effects
@@ -138,6 +140,11 @@ export default function Dashboard() {
           setOpenDropdowns(prev => ({ ...prev, [key]: false }));
         }
       });
+      
+      // Close date picker if clicking outside
+      if (datePickerRef.current && !datePickerRef.current.contains(event.target)) {
+        setDatePickerOpen(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -1097,25 +1104,205 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Dates */}
-            <div className="filter-group">
-              <label>Period start</label>
+            {/* Date Range Picker */}
+            <div className="filter-group" ref={datePickerRef} style={{ position: 'relative' }}>
+              <label>Date Range</label>
+              <button
+                onClick={() => setDatePickerOpen(!datePickerOpen)}
+                style={{
+                  width: '100%',
+                  padding: '10px 15px',
+                  background: '#222',
+                  border: '1px solid #444',
+                  borderRadius: '4px',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontSize: '14px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.background = '#2a2a2a';
+                  e.target.style.borderColor = '#555';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.background = '#222';
+                  e.target.style.borderColor = '#444';
+                }}
+              >
+                <span>
+                  {filters.start && filters.end 
+                    ? `${new Date(filters.start).toLocaleDateString()} - ${new Date(filters.end).toLocaleDateString()}`
+                    : 'Select date range...'}
+                </span>
+                <span style={{ fontSize: '12px', opacity: 0.7 }}>▼</span>
+              </button>
+              
+              {datePickerOpen && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: '5px',
+                  background: '#1a1a1a',
+                  border: '1px solid #444',
+                  borderRadius: '8px',
+                  padding: '20px',
+                  zIndex: 1000,
+                  minWidth: '320px',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)'
+                }}>
+                  {/* Quick Action Buttons */}
+                  <div style={{ marginBottom: '20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => {
+                        const now = new Date();
+                        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+                        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                        handleFilterChange('start', formatDateForInput(firstDay));
+                        handleFilterChange('end', formatDateForInput(lastDay));
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        background: '#4caf50',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseOver={(e) => e.target.style.background = '#45a049'}
+                      onMouseOut={(e) => e.target.style.background = '#4caf50'}
+                    >
+                      Current Month
+                    </button>
+                    <button
+                      onClick={() => {
+                        const now = new Date();
+                        const firstDay = new Date(now.getFullYear(), 0, 1);
+                        const lastDay = new Date(now.getFullYear(), 11, 31);
+                        handleFilterChange('start', formatDateForInput(firstDay));
+                        handleFilterChange('end', formatDateForInput(lastDay));
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        background: '#2196f3',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseOver={(e) => e.target.style.background = '#1976d2'}
+                      onMouseOut={(e) => e.target.style.background = '#2196f3'}
+                    >
+                      Current Year
+                    </button>
+                    <button
+                      onClick={() => {
+                        const farPast = new Date(2000, 0, 1);
+                        const farFuture = new Date(2100, 0, 1);
+                        handleFilterChange('start', formatDateForInput(farPast));
+                        handleFilterChange('end', formatDateForInput(farFuture));
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        background: '#ff9800',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseOver={(e) => e.target.style.background = '#f57c00'}
+                      onMouseOut={(e) => e.target.style.background = '#ff9800'}
+                    >
+                      All Time
+                    </button>
+                  </div>
+                  
+                  {/* Date Inputs */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '8px', color: '#ccc', fontSize: '13px', fontWeight: '500' }}>
+                        Start Date
+                      </label>
               <input
                 type="date"
                 value={filters.start}
                 max={filters.end || defaultEnd}
                 onChange={(e) => handleFilterChange('start', e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          background: '#222',
+                          border: '1px solid #444',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          fontSize: '14px'
+                        }}
               />
             </div>
-            <div className="filter-group">
-              <label>Period end</label>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '8px', color: '#ccc', fontSize: '13px', fontWeight: '500' }}>
+                        End Date
+                      </label>
               <input
                 type="date"
                 value={filters.end}
                 min={filters.start}
                 max={defaultEnd}
                 onChange={(e) => handleFilterChange('end', e.target.value)}
-              />
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          background: '#222',
+                          border: '1px solid #444',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          fontSize: '14px'
+                        }}
+                      />
+                    </div>
+                  </div>
+                  
+                  {/* Close Button */}
+                  <div style={{ marginTop: '15px', textAlign: 'right' }}>
+                    <button
+                      onClick={() => setDatePickerOpen(false)}
+                      style={{
+                        padding: '8px 20px',
+                        background: '#333',
+                        border: '1px solid #555',
+                        borderRadius: '4px',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseOver={(e) => {
+                        e.target.style.background = '#444';
+                        e.target.style.borderColor = '#666';
+                      }}
+                      onMouseOut={(e) => {
+                        e.target.style.background = '#333';
+                        e.target.style.borderColor = '#555';
+                      }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
