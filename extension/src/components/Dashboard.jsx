@@ -73,6 +73,12 @@ export default function Dashboard() {
     phase2_elapsed: null,
     phase2_eta: null
   });
+  
+  // Real-time elapsed time counter
+  const [localElapsed, setLocalElapsed] = useState(0);
+  const [phase1StartTime, setPhase1StartTime] = useState(null);
+  const [phase2StartTime, setPhase2StartTime] = useState(null);
+  const elapsedIntervalRef = useRef(null);
   const [jobProgress, setJobProgress] = useState({ runs_processed: 0, total_runs: 0, jobs_collected: 0, isCollecting: false });
   
   // Filter states
@@ -355,18 +361,43 @@ export default function Dashboard() {
         });
         
         // Update main progress state (controls the streaming indicator)
-        setProgress(prev => ({
-          items: status.totalRuns || prev.items || 0,
-          complete: status.isComplete || false,
-          isStreaming: status.isStreaming || false,
-          phase: status.phase || prev.phase || 'workflow_runs',
-          totalRuns: status.totalRuns || prev.totalRuns || 0,
-          elapsed_time: status.elapsed_time || prev.elapsed_time || null,
-          eta_seconds: status.eta_seconds || prev.eta_seconds || null,
-          phase1_elapsed: status.phase1_elapsed || prev.phase1_elapsed || null,
-          phase2_elapsed: status.phase2_elapsed || prev.phase2_elapsed || null,
-          phase2_eta: status.phase2_eta || prev.phase2_eta || null
-        }));
+        setProgress(prev => {
+          // Start real-time counter when streaming starts
+          if (status.isStreaming && !prev.isStreaming) {
+            if (status.phase === 'workflow_runs') {
+              setPhase1StartTime(Date.now());
+              setLocalElapsed(0);
+            } else if (status.phase === 'jobs' && !status.phase1_elapsed) {
+              // Phase 1 just completed, Phase 2 starting (no phase1_elapsed from backend yet)
+              setPhase1StartTime(null);
+              setPhase2StartTime(Date.now());
+              setLocalElapsed(0);
+            } else if (status.phase === 'jobs' && status.phase1_elapsed) {
+              // Phase 2 starting (phase1_elapsed from backend)
+              setPhase2StartTime(Date.now());
+              setLocalElapsed(0);
+            }
+          }
+          
+          // Stop counter when complete
+          if (status.isComplete && prev.isStreaming) {
+            setPhase1StartTime(null);
+            setPhase2StartTime(null);
+          }
+          
+          return {
+            items: status.totalRuns || prev.items || 0,
+            complete: status.isComplete || false,
+            isStreaming: status.isStreaming || false,
+            phase: status.phase || prev.phase || 'workflow_runs',
+            totalRuns: status.totalRuns || prev.totalRuns || 0,
+            elapsed_time: status.elapsed_time || prev.elapsed_time || null,
+            eta_seconds: status.eta_seconds || prev.eta_seconds || null,
+            phase1_elapsed: status.phase1_elapsed || prev.phase1_elapsed || null,
+            phase2_elapsed: status.phase2_elapsed || prev.phase2_elapsed || null,
+            phase2_eta: status.phase2_eta || prev.phase2_eta || null
+          };
+        });
         
         // Update job progress for Jobs tab
         if (status.phase === 'jobs' && status.jobsProgress) {
@@ -444,6 +475,33 @@ export default function Dashboard() {
       }
     };
   }, [currentRepo, filters, availableFilters]);
+  
+  // Real-time elapsed time counter (updates every second)
+  useEffect(() => {
+    if (progress.isStreaming) {
+      elapsedIntervalRef.current = setInterval(() => {
+        if (progress.phase === 'workflow_runs' && phase1StartTime) {
+          const elapsed = (Date.now() - phase1StartTime) / 1000;
+          setLocalElapsed(elapsed);
+        } else if (progress.phase === 'jobs' && phase2StartTime) {
+          const elapsed = (Date.now() - phase2StartTime) / 1000;
+          setLocalElapsed(elapsed);
+        }
+      }, 1000);
+    } else {
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current);
+        elapsedIntervalRef.current = null;
+      }
+      setLocalElapsed(0);
+    }
+    
+    return () => {
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current);
+      }
+    };
+  }, [progress.isStreaming, progress.phase, phase1StartTime, phase2StartTime]);
 
   // Apply ALL filters (including date) when any filter changes (works during collection too)
   // This ensures real-time filtering as data streams in
@@ -844,58 +902,55 @@ export default function Dashboard() {
             marginBottom: '20px',
             boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: progress.phase === 'jobs' ? '10px' : '0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div className="spinner" style={{ 
-                  border: '3px solid rgba(255,255,255,0.3)',
-                  borderTop: '3px solid white',
-                  borderRadius: '50%',
-                  width: '20px',
-                  height: '20px',
-                  animation: 'spin 1s linear infinite'
-                }}></div>
+            {/* First row: Spinner and collecting text */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div className="spinner" style={{ 
+                border: '3px solid rgba(255,255,255,0.3)',
+                borderTop: '3px solid white',
+                borderRadius: '50%',
+                width: '20px',
+                height: '20px',
+                animation: 'spin 1s linear infinite'
+              }}></div>
                 <span style={{ fontWeight: 600 }}>
                   {progress.phase === 'workflow_runs' ? 'Collecting workflow runs...' : 'Collecting job details...'}
                 </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                {/* Progress: X / Total */}
-                <span style={{ 
-                  background: 'rgba(255,255,255,0.2)', 
-                  padding: '4px 12px', 
-                  borderRadius: '12px',
-                  fontSize: '14px',
-                  fontWeight: 700
-                }}>
-                  {progress.phase === 'workflow_runs' 
-                    ? `${progress.items} / ${progress.totalRuns || '?'} runs`
-                    : `${jobProgress.runs_processed || 0} / ${jobProgress.total_runs || 0} runs (${jobProgress.jobs_collected || 0} jobs)`}
-                </span>
-                
-                {/* Time elapsed and ETA */}
-                {(progress.elapsed_time || progress.phase1_elapsed || progress.phase2_elapsed) && (
-                  <span style={{ 
-                    background: 'rgba(255,255,255,0.2)', 
-                    padding: '4px 12px', 
-                    borderRadius: '12px',
-                    fontSize: '14px',
-                    fontWeight: 600
-                  }}>
-                    {progress.phase === 'workflow_runs' ? (
-                      <>
-                        Elapsed: {formatDuration(progress.elapsed_time)}
-                        {progress.eta_seconds && ` | ETA: ${formatDuration(progress.eta_seconds)}`}
-                      </>
-                    ) : (
-                      <>
-                        Phase 1: {formatDuration(progress.phase1_elapsed)}
-                        {progress.phase2_elapsed && ` | Phase 2: ${formatDuration(progress.phase2_elapsed)}`}
-                        {progress.phase2_eta && ` | ETA: ${formatDuration(progress.phase2_eta)}`}
-                      </>
-                    )}
-                  </span>
-                )}
-              </div>
+            </div>
+              {/* Progress: X / Total */}
+            <span style={{ 
+              background: 'rgba(255,255,255,0.2)', 
+              padding: '4px 12px', 
+              borderRadius: '12px',
+              fontSize: '14px',
+              fontWeight: 700
+            }}>
+                {progress.phase === 'workflow_runs' 
+                  ? `${progress.items} / ${progress.totalRuns || '?'} runs`
+                  : `${jobProgress.runs_processed || 0} / ${jobProgress.total_runs || 0} runs (${jobProgress.jobs_collected || 0} jobs)`}
+            </span>
+            </div>
+            
+            {/* Second row: Time elapsed and ETA (under the collecting text) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '14px', fontWeight: 500, paddingLeft: '32px' }}>
+              {progress.phase === 'workflow_runs' ? (
+                <>
+                  <span>Time Elapsed: <strong>{formatDuration(localElapsed || progress.elapsed_time || 0)}</strong></span>
+                  {progress.eta_seconds && (
+                    <span>ETA: <strong>{formatDuration(progress.eta_seconds)}</strong></span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {progress.phase1_elapsed && (
+                    <span>Phase 1 Elapsed: <strong>{formatDuration(progress.phase1_elapsed)}</strong></span>
+                  )}
+                  <span>Phase 2 Elapsed: <strong>{formatDuration(localElapsed || progress.phase2_elapsed || 0)}</strong></span>
+                  {progress.phase2_eta && (
+                    <span>ETA: <strong>{formatDuration(progress.phase2_eta)}</strong></span>
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}

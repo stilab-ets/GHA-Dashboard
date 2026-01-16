@@ -157,6 +157,8 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
     
     total_runs = 0
     all_runs = []  # Store all runs for Phase 2
+    estimated_total = 0  # Track estimated total across all workflows
+    current_page = 0  # Track current page for estimation
     
     # Process each workflow
     for workflow_id in workflow_ids:
@@ -184,7 +186,17 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
             if not workflow_runs:
                 break
             
+            current_page += 1
             print(f"[GHAminer Stream] Processing page {page} of workflow {workflow_id}: {len(workflow_runs)} runs")
+            
+            # Update estimated total based on pagination
+            # If we got a full page (100 runs), estimate there's at least one more page
+            if len(workflow_runs) == 100:
+                # If this is a full page, estimate at least current_total + 100
+                estimated_total = max(estimated_total, total_runs + 100)
+            else:
+                # This is likely the last page, so total is at least what we have
+                estimated_total = max(estimated_total, total_runs + len(workflow_runs))
             
             # Process each run (WITHOUT fetching job details)
             for run in workflow_runs:
@@ -227,11 +239,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                 all_runs.append(dashboard_run)
                 total_runs += 1
                 
-                # Estimate total: if we got 100 runs this page, there might be more pages
-                estimated_total = total_runs
-                if len(workflow_runs) == 100:  # If we filled a page, assume there's at least one more
-                    estimated_total = max(estimated_total, total_runs + 100)
-                
+                # Yield with current estimated total (updated per page, not per run)
                 yield (dashboard_run, total_runs, estimated_total, all_runs)
             
             # Check for next page using Link header
@@ -241,6 +249,8 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
             if has_next:
                 page += 1
             else:
+                # No more pages for this workflow, finalize estimate
+                estimated_total = max(estimated_total, total_runs)
                 break
     
     print(f"[GHAminer Stream] Phase 1 complete: {total_runs} runs collected")
