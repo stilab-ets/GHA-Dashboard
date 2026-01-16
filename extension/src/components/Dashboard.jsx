@@ -1338,6 +1338,7 @@ export default function Dashboard() {
                     <thead>
                       <tr>
                         <th>Job</th>
+                        <th>Workflow</th>
                         <th>Total Runs</th>
                         <th>Failures</th>
                         <th>Skipped</th>
@@ -1356,6 +1357,7 @@ export default function Dashboard() {
                         return (
                           <tr key={j.name}>
                             <td className="branch-name">{j.name}</td>
+                            <td style={{ color: '#bbb', fontSize: '13px' }}>{j.workflowName || 'unknown'}</td>
                             <td>{j.totalRuns}</td>
                             <td>{j.failures}</td>
                             <td>{j.skipped}</td>

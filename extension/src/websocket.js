@@ -319,6 +319,8 @@ function calculateJobStats(filteredRuns) {
         });
       }
       
+      const workflowName = run.workflow_name || 'unknown';
+      
       run.jobs.forEach(job => {
         totalJobsProcessed++;
         const jobName = job.name || 'unknown';
@@ -329,7 +331,8 @@ function calculateJobStats(filteredRuns) {
             skipped: 0,
             cancelled: 0,
             timeout: 0,
-            durations: []
+            durations: [],
+            workflows: {} // Track workflow occurrences for this job
           };
         }
         jobStats[jobName].totalRuns++;
@@ -338,6 +341,12 @@ function calculateJobStats(filteredRuns) {
         else if (job.conclusion === 'cancelled') jobStats[jobName].cancelled++;
         else if (job.conclusion === 'timed_out') jobStats[jobName].timeout++;
         if (job.duration > 0) jobStats[jobName].durations.push(job.duration);
+        
+        // Track which workflows this job appears in
+        if (!jobStats[jobName].workflows[workflowName]) {
+          jobStats[jobName].workflows[workflowName] = 0;
+        }
+        jobStats[jobName].workflows[workflowName]++;
       });
     }
   });
@@ -347,6 +356,17 @@ function calculateJobStats(filteredRuns) {
     const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
     const totalDuration = stats.durations.reduce((a, b) => a + b, 0);
 
+    // Get the most common workflow for this job, or all workflows if multiple
+    const workflows = stats.workflows || {};
+    const workflowEntries = Object.entries(workflows);
+    const sortedWorkflows = workflowEntries.sort((a, b) => b[1] - a[1]); // Sort by count
+    const primaryWorkflow = sortedWorkflows.length > 0 ? sortedWorkflows[0][0] : 'unknown';
+    // If job appears in multiple workflows, show them as comma-separated
+    const allWorkflows = sortedWorkflows.map(([wf]) => wf);
+    const workflowDisplay = allWorkflows.length > 1 
+      ? allWorkflows.join(', ') 
+      : primaryWorkflow;
+
     return {
       name,
       totalRuns: stats.totalRuns,
@@ -355,7 +375,9 @@ function calculateJobStats(filteredRuns) {
       cancelled: stats.cancelled,
       timeout: stats.timeout,
       medianDuration: Math.round(median),
-      totalDuration: Math.round(totalDuration)
+      totalDuration: Math.round(totalDuration),
+      workflowName: workflowDisplay,
+      workflows: allWorkflows // Keep for potential future use
     };
   });
   
