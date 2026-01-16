@@ -139,15 +139,46 @@ def convert_ghaminer_run_to_dashboard(run_data: dict, repo: str) -> dict:
     }
 
 
+def get_total_workflow_runs_count(repo: str, token: str) -> int:
+    """
+    Get the total count of workflow runs for a repository using GitHub API.
+    Returns total_count from the /repos/{owner}/{repo}/actions/runs endpoint.
+    """
+    try:
+        api_url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=1"
+        headers = {
+            'Authorization': f'token {token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'
+        }
+        import requests as req_module
+        resp = req_module.get(api_url, headers=headers)
+        
+        if resp.status_code == 200:
+            response = resp.json()
+            total_count = response.get('total_count', 0)
+            print(f"[GHAminer Stream] Total workflow runs count: {total_count}")
+            return total_count
+        else:
+            print(f"[GHAminer Stream] Failed to get total count: {resp.status_code}")
+            return 0
+    except Exception as e:
+        print(f"[GHAminer Stream] Error getting total count: {e}")
+        return 0
+
+
 def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> Generator[tuple[Dict[str, Any], int, int, List[Dict[str, Any]]], None, None]:
     """
     Phase 1: Collect all workflow runs FIRST (without job details)
-    Yields: (dashboard_run_dict, current_count, estimated_total, all_runs_list)
+    Yields: (dashboard_run_dict, current_count, total_count, all_runs_list)
     """
     if config is None:
         config = load_config()
     
     print(f"[GHAminer Stream] Phase 1: Starting workflow runs collection for {repo}")
+    
+    # Get total count upfront
+    total_count = get_total_workflow_runs_count(repo, token)
     
     # Get workflow IDs (filtered by config if specified)
     specific_workflow_ids = config.get("workflow_ids", [])
@@ -157,8 +188,9 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
     
     total_runs = 0
     all_runs = []  # Store all runs for Phase 2
-    estimated_total = 0  # Track estimated total across all workflows
-    current_page = 0  # Track current page for estimation
+    # Use the total_count from API if available, otherwise fall back to estimation
+    # If total_count is 0 (API failed), we'll use estimation as fallback
+    actual_total = total_count if total_count > 0 else None
     
     # Process each workflow
     for workflow_id in workflow_ids:
@@ -186,17 +218,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
             if not workflow_runs:
                 break
             
-            current_page += 1
             print(f"[GHAminer Stream] Processing page {page} of workflow {workflow_id}: {len(workflow_runs)} runs")
-            
-            # Update estimated total based on pagination
-            # If we got a full page (100 runs), estimate there's at least one more page
-            if len(workflow_runs) == 100:
-                # If this is a full page, estimate at least current_total + 100
-                estimated_total = max(estimated_total, total_runs + 100)
-            else:
-                # This is likely the last page, so total is at least what we have
-                estimated_total = max(estimated_total, total_runs + len(workflow_runs))
             
             # Process each run (WITHOUT fetching job details)
             for run in workflow_runs:
@@ -239,8 +261,10 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                 all_runs.append(dashboard_run)
                 total_runs += 1
                 
-                # Yield with current estimated total (updated per page, not per run)
-                yield (dashboard_run, total_runs, estimated_total, all_runs)
+                # Use actual_total if we have it, otherwise use total_runs as fallback
+                display_total = actual_total if actual_total else max(total_runs, total_runs + 100 if len(workflow_runs) == 100 else total_runs)
+                
+                yield (dashboard_run, total_runs, display_total, all_runs)
             
             # Check for next page using Link header
             link_header = resp.headers.get('Link', '')
@@ -249,8 +273,6 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
             if has_next:
                 page += 1
             else:
-                # No more pages for this workflow, finalize estimate
-                estimated_total = max(estimated_total, total_runs)
                 break
     
     print(f"[GHAminer Stream] Phase 1 complete: {total_runs} runs collected")

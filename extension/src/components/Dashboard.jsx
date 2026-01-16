@@ -386,11 +386,11 @@ export default function Dashboard() {
           }
           
           return {
-            items: status.totalRuns || prev.items || 0,
+            items: status.collectedRuns || status.totalRuns || prev.items || 0, // Current collected count
             complete: status.isComplete || false,
             isStreaming: status.isStreaming || false,
             phase: status.phase || prev.phase || 'workflow_runs',
-            totalRuns: status.totalRuns || prev.totalRuns || 0,
+            totalRuns: status.totalRuns || prev.totalRuns || 0, // Total count from API
             elapsed_time: status.elapsed_time || prev.elapsed_time || null,
             eta_seconds: status.eta_seconds || prev.eta_seconds || null,
             phase1_elapsed: status.phase1_elapsed || prev.phase1_elapsed || null,

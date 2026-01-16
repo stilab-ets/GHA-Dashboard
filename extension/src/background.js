@@ -133,7 +133,8 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
       isComplete: false, 
       repo: repo, 
       page: 0, 
-      totalRuns: 0,
+      totalRuns: 0, // Total count from API
+      collectedRuns: 0, // What we've collected
       phase: 'workflow_runs',
       phase1_elapsed: null,
       phase2_elapsed: null
@@ -244,12 +245,15 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             // Get current status to preserve phase1_elapsed if it exists
             chrome.storage.local.get(['wsStatus'], (result) => {
               const currentStatus = result.wsStatus || {};
+              // totalRuns from message is the total count (from API), collectedRuns is what we've collected
+              const collectedRuns = cache.runs.length;
               const statusUpdate = {
                 isStreaming: true, 
                 isComplete: false, 
                 repo: repo, 
                 page: message.page,
-                totalRuns: message.totalRuns || cache.runs.length,
+                totalRuns: message.totalRuns || 0, // Total count from API (e.g., 632)
+                collectedRuns: collectedRuns, // What we've collected so far
                 runsWithJobs,
                 totalJobs,
                 phase: message.phase || 'workflow_runs',
@@ -288,7 +292,8 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 isStreaming: true, 
                 isComplete: false, 
                 repo: repo, 
-                totalRuns: message.totalRuns,
+                totalRuns: message.totalRuns, // Total count from API
+                collectedRuns: cache.runs.length, // What we've collected
                 phase: 'jobs',
                 phase1_elapsed: message.elapsed_time || null
               }
