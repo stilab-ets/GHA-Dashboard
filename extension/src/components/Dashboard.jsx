@@ -109,6 +109,7 @@ export default function Dashboard() {
   });
 
   const [activeStatsTab, setActiveStatsTab] = useState('workflows');
+  const [contributorSearchQuery, setContributorSearchQuery] = useState('');
   const [activeBranchEventTab, setActiveBranchEventTab] = useState('all');
   const [selectedWorkflowForDuration, setSelectedWorkflowForDuration] = useState('all');
   const [tooltipData, setTooltipData] = useState(null);
@@ -686,6 +687,7 @@ export default function Dashboard() {
     jobStats = [],
     branchStatsGrouped = [],
     eventStats = [],
+    contributorStats = [],
     timeToFix = [],
     topFailedWorkflows = [],
     failureDurationOverTime = [],
@@ -1197,6 +1199,19 @@ export default function Dashboard() {
                 >
                   Event Triggers
                 </button>
+                <button
+                  onClick={() => setActiveStatsTab('contributors')}
+                  style={{
+                    padding: '10px 20px',
+                    background: activeStatsTab === 'contributors' ? '#4caf50' : '#222',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    borderRadius: '4px 4px 0 0'
+                  }}
+                >
+                  Contributors
+                </button>
               </div>
             </div>
             
@@ -1568,6 +1583,101 @@ export default function Dashboard() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {activeStatsTab === 'contributors' && (
+              <div>
+                {/* Search bar for filtering contributors */}
+                <div style={{ marginBottom: '15px' }}>
+                  <input
+                    type="text"
+                    placeholder="Search contributors by name..."
+                    value={contributorSearchQuery}
+                    onChange={(e) => setContributorSearchQuery(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 15px',
+                      background: '#222',
+                      border: '1px solid #444',
+                      borderRadius: '4px',
+                      color: '#fff',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+                
+                <div className="table-wrapper">
+                  <table className="branch-table">
+                    <thead>
+                      <tr>
+                        <th>Contributor</th>
+                        <th>Total Runs</th>
+                        <th>Failures</th>
+                        <th>Skipped</th>
+                        <th>Cancelled</th>
+                        <th>Timeout</th>
+                        <th>Success/Failure</th>
+                        <th>Median Duration</th>
+                        <th>Total Duration</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contributorStats
+                        .filter(c => {
+                          if (!contributorSearchQuery.trim()) return true;
+                          return c.name.toLowerCase().includes(contributorSearchQuery.toLowerCase());
+                        })
+                        .map(c => {
+                          const successRate = c.totalRuns > 0 ? (c.successes / c.totalRuns) * 100 : 0;
+                          const failureRate = c.totalRuns > 0 ? (c.failures / c.totalRuns) * 100 : 0;
+                          return (
+                            <tr key={c.name}>
+                              <td className="branch-name">{c.name}</td>
+                              <td>{c.totalRuns}</td>
+                              <td>{c.failures}</td>
+                              <td>{c.skipped}</td>
+                              <td>{c.cancelled}</td>
+                              <td>{c.timeout}</td>
+                              <td>
+                                <div style={{ 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  gap: '8px',
+                                  minWidth: '150px'
+                                }}>
+                                  <div style={{
+                                    flex: 1,
+                                    height: '20px',
+                                    background: '#333',
+                                    borderRadius: '4px',
+                                    overflow: 'hidden',
+                                    display: 'flex'
+                                  }}>
+                                    <div style={{
+                                      width: `${successRate}%`,
+                                      background: '#4caf50',
+                                      height: '100%'
+                                    }}></div>
+                                    <div style={{
+                                      width: `${failureRate}%`,
+                                      background: '#f44336',
+                                      height: '100%'
+                                    }}></div>
+                                  </div>
+                                  <span style={{ fontSize: '12px', color: '#ccc', minWidth: '45px' }}>
+                                    {successRate.toFixed(0)}%/{failureRate.toFixed(0)}%
+                                  </span>
+                                </div>
+                              </td>
+                              <td>{c.medianDuration}s</td>
+                              <td>{c.totalDuration}s</td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>

@@ -459,6 +459,56 @@ function calculateEventStats(filteredRuns) {
 }
 
 /**
+ * Calculate contributor (actor) statistics
+ */
+function calculateContributorStats(filteredRuns) {
+  const contributorStats = {};
+
+  filteredRuns.forEach(run => {
+    const actor = run.actor || 'unknown';
+    if (!contributorStats[actor]) {
+      contributorStats[actor] = {
+        totalRuns: 0,
+        failures: 0,
+        skipped: 0,
+        cancelled: 0,
+        timeout: 0,
+        durations: []
+      };
+    }
+    contributorStats[actor].totalRuns++;
+    if (run.conclusion === 'failure') contributorStats[actor].failures++;
+    else if (run.conclusion === 'skipped') contributorStats[actor].skipped++;
+    else if (run.conclusion === 'cancelled') contributorStats[actor].cancelled++;
+    else if (run.conclusion === 'timed_out') contributorStats[actor].timeout++;
+    if (run.duration > 0) contributorStats[actor].durations.push(run.duration);
+  });
+
+  return Object.entries(contributorStats).map(([name, stats]) => {
+    const sorted = [...stats.durations].sort((a, b) => a - b);
+    const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
+    const totalDuration = stats.durations.reduce((a, b) => a + b, 0);
+    const successCount = stats.totalRuns - stats.failures - stats.skipped - stats.cancelled - stats.timeout;
+    const successRate = stats.totalRuns > 0 ? (successCount / stats.totalRuns) * 100 : 0;
+    const failureRate = stats.totalRuns > 0 ? (stats.failures / stats.totalRuns) * 100 : 0;
+
+    return {
+      name,
+      totalRuns: stats.totalRuns,
+      failures: stats.failures,
+      skipped: stats.skipped,
+      cancelled: stats.cancelled,
+      timeout: stats.timeout,
+      successes: successCount,
+      successRate: Math.round(successRate),
+      failureRate: Math.round(failureRate),
+      medianDuration: Math.round(median),
+      totalDuration: Math.round(totalDuration)
+    };
+  });
+}
+
+/**
  * Calculate time to fix per workflow
  * Groups by workflow_id + branch + pull_request_number, finds failure→success sequences
  */
@@ -649,6 +699,7 @@ function convertRunsToDashboard(runs, repo, filters) {
   const jobStats = calculateJobStats(filteredRuns);
   const branchStatsGrouped = calculateBranchStatsGrouped(filteredRuns);
   const eventStats = calculateEventStats(filteredRuns);
+  const contributorStats = calculateContributorStats(filteredRuns);
   const timeToFix = calculateTimeToFix(filteredRuns);
 
   // Status breakdown
@@ -704,6 +755,7 @@ function convertRunsToDashboard(runs, repo, filters) {
     jobStats: jobStats,
     branchStatsGrouped: branchStatsGrouped,
     eventStats: eventStats,
+    contributorStats: contributorStats,
     timeToFix: timeToFix,
     topFailedWorkflows,
     failureDurationOverTime,
