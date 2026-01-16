@@ -386,7 +386,10 @@ export default function Dashboard() {
           }
           
           return {
-            items: status.collectedRuns || status.totalRuns || prev.items || 0, // Current collected count
+            // Use collectedRuns if explicitly set, otherwise use previous items (don't fall back to totalRuns)
+            items: (status.collectedRuns !== undefined && status.collectedRuns !== null) 
+              ? status.collectedRuns 
+              : (prev.items || 0), // Current collected count
             complete: status.isComplete || false,
             isStreaming: status.isStreaming || false,
             phase: status.phase || prev.phase || 'workflow_runs',
@@ -455,11 +458,13 @@ export default function Dashboard() {
       const status = result.wsStatus || {};
       if (status) {
         setProgress({
-          items: status.totalRuns || 0,
+          items: (status.collectedRuns !== undefined && status.collectedRuns !== null) 
+            ? status.collectedRuns 
+            : 0, // Current collected count
           complete: status.isComplete || false,
           isStreaming: status.isStreaming || false,
           phase: status.phase || 'workflow_runs',
-          totalRuns: status.totalRuns || 0,
+          totalRuns: status.totalRuns || 0, // Total count from API
           elapsed_time: status.elapsed_time || null,
           eta_seconds: status.eta_seconds || null,
           phase1_elapsed: status.phase1_elapsed || null,
@@ -484,6 +489,7 @@ export default function Dashboard() {
           const elapsed = (Date.now() - phase1StartTime) / 1000;
           setLocalElapsed(elapsed);
         } else if (progress.phase === 'jobs' && phase2StartTime) {
+          // Phase 2: count up from when phase2 started
           const elapsed = (Date.now() - phase2StartTime) / 1000;
           setLocalElapsed(elapsed);
         }
@@ -493,7 +499,10 @@ export default function Dashboard() {
         clearInterval(elapsedIntervalRef.current);
         elapsedIntervalRef.current = null;
       }
-      setLocalElapsed(0);
+      // Only reset if we're not in Phase 2 (keep Phase 2 elapsed visible until complete)
+      if (progress.phase !== 'jobs') {
+        setLocalElapsed(0);
+      }
     }
     
     return () => {
@@ -945,7 +954,10 @@ export default function Dashboard() {
                   {progress.phase1_elapsed && (
                     <span>Phase 1 Elapsed: <strong>{formatDuration(progress.phase1_elapsed)}</strong></span>
                   )}
-                  <span>Phase 2 Elapsed: <strong>{formatDuration(localElapsed || progress.phase2_elapsed || 0)}</strong></span>
+                  <span>Phase 2 Elapsed: <strong>{formatDuration(localElapsed || 0)}</strong></span>
+                  {progress.phase1_elapsed && (
+                    <span>Total Elapsed: <strong>{formatDuration((progress.phase1_elapsed || 0) + (localElapsed || 0))}</strong></span>
+                  )}
                   {progress.phase2_eta && (
                     <span>ETA: <strong>{formatDuration(progress.phase2_eta)}</strong></span>
                   )}
