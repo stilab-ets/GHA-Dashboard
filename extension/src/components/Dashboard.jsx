@@ -976,6 +976,50 @@ export default function Dashboard() {
     );
   };
 
+  // Determine the best time unit based on data range
+  const getTimeUnit = (timeToFixData) => {
+    if (!timeToFixData || timeToFixData.length === 0) {
+      return { unit: 'seconds', label: 's', divisor: 1, fullLabel: 'seconds' };
+    }
+    
+    // Get representative values (medians and q3s) to decide the unit
+    const representativeValues = timeToFixData.flatMap(d => [d.median, d.q3, d.mean].filter(v => v > 0));
+    if (representativeValues.length === 0) {
+      return { unit: 'seconds', label: 's', divisor: 1, fullLabel: 'seconds' };
+    }
+    
+    // Use median of representative values to determine unit
+    const sorted = [...representativeValues].sort((a, b) => a - b);
+    const medianValue = sorted[Math.floor(sorted.length / 2)];
+    
+    if (medianValue >= 86400) { // >= 1 day
+      return { unit: 'days', label: 'd', divisor: 86400, fullLabel: 'days' };
+    } else if (medianValue >= 3600) { // >= 1 hour
+      return { unit: 'hours', label: 'h', divisor: 3600, fullLabel: 'hours' };
+    } else if (medianValue >= 60) { // >= 1 minute
+      return { unit: 'minutes', label: 'm', divisor: 60, fullLabel: 'minutes' };
+    }
+    return { unit: 'seconds', label: 's', divisor: 1, fullLabel: 'seconds' };
+  };
+  
+  // Format a value with the given time unit
+  const formatWithUnit = (seconds, divisor, label) => {
+    if (seconds === 0 || seconds == null) return `0${label}`;
+    const value = seconds / divisor;
+    if (value < 0.1) return `<0.1${label}`;
+    if (value < 10) return `${value.toFixed(1)}${label}`;
+    return `${Math.round(value)}${label}`;
+  };
+  
+  // Format time value for tooltip (always show most readable format)
+  const formatTimeForTooltip = (seconds) => {
+    if (seconds === 0 || seconds == null) return '0s';
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m (${Math.round(seconds)}s)`;
+    if (seconds < 86400) return `${(seconds / 3600).toFixed(1)}h (${Math.round(seconds / 60)}m)`;
+    return `${(seconds / 86400).toFixed(1)}d (${Math.round(seconds / 3600)}h)`;
+  };
+
   // Format time-to-fix data for visualization
   const formatTimeToFixForBoxPlot = (timeToFixData) => {
     if (!timeToFixData || timeToFixData.length === 0) return [];
@@ -2251,12 +2295,12 @@ export default function Dashboard() {
                   >
                     <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>{tooltipData.workflow}</div>
                     <div>Count: {tooltipData.count}</div>
-                    <div>Min: {tooltipData.min}s</div>
-                    <div style={{ color: '#2196f3' }}>Q1: {tooltipData.q1}s</div>
-                    <div style={{ color: '#ff9800', fontWeight: 'bold' }}>Median: {tooltipData.median}s</div>
-                    <div style={{ color: '#2196f3' }}>Q3: {tooltipData.q3}s</div>
-                    <div>Max: {tooltipData.max}s</div>
-                    <div style={{ color: '#4caf50', fontWeight: 'bold', marginTop: '5px' }}>Mean: {tooltipData.mean}s</div>
+                    <div>Min: {formatTimeForTooltip(tooltipData.min)}</div>
+                    <div style={{ color: '#2196f3' }}>Q1: {formatTimeForTooltip(tooltipData.q1)}</div>
+                    <div style={{ color: '#ff9800', fontWeight: 'bold' }}>Median: {formatTimeForTooltip(tooltipData.median)}</div>
+                    <div style={{ color: '#2196f3' }}>Q3: {formatTimeForTooltip(tooltipData.q3)}</div>
+                    <div>Max: {formatTimeForTooltip(tooltipData.max)}</div>
+                    <div style={{ color: '#4caf50', fontWeight: 'bold', marginTop: '5px' }}>Mean: {formatTimeForTooltip(tooltipData.mean)}</div>
                   </div>
                 )}
                 <svg width="100%" height="100%" viewBox="0 0 900 320" preserveAspectRatio="xMidYMid meet" style={{ overflow: 'visible' }}>
@@ -2267,11 +2311,17 @@ export default function Dashboard() {
                     const plotWidth = chartWidth - margin.left - margin.right;
                     const plotHeight = chartHeight - margin.top - margin.bottom;
                     
+                    // Get the appropriate time unit based on data
+                    const timeUnit = getTimeUnit(timeToFix);
+                    
                     // Handle large values by using 95th percentile or reasonable max
                     const allValues = timeToFix.flatMap(d => [d.min, d.q1, d.median, d.q3, d.max, d.mean].filter(v => v > 0));
                     const sortedValues = [...allValues].sort((a, b) => a - b);
                     const p95Index = Math.floor(sortedValues.length * 0.95);
                     const reasonableMax = sortedValues.length > 0 ? Math.max(sortedValues[p95Index] || sortedValues[sortedValues.length - 1], Math.max(...timeToFix.map(d => d.max || 0)) * 0.1) : 1;
+                    
+                    // Convert reasonableMax to the selected unit for display
+                    const reasonableMaxInUnit = reasonableMax / timeUnit.divisor;
                     
                     const xScale = reasonableMax > 0 ? plotWidth / reasonableMax : 1;
                     const boxSpacing = plotHeight / (timeToFix.length + 1);
@@ -2303,6 +2353,7 @@ export default function Dashboard() {
                         {[0, 0.25, 0.5, 0.75, 1].map(ratio => {
                           const value = reasonableMax * ratio;
                           const xPos = value * xScale;
+                          const displayValue = value / timeUnit.divisor;
                           return (
                             <g key={ratio}>
                               <line 
@@ -2321,7 +2372,7 @@ export default function Dashboard() {
                                 fontSize="11" 
                                 textAnchor="middle"
                               >
-                                {formatTimeValue(value)}
+                                {displayValue < 10 ? displayValue.toFixed(1) : Math.round(displayValue)}{timeUnit.label}
                               </text>
                             </g>
                           );
@@ -2402,7 +2453,7 @@ export default function Dashboard() {
                                     fontSize="9" 
                                     textAnchor="start"
                                   >
-                                    {formatTimeValue(item.max)}
+                                    {formatWithUnit(item.max, timeUnit.divisor, timeUnit.label)}
                                   </text>
                                 </>
                               )}
@@ -2451,7 +2502,7 @@ export default function Dashboard() {
                           textAnchor="middle"
                           fontWeight="bold"
                         >
-                          Time to Fix (seconds)
+                          Time to Fix ({timeUnit.fullLabel})
                         </text>
                         
                         {/* Y-axis label */}
