@@ -123,6 +123,9 @@ export default function Dashboard() {
     actors: ['all']
   });
   
+  // Store date filters in a ref to preserve them during collection
+  const dateFiltersRef = useRef({ start: defaultStart, end: defaultEnd });
+  
   const [filters, setFilters] = useState({
     workflow: ['all'],
     branch: ['all'],
@@ -312,6 +315,13 @@ export default function Dashboard() {
 
       setCurrentRepo(repo);
       console.log('[Dashboard] Using repo:', repo);
+
+      // Preserve existing date filters when starting new collection
+      // Only initialize defaults if filters haven't been set yet
+      if (!dateFiltersRef.current.start || !dateFiltersRef.current.end) {
+        dateFiltersRef.current = { start: defaultStart, end: defaultEnd };
+        setFilters(prev => ({ ...prev, start: defaultStart, end: defaultEnd }));
+      }
 
       clearWebSocketCache(repo);
       
@@ -767,6 +777,8 @@ export default function Dashboard() {
         newStart = newEnd;
       }
 
+      // Update both state and ref to preserve dates during collection
+      dateFiltersRef.current = { start: newStart, end: newEnd };
       setFilters(prev => ({ ...prev, start: newStart, end: newEnd }));
       return;
     }
@@ -1181,7 +1193,11 @@ export default function Dashboard() {
               
               {datePickerOpen && (() => {
                 const handleSetDates = (startDate, endDate) => {
-                  setFilters(prev => ({ ...prev, start: formatDateForInput(startDate), end: formatDateForInput(endDate) }));
+                  const startStr = formatDateForInput(startDate);
+                  const endStr = formatDateForInput(endDate);
+                  // Update both state and ref to preserve dates during collection
+                  dateFiltersRef.current = { start: startStr, end: endStr };
+                  setFilters(prev => ({ ...prev, start: startStr, end: endStr }));
                 };
 
                 const handleDateClick = (day) => {
