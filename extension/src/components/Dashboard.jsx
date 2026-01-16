@@ -30,6 +30,11 @@ function formatTimeValue(seconds) {
   return `${Math.round(seconds / 86400)}d`;
 }
 
+function formatDuration(seconds) {
+  if (!seconds || seconds < 0) return '0s';
+  return formatTimeValue(seconds);
+}
+
 function formatDateForInput(d) {
   const pad = (n) => String(n).padStart(2, '0');
   const year = d.getFullYear();
@@ -56,7 +61,18 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false); // Start as false so button shows initially
   const [error, setError] = useState(null);
-  const [progress, setProgress] = useState({ items: 0, complete: false, isStreaming: false });
+  const [progress, setProgress] = useState({ 
+    items: 0, 
+    complete: false, 
+    isStreaming: false, 
+    phase: 'workflow_runs',
+    totalRuns: 0,
+    elapsed_time: null,
+    eta_seconds: null,
+    phase1_elapsed: null,
+    phase2_elapsed: null,
+    phase2_eta: null
+  });
   const [jobProgress, setJobProgress] = useState({ runs_processed: 0, total_runs: 0, jobs_collected: 0, isCollecting: false });
   
   // Filter states
@@ -340,9 +356,16 @@ export default function Dashboard() {
         
         // Update main progress state (controls the streaming indicator)
         setProgress(prev => ({
-          items: status.totalRuns || prev.items,
+          items: status.totalRuns || prev.items || 0,
           complete: status.isComplete || false,
-          isStreaming: status.isStreaming || false
+          isStreaming: status.isStreaming || false,
+          phase: status.phase || prev.phase || 'workflow_runs',
+          totalRuns: status.totalRuns || prev.totalRuns || 0,
+          elapsed_time: status.elapsed_time || prev.elapsed_time || null,
+          eta_seconds: status.eta_seconds || prev.eta_seconds || null,
+          phase1_elapsed: status.phase1_elapsed || prev.phase1_elapsed || null,
+          phase2_elapsed: status.phase2_elapsed || prev.phase2_elapsed || null,
+          phase2_eta: status.phase2_eta || prev.phase2_eta || null
         }));
         
         // Update job progress for Jobs tab
@@ -403,7 +426,14 @@ export default function Dashboard() {
         setProgress({
           items: status.totalRuns || 0,
           complete: status.isComplete || false,
-          isStreaming: status.isStreaming || false
+          isStreaming: status.isStreaming || false,
+          phase: status.phase || 'workflow_runs',
+          totalRuns: status.totalRuns || 0,
+          elapsed_time: status.elapsed_time || null,
+          eta_seconds: status.eta_seconds || null,
+          phase1_elapsed: status.phase1_elapsed || null,
+          phase2_elapsed: status.phase2_elapsed || null,
+          phase2_eta: status.phase2_eta || null
         });
       }
     });
@@ -806,35 +836,67 @@ export default function Dashboard() {
         {progress.isStreaming && (
           <div style={{ 
             padding: '15px 20px', 
-            background: 'linear-gradient(90deg, #ff9800 0%, #f44336 100%)',
+            background: progress.phase === 'workflow_runs' 
+              ? 'linear-gradient(90deg, #2196f3 0%, #1976d2 100%)' 
+              : 'linear-gradient(90deg, #ff9800 0%, #f44336 100%)',
             color: 'white',
             borderRadius: '8px',
             marginBottom: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
             boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div className="spinner" style={{ 
-                border: '3px solid rgba(255,255,255,0.3)',
-                borderTop: '3px solid white',
-                borderRadius: '50%',
-                width: '20px',
-                height: '20px',
-                animation: 'spin 1s linear infinite'
-              }}></div>
-              <span style={{ fontWeight: 600 }}>Streaming data from GitHub API...</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: progress.phase === 'jobs' ? '10px' : '0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div className="spinner" style={{ 
+                  border: '3px solid rgba(255,255,255,0.3)',
+                  borderTop: '3px solid white',
+                  borderRadius: '50%',
+                  width: '20px',
+                  height: '20px',
+                  animation: 'spin 1s linear infinite'
+                }}></div>
+                <span style={{ fontWeight: 600 }}>
+                  {progress.phase === 'workflow_runs' ? 'Collecting workflow runs...' : 'Collecting job details...'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                {/* Progress: X / Total */}
+                <span style={{ 
+                  background: 'rgba(255,255,255,0.2)', 
+                  padding: '4px 12px', 
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: 700
+                }}>
+                  {progress.phase === 'workflow_runs' 
+                    ? `${progress.items} / ${progress.totalRuns || '?'} runs`
+                    : `${jobProgress.runs_processed || 0} / ${jobProgress.total_runs || 0} runs (${jobProgress.jobs_collected || 0} jobs)`}
+                </span>
+                
+                {/* Time elapsed and ETA */}
+                {(progress.elapsed_time || progress.phase1_elapsed || progress.phase2_elapsed) && (
+                  <span style={{ 
+                    background: 'rgba(255,255,255,0.2)', 
+                    padding: '4px 12px', 
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: 600
+                  }}>
+                    {progress.phase === 'workflow_runs' ? (
+                      <>
+                        Elapsed: {formatDuration(progress.elapsed_time)}
+                        {progress.eta_seconds && ` | ETA: ${formatDuration(progress.eta_seconds)}`}
+                      </>
+                    ) : (
+                      <>
+                        Phase 1: {formatDuration(progress.phase1_elapsed)}
+                        {progress.phase2_elapsed && ` | Phase 2: ${formatDuration(progress.phase2_elapsed)}`}
+                        {progress.phase2_eta && ` | ETA: ${formatDuration(progress.phase2_eta)}`}
+                      </>
+                    )}
+                  </span>
+                )}
+              </div>
             </div>
-            <span style={{ 
-              background: 'rgba(255,255,255,0.2)', 
-              padding: '4px 12px', 
-              borderRadius: '12px',
-              fontSize: '14px',
-              fontWeight: 700
-            }}>
-              {progress.items} runs received
-            </span>
           </div>
         )}
 

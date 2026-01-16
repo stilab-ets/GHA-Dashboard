@@ -62,7 +62,6 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         config = load_config()
         print(f"[WebSocket] GHAminer config loaded: fetch_job_details={config.get('fetch_job_details', True)}")
         
-        batch_size = 50
         all_runs_list = []
         
         # ========================================
@@ -70,6 +69,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         # ========================================
         print(f"[WebSocket] Starting Phase 1: Workflow runs collection")
         phase1_start_time = time.time()
+        phase1_batch_size = 100  # GitHub API returns 100 per page
         total_runs = 0
         batch = []
         last_keepalive = 0
@@ -86,12 +86,12 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             runs_per_second = total_runs / elapsed_time if elapsed_time > 0 else 0
             eta_seconds = (estimated_total - total_runs) / runs_per_second if runs_per_second > 0 and estimated_total > total_runs else None
             
-            # Send batch to frontend
-            if len(batch) >= batch_size:
+            # Send batch to frontend (batch size 100 for Phase 1)
+            if len(batch) >= phase1_batch_size:
                 msg = {
                     "type": "runs",
                     "data": batch,
-                    "page": (total_runs // batch_size) + 1,
+                    "page": (total_runs // phase1_batch_size) + 1,
                     "hasMore": True,
                     "phase": "workflow_runs",
                     "totalRuns": estimated_total,
@@ -121,7 +121,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             msg = {
                 "type": "runs",
                 "data": batch,
-                "page": (total_runs // batch_size) + 1,
+                "page": (total_runs // phase1_batch_size) + 1,
                 "hasMore": False,
                 "phase": "workflow_runs",
                 "totalRuns": total_runs,
@@ -148,6 +148,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         if config.get("fetch_job_details", True) and all_runs_list:
             print(f"[WebSocket] Starting Phase 2: Job details collection")
             phase2_start_time = time.time()
+            phase2_batch_size = 50  # Smaller batches for job details
             batch = []
             jobs_collected = 0
             last_keepalive = 0
@@ -164,12 +165,12 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                 runs_per_second = current_count / elapsed_time if elapsed_time > 0 else 0
                 eta_seconds = (total_runs_count - current_count) / runs_per_second if runs_per_second > 0 and total_runs_count > current_count else None
                 
-                # Send batch to frontend
-                if len(batch) >= batch_size:
+                # Send batch to frontend (batch size 50 for Phase 2)
+                if len(batch) >= phase2_batch_size:
                     msg = {
                         "type": "runs",
                         "data": batch,
-                        "page": (current_count // batch_size) + 1,
+                        "page": (current_count // phase2_batch_size) + 1,
                         "hasMore": True,
                         "phase": "jobs",
                         "totalRuns": total_runs_count,
@@ -181,7 +182,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     batch.clear()
                     last_keepalive = current_count
                 
-                # Send job progress update
+                # Send job progress update (with timing info)
                 if current_count % 10 == 0 or current_count == total_runs_count:
                     job_progress_msg = {
                         "type": "job_progress",
@@ -214,7 +215,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                 msg = {
                     "type": "runs",
                     "data": batch,
-                    "page": (len(all_runs_list) // batch_size) + 1,
+                    "page": (len(all_runs_list) // phase2_batch_size) + 1,
                     "hasMore": False,
                     "phase": "jobs",
                     "totalRuns": len(all_runs_list),

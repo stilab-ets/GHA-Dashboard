@@ -128,7 +128,16 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
   
   chrome.storage.local.set({ 
     wsRuns: [], 
-    wsStatus: { isStreaming: true, isComplete: false, repo: repo, page: 0, totalRuns: 0 }
+    wsStatus: { 
+      isStreaming: true, 
+      isComplete: false, 
+      repo: repo, 
+      page: 0, 
+      totalRuns: 0,
+      phase: 'workflow_runs',
+      phase1_elapsed: null,
+      phase2_elapsed: null
+    }
   });
   
   // Get GitHub token from storage
@@ -228,29 +237,50 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
               updatedRuns: updatedRunIds.size,
               totalRuns: cache.runs.length,
               runsWithJobs,
-              totalJobs
+              totalJobs,
+              phase: message.phase
             });
             
-            chrome.storage.local.set({ 
-              wsRuns: [...cache.runs],
-              wsStatus: { 
+            // Get current status to preserve phase1_elapsed if it exists
+            chrome.storage.local.get(['wsStatus'], (result) => {
+              const currentStatus = result.wsStatus || {};
+              const statusUpdate = {
                 isStreaming: true, 
                 isComplete: false, 
                 repo: repo, 
                 page: message.page,
-                totalRuns: cache.runs.length,
+                totalRuns: message.totalRuns || cache.runs.length,
                 runsWithJobs,
                 totalJobs,
-                phase: message.phase || 'jobs',
-                hasMore: message.hasMore
+                phase: message.phase || 'workflow_runs',
+                hasMore: message.hasMore,
+                elapsed_time: message.elapsed_time || null,
+                eta_seconds: message.eta_seconds || null
+              };
+              
+              // Preserve phase1_elapsed if we're in Phase 2
+              if (message.phase === 'jobs' && currentStatus.phase1_elapsed) {
+                statusUpdate.phase1_elapsed = currentStatus.phase1_elapsed;
               }
+              
+              // Update phase2_elapsed if in jobs phase
+              if (message.phase === 'jobs' && message.elapsed_time) {
+                statusUpdate.phase2_elapsed = message.elapsed_time;
+                statusUpdate.phase2_eta = message.eta_seconds || null;
+              }
+              
+              chrome.storage.local.set({ 
+                wsRuns: [...cache.runs],
+                wsStatus: statusUpdate
+              });
             });
           }
           else if (message.type === 'phase_complete') {
             // Phase 1 (runs) complete, Phase 2 (jobs) starting
             console.log('[Background] Phase complete', {
               phase: message.phase,
-              totalRuns: message.totalRuns
+              totalRuns: message.totalRuns,
+              elapsed_time: message.elapsed_time
             });
             
             chrome.storage.local.set({ 
@@ -259,7 +289,8 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 isComplete: false, 
                 repo: repo, 
                 totalRuns: message.totalRuns,
-                phase: 'jobs'
+                phase: 'jobs',
+                phase1_elapsed: message.elapsed_time || null
               }
             });
           }
@@ -267,22 +298,30 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             // Update job collection progress
             const runsWithJobs = cache.runs.filter(r => r.jobs && r.jobs.length > 0).length;
             
-            chrome.storage.local.set({ 
-              wsRuns: [...cache.runs], // Trigger update
-              wsStatus: { 
-                isStreaming: true, 
-                isComplete: false, 
-                repo: repo, 
-                totalRuns: message.total_runs,
-                runsWithJobs,
-                totalJobs: message.jobs_collected,
-                phase: 'jobs',
-                jobsProgress: {
-                  runs_processed: message.runs_processed,
-                  total_runs: message.total_runs,
-                  jobs_collected: message.jobs_collected
+            // Get current status to preserve phase1_elapsed
+            chrome.storage.local.get(['wsStatus'], (result) => {
+              const currentStatus = result.wsStatus || {};
+              
+              chrome.storage.local.set({ 
+                wsRuns: [...cache.runs], // Trigger update
+                wsStatus: { 
+                  isStreaming: true, 
+                  isComplete: false, 
+                  repo: repo, 
+                  totalRuns: message.total_runs,
+                  runsWithJobs,
+                  totalJobs: message.jobs_collected,
+                  phase: 'jobs',
+                  phase1_elapsed: currentStatus.phase1_elapsed || null,
+                  phase2_elapsed: message.elapsed_time || null,
+                  phase2_eta: message.eta_seconds || null,
+                  jobsProgress: {
+                    runs_processed: message.runs_processed,
+                    total_runs: message.total_runs,
+                    jobs_collected: message.jobs_collected
+                  }
                 }
-              }
+              });
             });
           }
           else if (message.type === 'complete') {
