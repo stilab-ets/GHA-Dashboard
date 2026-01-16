@@ -2556,11 +2556,26 @@ export default function Dashboard() {
                       dataKey="date" 
                       height={30}
                       stroke="#8884d8"
-                      startIndex={durationExplosionZoom?.startIndex}
-                      endIndex={durationExplosionZoom?.endIndex}
-                      onChange={(e) => {
-                        if (e && typeof e.startIndex === 'number' && typeof e.endIndex === 'number') {
-                          setDurationExplosionZoom({ startIndex: e.startIndex, endIndex: e.endIndex });
+                      startIndex={durationExplosionZoom?.startIndex ?? undefined}
+                      endIndex={durationExplosionZoom?.endIndex ?? undefined}
+                      onChange={(newIndices) => {
+                        // Handle different event formats from Recharts Brush
+                        let startIdx, endIdx;
+                        if (Array.isArray(newIndices)) {
+                          // Array format: [startIndex, endIndex]
+                          [startIdx, endIdx] = newIndices;
+                        } else if (newIndices && typeof newIndices === 'object') {
+                          // Object format: { startIndex, endIndex }
+                          startIdx = newIndices.startIndex;
+                          endIdx = newIndices.endIndex;
+                        } else {
+                          // Invalid format, reset zoom
+                          setDurationExplosionZoom(null);
+                          return;
+                        }
+                        
+                        if (typeof startIdx === 'number' && typeof endIdx === 'number' && startIdx >= 0 && endIdx >= 0) {
+                          setDurationExplosionZoom({ startIndex: startIdx, endIndex: endIdx });
                         } else {
                           setDurationExplosionZoom(null);
                         }
@@ -2650,11 +2665,26 @@ export default function Dashboard() {
                     dataKey="date" 
                     height={30}
                     stroke="#8884d8"
-                    startIndex={failureWorseningZoom?.startIndex}
-                    endIndex={failureWorseningZoom?.endIndex}
-                    onChange={(e) => {
-                      if (e && typeof e.startIndex === 'number' && typeof e.endIndex === 'number') {
-                        setFailureWorseningZoom({ startIndex: e.startIndex, endIndex: e.endIndex });
+                    startIndex={failureWorseningZoom?.startIndex ?? undefined}
+                    endIndex={failureWorseningZoom?.endIndex ?? undefined}
+                    onChange={(newIndices) => {
+                      // Handle different event formats from Recharts Brush
+                      let startIdx, endIdx;
+                      if (Array.isArray(newIndices)) {
+                        // Array format: [startIndex, endIndex]
+                        [startIdx, endIdx] = newIndices;
+                      } else if (newIndices && typeof newIndices === 'object') {
+                        // Object format: { startIndex, endIndex }
+                        startIdx = newIndices.startIndex;
+                        endIdx = newIndices.endIndex;
+                      } else {
+                        // Invalid format, reset zoom
+                        setFailureWorseningZoom(null);
+                        return;
+                      }
+                      
+                      if (typeof startIdx === 'number' && typeof endIdx === 'number' && startIdx >= 0 && endIdx >= 0) {
+                        setFailureWorseningZoom({ startIndex: startIdx, endIndex: endIdx });
                       } else {
                         setFailureWorseningZoom(null);
                       }
