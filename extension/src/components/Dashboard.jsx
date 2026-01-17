@@ -875,7 +875,7 @@ export default function Dashboard() {
     });
     
     const windowSize = 10;
-    const thresholdMultiplier = 1.5; // If next median is 1.5x larger than previous, it's worsening
+    const thresholdMultiplier = 1.3; // If next median is 1.3x larger than previous, it's worsening (lowered for better detection)
     
     // Group by date for display
     const byDate = {};
@@ -976,7 +976,7 @@ export default function Dashboard() {
     // Convert to sorted array of dates
     const sortedDates = Object.keys(byDate).sort((a, b) => new Date(a) - new Date(b));
     const windowSize = 10; // 10 days
-    const thresholdMultiplier = 1.5; // If next period has 1.5x more failures, it's worsening
+    const thresholdMultiplier = 1.2; // If next period has 1.2x more failures, it's worsening (lowered for better detection)
     
     // Check each date for worsening
     for (let i = windowSize; i < sortedDates.length - windowSize; i++) {
@@ -2719,42 +2719,50 @@ export default function Dashboard() {
                     name="Duration" 
                     dot={(props) => {
                       const { cx, cy, payload } = props;
-                      if (!payload || !payload.worseningPoint) {
-                        return null; // Don't show dots for non-worsening points
+                      // Show regular dot for all points
+                      if (!payload) return null;
+                      
+                      // If this is a worsening point, show highlighted dot
+                      if (payload.worseningPoint) {
+                        return (
+                          <g>
+                            {/* Outer glow ring */}
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={12}
+                              fill="none"
+                              stroke="#ff5722"
+                              strokeWidth={2}
+                              opacity={0.4}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => {
+                                if (payload.worseningPoint?.commitUrl) {
+                                  window.open(payload.worseningPoint.commitUrl, '_blank');
+                                }
+                              }}
+                            />
+                            {/* Highlighted dot */}
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={8}
+                              fill="#ff5722"
+                              stroke="#fff"
+                              strokeWidth={2}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => {
+                                if (payload.worseningPoint?.commitUrl) {
+                                  window.open(payload.worseningPoint.commitUrl, '_blank');
+                                }
+                              }}
+                            />
+                          </g>
+                        );
                       }
-                      return (
-                        <g>
-                          <circle
-                            cx={cx}
-                            cy={cy}
-                            r={8}
-                            fill="#ff5722"
-                            stroke="#fff"
-                            strokeWidth={2}
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => {
-                              if (payload.worseningPoint?.commitUrl) {
-                                window.open(payload.worseningPoint.commitUrl, '_blank');
-                              }
-                            }}
-                          />
-                          <circle
-                            cx={cx}
-                            cy={cy}
-                            r={12}
-                            fill="none"
-                            stroke="#ff5722"
-                            strokeWidth={1}
-                            opacity={0.5}
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => {
-                              if (payload.worseningPoint?.commitUrl) {
-                                window.open(payload.worseningPoint.commitUrl, '_blank');
-                              }
-                            }}
-                          />
-                        </g>
-                      );
+                      
+                      // Regular dot for non-worsening points
+                      return <circle cx={cx} cy={cy} r={4} fill="#2196f3" />;
                     }}
                     activeDot={{
                       r: 6,
@@ -2856,51 +2864,57 @@ export default function Dashboard() {
                   />
                   <Legend />
                   <Area type="monotone" dataKey="failureRate" fill="#f44336" fillOpacity={0.3} stroke="#f44336" name="Failure Rate" />
-                  {/* Line for worsening points only */}
+                  {/* Line for failure rate with worsening points highlighted */}
                   <Line
                     type="monotone"
                     dataKey="failureRate"
-                    stroke="none"
-                    strokeWidth={0}
-                    name="Worsening Points"
+                    stroke="#f44336"
+                    strokeWidth={2}
                     dot={(props) => {
                       const { cx, cy, payload } = props;
-                      if (!payload || !payload.worseningPoint) {
-                        return null; // Don't show dots for non-worsening points
+                      if (!payload) return null;
+                      
+                      // If this is a worsening point, show highlighted dot
+                      if (payload.worseningPoint) {
+                        return (
+                          <g>
+                            {/* Outer glow ring */}
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={12}
+                              fill="none"
+                              stroke="#ff5722"
+                              strokeWidth={2}
+                              opacity={0.4}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => {
+                                if (payload.worseningPoint?.commitUrl) {
+                                  window.open(payload.worseningPoint.commitUrl, '_blank');
+                                }
+                              }}
+                            />
+                            {/* Highlighted dot */}
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={8}
+                              fill="#ff5722"
+                              stroke="#fff"
+                              strokeWidth={2}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => {
+                                if (payload.worseningPoint?.commitUrl) {
+                                  window.open(payload.worseningPoint.commitUrl, '_blank');
+                                }
+                              }}
+                            />
+                          </g>
+                        );
                       }
-                      return (
-                        <g>
-                          <circle
-                            cx={cx}
-                            cy={cy}
-                            r={8}
-                            fill="#ff5722"
-                            stroke="#fff"
-                            strokeWidth={2}
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => {
-                              if (payload.worseningPoint?.commitUrl) {
-                                window.open(payload.worseningPoint.commitUrl, '_blank');
-                              }
-                            }}
-                          />
-                          <circle
-                            cx={cx}
-                            cy={cy}
-                            r={12}
-                            fill="none"
-                            stroke="#ff5722"
-                            strokeWidth={1}
-                            opacity={0.5}
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => {
-                              if (payload.worseningPoint?.commitUrl) {
-                                window.open(payload.worseningPoint.commitUrl, '_blank');
-                              }
-                            }}
-                          />
-                        </g>
-                      );
+                      
+                      // Regular small dot for non-worsening points
+                      return <circle cx={cx} cy={cy} r={3} fill="#f44336" opacity={0.6} />;
                     }}
                   />
                   <Brush 
