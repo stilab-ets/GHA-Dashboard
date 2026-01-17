@@ -119,6 +119,9 @@ def convert_ghaminer_run_to_dashboard(run_data: dict, repo: str) -> dict:
     # Get actor
     actor = run_data.get('issuer_name') or run_data.get('actor') or None
     
+    # Get commit SHA (try multiple field names)
+    commit_sha = run_data.get('commit_sha') or run_data.get('head_sha') or None
+    
     return {
         'id': run_data.get('id_build') or run_data.get('id'),
         'workflow_id': run_data.get('workflow_id'),
@@ -135,7 +138,9 @@ def convert_ghaminer_run_to_dashboard(run_data: dict, repo: str) -> dict:
         'html_url': f"https://github.com/{repo}/actions/runs/{run_data.get('id_build') or run_data.get('id')}",
         'pull_request_number': pull_request_number,
         'jobs_url': f"https://api.github.com/repos/{repo}/actions/runs/{run_data.get('id_build') or run_data.get('id')}/jobs",
-        'jobs': jobs
+        'jobs': jobs,
+        'commit_sha': commit_sha,
+        'head_sha': commit_sha  # Also include as head_sha for compatibility
     }
 
 

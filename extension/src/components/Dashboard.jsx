@@ -847,6 +847,17 @@ export default function Dashboard() {
     });
   };
 
+  // Helper function to calculate median
+  const calculateMedian = (values) => {
+    if (!values || values.length === 0) return 0;
+    const sorted = [...values].filter(v => v > 0).sort((a, b) => a - b);
+    if (sorted.length === 0) return 0;
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 
+      ? (sorted[mid - 1] + sorted[mid]) / 2 
+      : sorted[mid];
+  };
+
   // Helper function for duration explosion chart
   const getDurationExplosionData = (workflowName) => {
     if (!rawRuns || rawRuns.length === 0) return [];
@@ -856,36 +867,94 @@ export default function Dashboard() {
       filteredRuns = rawRuns.filter(r => r.workflow_name === workflowName);
     }
     
-    // Calculate median for the selected workflow(s)
-    const durations = filteredRuns.map(r => r.duration || 0).filter(d => d > 0);
-    const sorted = [...durations].sort((a, b) => a - b);
-    const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
-    const threshold = median * 2;
-    
-    // Group by date and calculate stats
-    const byDate = {};
-    filteredRuns.forEach(run => {
-      const date = run.created_at ? run.created_at.split('T')[0] : 'Unknown';
-      if (!byDate[date]) {
-        byDate[date] = { durations: [], explosions: [] };
-      }
-      byDate[date].durations.push(run.duration || 0);
-      if (run.duration > threshold) {
-        byDate[date].explosions.push({
-          duration: run.duration,
-          html_url: run.html_url,
-          created_at: run.created_at
-        });
-      }
+    // Sort runs by created_at to ensure chronological order
+    const sortedRuns = [...filteredRuns].sort((a, b) => {
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return dateA - dateB;
     });
+    
+    const windowSize = 10;
+    const thresholdMultiplier = 1.5; // If next median is 1.5x larger than previous, it's worsening
+    
+    // Group by date for display
+    const byDate = {};
+    const worseningPoints = [];
+    
+    // Check each point for worsening
+    for (let i = windowSize; i < sortedRuns.length - windowSize; i++) {
+      const currentRun = sortedRuns[i];
+      const currentDate = currentRun.created_at ? currentRun.created_at.split('T')[0] : 'Unknown';
+      
+      // Get previous 10 runs (before current point)
+      const previousRuns = sortedRuns.slice(i - windowSize, i);
+      const previousDurations = previousRuns.map(r => r.duration || 0);
+      const previousMedian = calculateMedian(previousDurations);
+      
+      // Get next 10 runs (after current point)
+      const nextRuns = sortedRuns.slice(i + 1, i + 1 + windowSize);
+      const nextDurations = nextRuns.map(r => r.duration || 0);
+      const nextMedian = calculateMedian(nextDurations);
+      
+      // Check if there's significant worsening
+      if (previousMedian > 0 && nextMedian > 0 && nextMedian > previousMedian * thresholdMultiplier) {
+        // This is a worsening point
+        if (!byDate[currentDate]) {
+          byDate[currentDate] = { 
+            durations: [], 
+            runs: [],
+            worseningPoint: null
+          };
+        }
+        
+        // Store the worsening point with commit info
+        const commitSha = currentRun.commit_sha || currentRun.head_sha || null;
+        const commitUrl = commitSha && currentRepo 
+          ? `https://github.com/${currentRepo}/commit/${commitSha}`
+          : currentRun.html_url; // Fallback to run URL if no commit_sha
+        
+        const worseningPoint = {
+          date: currentDate,
+          duration: currentRun.duration || 0,
+          previousMedian,
+          nextMedian,
+          commitSha,
+          commitUrl,
+          html_url: currentRun.html_url,
+          created_at: currentRun.created_at,
+          run: currentRun
+        };
+        
+        byDate[currentDate].worseningPoint = worseningPoint;
+        worseningPoints.push(worseningPoint);
+      }
+      
+      // Always add all runs to byDate for the line chart
+      if (!byDate[currentDate]) {
+        byDate[currentDate] = { 
+          durations: [], 
+          runs: [],
+          worseningPoint: null
+        };
+      }
+      byDate[currentDate].durations.push(currentRun.duration || 0);
+      byDate[currentDate].runs.push(currentRun);
+    }
+    
+    // Calculate overall median for reference line
+    const allDurations = sortedRuns.map(r => r.duration || 0).filter(d => d > 0);
+    const overallMedian = calculateMedian(allDurations);
     
     return Object.entries(byDate)
       .map(([date, data]) => ({
         date,
-        duration: data.durations.reduce((a, b) => a + b, 0) / data.durations.length,
-        median,
-        threshold,
-        explosions: data.explosions
+        duration: data.durations.length > 0 
+          ? data.durations.reduce((a, b) => a + b, 0) / data.durations.length 
+          : 0,
+        median: overallMedian,
+        worseningPoint: data.worseningPoint,
+        // For individual runs in this date, keep track of the point
+        hasWorsening: data.worseningPoint !== null
       }))
       .sort((a, b) => new Date(a.date) - new Date(b.date));
   };
@@ -904,27 +973,69 @@ export default function Dashboard() {
       byDate[date].runs.push(run);
     });
     
-    // Calculate failure rate per date and detect worsening
-    const windowSize = 10;
-    const threshold = 0.5; // 50%
+    // Convert to sorted array of dates
+    const sortedDates = Object.keys(byDate).sort((a, b) => new Date(a) - new Date(b));
+    const windowSize = 10; // 10 days
+    const thresholdMultiplier = 1.5; // If next period has 1.5x more failures, it's worsening
     
-    return Object.entries(byDate)
-      .map(([date, data]) => {
-        const total = data.runs.length;
-        const failures = data.runs.filter(r => r.conclusion === 'failure').length;
-        const failureRate = total > 0 ? failures / total : 0;
-        
-        return {
-          date,
-          failureRate: failureRate * 100,
-          threshold: threshold * 100,
-          total,
-          failures,
-          worsening: failureRate > threshold ? failureRate * 100 : 0,
-          firstFailureUrl: failures > 0 ? data.runs.find(r => r.conclusion === 'failure')?.html_url : null
-        };
-      })
-      .sort((a, b) => new Date(a.date) - new Date(b.date));
+    // Check each date for worsening
+    for (let i = windowSize; i < sortedDates.length - windowSize; i++) {
+      const currentDate = sortedDates[i];
+      const currentData = byDate[currentDate];
+      
+      // Get previous 10 days
+      const previousDates = sortedDates.slice(i - windowSize, i);
+      const previousFailures = previousDates.reduce((sum, date) => {
+        const dateData = byDate[date];
+        return sum + dateData.runs.filter(r => r.conclusion === 'failure').length;
+      }, 0);
+      
+      // Get next 10 days
+      const nextDates = sortedDates.slice(i + 1, i + 1 + windowSize);
+      const nextFailures = nextDates.reduce((sum, date) => {
+        const dateData = byDate[date];
+        return sum + dateData.runs.filter(r => r.conclusion === 'failure').length;
+      }, 0);
+      
+      // Check if there's significant worsening
+      if (previousFailures >= 0 && nextFailures > previousFailures * thresholdMultiplier && nextFailures > 0) {
+        // Find the first failure run on this date to get commit info
+        const firstFailure = currentData.runs.find(r => r.conclusion === 'failure');
+        if (firstFailure) {
+          const commitSha = firstFailure.commit_sha || firstFailure.head_sha || null;
+          const commitUrl = commitSha && currentRepo 
+            ? `https://github.com/${currentRepo}/commit/${commitSha}`
+            : firstFailure.html_url; // Fallback to run URL if no commit_sha
+          
+          currentData.worseningPoint = {
+            date: currentDate,
+            previousFailures,
+            nextFailures,
+            commitSha,
+            commitUrl,
+            html_url: firstFailure.html_url,
+            run: firstFailure
+          };
+        }
+      }
+    }
+    
+    // Build result array
+    return sortedDates.map(date => {
+      const data = byDate[date];
+      const total = data.runs.length;
+      const failures = data.runs.filter(r => r.conclusion === 'failure').length;
+      const failureRate = total > 0 ? failures / total : 0;
+      
+      return {
+        date,
+        failureRate: failureRate * 100,
+        total,
+        failures,
+        worseningPoint: data.worseningPoint || null,
+        hasWorsening: data.worseningPoint !== null && data.worseningPoint !== undefined
+      };
+    });
   };
 
   // Custom Box Plot Component
@@ -2578,11 +2689,20 @@ export default function Dashboard() {
                           <div style={{ background: '#222', padding: '10px', border: '1px solid #444', borderRadius: '4px' }}>
                             <p style={{ color: '#fff', margin: 0 }}>Date: {data.date}</p>
                             <p style={{ color: '#fff', margin: 0 }}>Duration: {data.duration.toFixed(1)}s</p>
-                            {data.explosions && data.explosions.length > 0 && (
-                              <p style={{ color: '#ff9800', margin: '5px 0 0 0', cursor: 'pointer' }} 
-                                 onClick={() => window.open(data.explosions[0].html_url, '_blank')}>
-                                ⚠️ Duration explosion detected - Click to view run
-                              </p>
+                            {data.worseningPoint && (
+                              <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px solid #444' }}>
+                                <p style={{ color: '#ff9800', margin: 0, fontWeight: 'bold' }}>⚠️ Worsening Detected</p>
+                                <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
+                                  Previous median: {data.worseningPoint.previousMedian.toFixed(1)}s
+                                </p>
+                                <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
+                                  Next median: {data.worseningPoint.nextMedian.toFixed(1)}s
+                                </p>
+                                <p style={{ color: '#ff9800', margin: '5px 0 0 0', cursor: 'pointer', fontSize: '11px' }} 
+                                   onClick={() => window.open(data.worseningPoint.commitUrl, '_blank')}>
+                                  Click to view commit changes
+                                </p>
+                              </div>
                             )}
                           </div>
                         );
@@ -2597,23 +2717,53 @@ export default function Dashboard() {
                     stroke="#2196f3" 
                     strokeWidth={2} 
                     name="Duration" 
-                    dot={{ r: 4, fill: '#2196f3' }}
+                    dot={(props) => {
+                      const { cx, cy, payload } = props;
+                      if (!payload || !payload.worseningPoint) {
+                        return null; // Don't show dots for non-worsening points
+                      }
+                      return (
+                        <g>
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r={8}
+                            fill="#ff5722"
+                            stroke="#fff"
+                            strokeWidth={2}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                              if (payload.worseningPoint?.commitUrl) {
+                                window.open(payload.worseningPoint.commitUrl, '_blank');
+                              }
+                            }}
+                          />
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r={12}
+                            fill="none"
+                            stroke="#ff5722"
+                            strokeWidth={1}
+                            opacity={0.5}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                              if (payload.worseningPoint?.commitUrl) {
+                                window.open(payload.worseningPoint.commitUrl, '_blank');
+                              }
+                            }}
+                          />
+                        </g>
+                      );
+                    }}
                     activeDot={{
                       r: 6,
                       fill: '#2196f3',
                       stroke: '#fff',
-                      strokeWidth: 2,
-                      cursor: 'pointer',
-                      onClick: (_, payload) => {
-                        const point = payload?.payload;
-                        if (point?.explosions?.length > 0 && point.explosions[0].html_url) {
-                          window.open(point.explosions[0].html_url, '_blank');
-                        }
-                      }
+                      strokeWidth: 2
                     }}
                   />
-                  <Line type="monotone" dataKey="median" stroke="#4caf50" strokeWidth={2} strokeDasharray="5 5" name="Median" />
-                  <Line type="monotone" dataKey="threshold" stroke="#ff9800" strokeWidth={2} strokeDasharray="3 3" name="2x Median Threshold" />
+                  <Line type="monotone" dataKey="median" stroke="#4caf50" strokeWidth={2} strokeDasharray="5 5" name="Overall Median" />
                   <Brush 
                     dataKey="date" 
                     height={30}
@@ -2683,11 +2833,20 @@ export default function Dashboard() {
                             <p style={{ color: '#fff', margin: 0 }}>Date: {data.date}</p>
                             <p style={{ color: '#fff', margin: 0 }}>Failure Rate: {data.failureRate.toFixed(1)}%</p>
                             <p style={{ color: '#fff', margin: 0 }}>Failures: {data.failures} / {data.total}</p>
-                            {data.worsening > 0 && data.firstFailureUrl && (
-                              <p style={{ color: '#ff5722', margin: '5px 0 0 0', cursor: 'pointer' }} 
-                                 onClick={() => window.open(data.firstFailureUrl, '_blank')}>
-                                ⚠️ Worsening detected - Click to view first failure
-                              </p>
+                            {data.worseningPoint && (
+                              <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px solid #444' }}>
+                                <p style={{ color: '#ff5722', margin: 0, fontWeight: 'bold' }}>⚠️ Worsening Detected</p>
+                                <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
+                                  Previous 10 days failures: {data.worseningPoint.previousFailures}
+                                </p>
+                                <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
+                                  Next 10 days failures: {data.worseningPoint.nextFailures}
+                                </p>
+                                <p style={{ color: '#ff5722', margin: '5px 0 0 0', cursor: 'pointer', fontSize: '11px' }} 
+                                   onClick={() => window.open(data.worseningPoint.commitUrl, '_blank')}>
+                                  Click to view commit changes
+                                </p>
+                              </div>
                             )}
                           </div>
                         );
@@ -2697,16 +2856,51 @@ export default function Dashboard() {
                   />
                   <Legend />
                   <Area type="monotone" dataKey="failureRate" fill="#f44336" fillOpacity={0.3} stroke="#f44336" name="Failure Rate" />
-                  <Line type="monotone" dataKey="threshold" stroke="#ff9800" strokeWidth={2} strokeDasharray="5 5" name="50% Threshold" />
-                  <Bar 
-                    dataKey="worsening" 
-                    fill="#ff5722" 
-                    name="Worsening Period"
-                    cursor="pointer"
-                    onClick={(data) => {
-                      if (data?.payload?.worsening > 0 && data?.payload?.firstFailureUrl) {
-                        window.open(data.payload.firstFailureUrl, '_blank');
+                  {/* Line for worsening points only */}
+                  <Line
+                    type="monotone"
+                    dataKey="failureRate"
+                    stroke="none"
+                    strokeWidth={0}
+                    name="Worsening Points"
+                    dot={(props) => {
+                      const { cx, cy, payload } = props;
+                      if (!payload || !payload.worseningPoint) {
+                        return null; // Don't show dots for non-worsening points
                       }
+                      return (
+                        <g>
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r={8}
+                            fill="#ff5722"
+                            stroke="#fff"
+                            strokeWidth={2}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                              if (payload.worseningPoint?.commitUrl) {
+                                window.open(payload.worseningPoint.commitUrl, '_blank');
+                              }
+                            }}
+                          />
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r={12}
+                            fill="none"
+                            stroke="#ff5722"
+                            strokeWidth={1}
+                            opacity={0.5}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                              if (payload.worseningPoint?.commitUrl) {
+                                window.open(payload.worseningPoint.commitUrl, '_blank');
+                              }
+                            }}
+                          />
+                        </g>
+                      );
                     }}
                   />
                   <Brush 
