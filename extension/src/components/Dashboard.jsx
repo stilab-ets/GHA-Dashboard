@@ -875,7 +875,7 @@ export default function Dashboard() {
     });
     
     const windowSize = 10;
-    const thresholdMultiplier = 1.3; // If next median is 1.3x larger than previous, it's worsening (lowered for better detection)
+    const thresholdMultiplier = 1.5; // Stricter threshold - only significant worsening
     
     // Group by date for display
     const byDate = {};
@@ -898,14 +898,9 @@ export default function Dashboard() {
       
       // Check if there's significant worsening
       if (previousMedian > 0 && nextMedian > 0 && nextMedian > previousMedian * thresholdMultiplier) {
-        // This is a worsening point
-        if (!byDate[currentDate]) {
-          byDate[currentDate] = { 
-            durations: [], 
-            runs: [],
-            worseningPoint: null
-          };
-        }
+        // Calculate severity score (how much worse it got)
+        const severityScore = (nextMedian - previousMedian) / previousMedian;
+        const dateTimestamp = new Date(currentDate).getTime();
         
         // Store the worsening point with commit info
         const commitSha = currentRun.commit_sha || currentRun.head_sha || null;
@@ -915,9 +910,11 @@ export default function Dashboard() {
         
         const worseningPoint = {
           date: currentDate,
+          dateTimestamp,
           duration: currentRun.duration || 0,
           previousMedian,
           nextMedian,
+          severityScore,
           commitSha,
           commitUrl,
           html_url: currentRun.html_url,
@@ -925,7 +922,6 @@ export default function Dashboard() {
           run: currentRun
         };
         
-        byDate[currentDate].worseningPoint = worseningPoint;
         worseningPoints.push(worseningPoint);
       }
       
@@ -941,6 +937,45 @@ export default function Dashboard() {
       byDate[currentDate].runs.push(currentRun);
     }
     
+    // Select top 3 worsening points that are spaced apart
+    const selectedWorseningPoints = [];
+    if (worseningPoints.length > 0) {
+      // Sort by severity (highest first)
+      const sortedBySeverity = [...worseningPoints].sort((a, b) => b.severityScore - a.severityScore);
+      
+      // Minimum time distance between points (30 days in milliseconds)
+      const minTimeDistance = 30 * 24 * 60 * 60 * 1000;
+      
+      // Greedily select top points that are far apart
+      for (const point of sortedBySeverity) {
+        if (selectedWorseningPoints.length >= 3) break;
+        
+        // Check if this point is far enough from already selected points
+        const isFarEnough = selectedWorseningPoints.every(selected => 
+          Math.abs(point.dateTimestamp - selected.dateTimestamp) >= minTimeDistance
+        );
+        
+        if (isFarEnough) {
+          selectedWorseningPoints.push(point);
+          // Mark this date in byDate
+          if (byDate[point.date]) {
+            byDate[point.date].worseningPoint = point;
+          }
+        }
+      }
+      
+      // If we don't have 3 points yet, add the most severe remaining ones
+      for (const point of sortedBySeverity) {
+        if (selectedWorseningPoints.length >= 3) break;
+        if (!selectedWorseningPoints.includes(point)) {
+          selectedWorseningPoints.push(point);
+          if (byDate[point.date]) {
+            byDate[point.date].worseningPoint = point;
+          }
+        }
+      }
+    }
+    
     // Calculate overall median for reference line
     const allDurations = sortedRuns.map(r => r.duration || 0).filter(d => d > 0);
     const overallMedian = calculateMedian(allDurations);
@@ -953,7 +988,6 @@ export default function Dashboard() {
           : 0,
         median: overallMedian,
         worseningPoint: data.worseningPoint,
-        // For individual runs in this date, keep track of the point
         hasWorsening: data.worseningPoint !== null
       }))
       .sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -976,7 +1010,8 @@ export default function Dashboard() {
     // Convert to sorted array of dates
     const sortedDates = Object.keys(byDate).sort((a, b) => new Date(a) - new Date(b));
     const windowSize = 10; // 10 days
-    const thresholdMultiplier = 1.2; // If next period has 1.2x more failures, it's worsening (lowered for better detection)
+    const thresholdMultiplier = 1.5; // Stricter threshold - only significant worsening
+    const worseningPoints = [];
     
     // Check each date for worsening
     for (let i = windowSize; i < sortedDates.length - windowSize; i++) {
@@ -999,6 +1034,12 @@ export default function Dashboard() {
       
       // Check if there's significant worsening
       if (previousFailures >= 0 && nextFailures > previousFailures * thresholdMultiplier && nextFailures > 0) {
+        // Calculate severity score (how much worse it got)
+        const severityScore = previousFailures > 0 
+          ? (nextFailures - previousFailures) / previousFailures 
+          : nextFailures; // If no previous failures, severity is just the absolute number
+        const dateTimestamp = new Date(currentDate).getTime();
+        
         // Find the first failure run on this date to get commit info
         const firstFailure = currentData.runs.find(r => r.conclusion === 'failure');
         if (firstFailure) {
@@ -1007,15 +1048,58 @@ export default function Dashboard() {
             ? `https://github.com/${currentRepo}/commit/${commitSha}`
             : firstFailure.html_url; // Fallback to run URL if no commit_sha
           
-          currentData.worseningPoint = {
+          const worseningPoint = {
             date: currentDate,
+            dateTimestamp,
             previousFailures,
             nextFailures,
+            severityScore,
             commitSha,
             commitUrl,
             html_url: firstFailure.html_url,
             run: firstFailure
           };
+          
+          worseningPoints.push(worseningPoint);
+        }
+      }
+    }
+    
+    // Select top 3 worsening points that are spaced apart
+    const selectedWorseningPoints = [];
+    if (worseningPoints.length > 0) {
+      // Sort by severity (highest first)
+      const sortedBySeverity = [...worseningPoints].sort((a, b) => b.severityScore - a.severityScore);
+      
+      // Minimum time distance between points (30 days in milliseconds)
+      const minTimeDistance = 30 * 24 * 60 * 60 * 1000;
+      
+      // Greedily select top points that are far apart
+      for (const point of sortedBySeverity) {
+        if (selectedWorseningPoints.length >= 3) break;
+        
+        // Check if this point is far enough from already selected points
+        const isFarEnough = selectedWorseningPoints.every(selected => 
+          Math.abs(point.dateTimestamp - selected.dateTimestamp) >= minTimeDistance
+        );
+        
+        if (isFarEnough) {
+          selectedWorseningPoints.push(point);
+          // Mark this date in byDate
+          if (byDate[point.date]) {
+            byDate[point.date].worseningPoint = point;
+          }
+        }
+      }
+      
+      // If we don't have 3 points yet, add the most severe remaining ones
+      for (const point of sortedBySeverity) {
+        if (selectedWorseningPoints.length >= 3) break;
+        if (!selectedWorseningPoints.includes(point)) {
+          selectedWorseningPoints.push(point);
+          if (byDate[point.date]) {
+            byDate[point.date].worseningPoint = point;
+          }
         }
       }
     }
@@ -2698,8 +2782,18 @@ export default function Dashboard() {
                                 <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
                                   Next median: {data.worseningPoint.nextMedian.toFixed(1)}s
                                 </p>
+                                {data.worseningPoint.commitSha && (
+                                  <p style={{ color: '#bcd', margin: '3px 0', fontSize: '10px', fontFamily: 'monospace' }}>
+                                    Commit: {data.worseningPoint.commitSha.substring(0, 7)}
+                                  </p>
+                                )}
                                 <p style={{ color: '#ff9800', margin: '5px 0 0 0', cursor: 'pointer', fontSize: '11px' }} 
-                                   onClick={() => window.open(data.worseningPoint.commitUrl, '_blank')}>
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     if (data.worseningPoint?.commitUrl) {
+                                       window.open(data.worseningPoint.commitUrl, '_blank');
+                                     }
+                                   }}>
                                   Click to view commit changes
                                 </p>
                               </div>
@@ -2736,11 +2830,12 @@ export default function Dashboard() {
                               strokeWidth={2}
                               opacity={0.4}
                               style={{ cursor: 'pointer' }}
-                              onClick={() => {
-                                if (payload.worseningPoint?.commitUrl) {
-                                  window.open(payload.worseningPoint.commitUrl, '_blank');
-                                }
-                              }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (payload.worseningPoint?.commitUrl) {
+                                window.open(payload.worseningPoint.commitUrl, '_blank');
+                              }
+                            }}
                             />
                             {/* Highlighted dot */}
                             <circle
@@ -2751,11 +2846,12 @@ export default function Dashboard() {
                               stroke="#fff"
                               strokeWidth={2}
                               style={{ cursor: 'pointer' }}
-                              onClick={() => {
-                                if (payload.worseningPoint?.commitUrl) {
-                                  window.open(payload.worseningPoint.commitUrl, '_blank');
-                                }
-                              }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (payload.worseningPoint?.commitUrl) {
+                                window.open(payload.worseningPoint.commitUrl, '_blank');
+                              }
+                            }}
                             />
                           </g>
                         );
@@ -2850,8 +2946,18 @@ export default function Dashboard() {
                                 <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
                                   Next 10 days failures: {data.worseningPoint.nextFailures}
                                 </p>
+                                {data.worseningPoint.commitSha && (
+                                  <p style={{ color: '#bcd', margin: '3px 0', fontSize: '10px', fontFamily: 'monospace' }}>
+                                    Commit: {data.worseningPoint.commitSha.substring(0, 7)}
+                                  </p>
+                                )}
                                 <p style={{ color: '#ff5722', margin: '5px 0 0 0', cursor: 'pointer', fontSize: '11px' }} 
-                                   onClick={() => window.open(data.worseningPoint.commitUrl, '_blank')}>
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     if (data.worseningPoint?.commitUrl) {
+                                       window.open(data.worseningPoint.commitUrl, '_blank');
+                                     }
+                                   }}>
                                   Click to view commit changes
                                 </p>
                               </div>
@@ -2888,11 +2994,12 @@ export default function Dashboard() {
                               strokeWidth={2}
                               opacity={0.4}
                               style={{ cursor: 'pointer' }}
-                              onClick={() => {
-                                if (payload.worseningPoint?.commitUrl) {
-                                  window.open(payload.worseningPoint.commitUrl, '_blank');
-                                }
-                              }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (payload.worseningPoint?.commitUrl) {
+                                window.open(payload.worseningPoint.commitUrl, '_blank');
+                              }
+                            }}
                             />
                             {/* Highlighted dot */}
                             <circle
@@ -2903,11 +3010,12 @@ export default function Dashboard() {
                               stroke="#fff"
                               strokeWidth={2}
                               style={{ cursor: 'pointer' }}
-                              onClick={() => {
-                                if (payload.worseningPoint?.commitUrl) {
-                                  window.open(payload.worseningPoint.commitUrl, '_blank');
-                                }
-                              }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (payload.worseningPoint?.commitUrl) {
+                                window.open(payload.worseningPoint.commitUrl, '_blank');
+                              }
+                            }}
                             />
                           </g>
                         );
