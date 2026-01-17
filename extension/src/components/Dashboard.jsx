@@ -2818,8 +2818,16 @@ export default function Dashboard() {
                       
                       // If this is a worsening point, show highlighted dot
                       if (payload.worseningPoint) {
+                        const handleClick = (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (payload.worseningPoint?.commitUrl) {
+                            window.open(payload.worseningPoint.commitUrl, '_blank');
+                          }
+                        };
+                        
                         return (
-                          <g>
+                          <g onClick={handleClick} onMouseDown={handleClick} style={{ cursor: 'pointer' }} pointerEvents="all">
                             {/* Outer glow ring */}
                             <circle
                               cx={cx}
@@ -2829,13 +2837,7 @@ export default function Dashboard() {
                               stroke="#ff5722"
                               strokeWidth={2}
                               opacity={0.4}
-                              style={{ cursor: 'pointer' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (payload.worseningPoint?.commitUrl) {
-                                window.open(payload.worseningPoint.commitUrl, '_blank');
-                              }
-                            }}
+                              pointerEvents="all"
                             />
                             {/* Highlighted dot */}
                             <circle
@@ -2845,13 +2847,7 @@ export default function Dashboard() {
                               fill="#ff5722"
                               stroke="#fff"
                               strokeWidth={2}
-                              style={{ cursor: 'pointer' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (payload.worseningPoint?.commitUrl) {
-                                window.open(payload.worseningPoint.commitUrl, '_blank');
-                              }
-                            }}
+                              pointerEvents="all"
                             />
                           </g>
                         );
@@ -2982,8 +2978,16 @@ export default function Dashboard() {
                       
                       // If this is a worsening point, show highlighted dot
                       if (payload.worseningPoint) {
+                        const handleClick = (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (payload.worseningPoint?.commitUrl) {
+                            window.open(payload.worseningPoint.commitUrl, '_blank');
+                          }
+                        };
+                        
                         return (
-                          <g>
+                          <g onClick={handleClick} onMouseDown={handleClick} style={{ cursor: 'pointer' }} pointerEvents="all">
                             {/* Outer glow ring */}
                             <circle
                               cx={cx}
@@ -2993,13 +2997,7 @@ export default function Dashboard() {
                               stroke="#ff5722"
                               strokeWidth={2}
                               opacity={0.4}
-                              style={{ cursor: 'pointer' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (payload.worseningPoint?.commitUrl) {
-                                window.open(payload.worseningPoint.commitUrl, '_blank');
-                              }
-                            }}
+                              pointerEvents="all"
                             />
                             {/* Highlighted dot */}
                             <circle
@@ -3009,13 +3007,7 @@ export default function Dashboard() {
                               fill="#ff5722"
                               stroke="#fff"
                               strokeWidth={2}
-                              style={{ cursor: 'pointer' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (payload.worseningPoint?.commitUrl) {
-                                window.open(payload.worseningPoint.commitUrl, '_blank');
-                              }
-                            }}
+                              pointerEvents="all"
                             />
                           </g>
                         );
