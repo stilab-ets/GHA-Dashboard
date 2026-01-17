@@ -2746,6 +2746,7 @@ export default function Dashboard() {
               <h3 style={{ margin: 0 }}>Workflow Duration Over Time (with Explosion Detection)</h3>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <select 
+                  value={selectedWorkflowForDuration}
                   onChange={(e) => setSelectedWorkflowForDuration(e.target.value)}
                   style={{ padding: '8px', background: '#222', color: '#fff', border: '1px solid #444' }}
                 >
@@ -2889,7 +2890,6 @@ export default function Dashboard() {
                       strokeWidth: 2
                     }}
                   />
-                  <Line type="monotone" dataKey="median" stroke="#4caf50" strokeWidth={2} strokeDasharray="5 5" name="Overall Median" />
                   <Brush 
                     dataKey="date" 
                     height={30}
