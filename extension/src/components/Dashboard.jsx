@@ -904,9 +904,17 @@ export default function Dashboard() {
         
         // Store the worsening point with commit info
         const commitSha = currentRun.commit_sha || currentRun.head_sha || null;
-        const commitUrl = commitSha && currentRepo 
-          ? `https://github.com/${currentRepo}/commit/${commitSha}`
-          : currentRun.html_url; // Fallback to run URL if no commit_sha
+        // Extract repo from html_url if currentRepo is not available
+        let repo = currentRepo;
+        if (!repo && currentRun.html_url) {
+          const urlMatch = currentRun.html_url.match(/github\.com\/([^\/]+\/[^\/]+)/);
+          if (urlMatch) {
+            repo = urlMatch[1];
+          }
+        }
+        const commitUrl = commitSha && repo
+          ? `https://github.com/${repo}/commit/${commitSha}`
+          : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : currentRun.html_url);
         
         const worseningPoint = {
           date: currentDate,
@@ -1044,9 +1052,17 @@ export default function Dashboard() {
         const firstFailure = currentData.runs.find(r => r.conclusion === 'failure');
         if (firstFailure) {
           const commitSha = firstFailure.commit_sha || firstFailure.head_sha || null;
-          const commitUrl = commitSha && currentRepo 
-            ? `https://github.com/${currentRepo}/commit/${commitSha}`
-            : firstFailure.html_url; // Fallback to run URL if no commit_sha
+          // Extract repo from html_url if currentRepo is not available
+          let repo = currentRepo;
+          if (!repo && firstFailure.html_url) {
+            const urlMatch = firstFailure.html_url.match(/github\.com\/([^\/]+\/[^\/]+)/);
+            if (urlMatch) {
+              repo = urlMatch[1];
+            }
+          }
+          const commitUrl = commitSha && repo
+            ? `https://github.com/${repo}/commit/${commitSha}`
+            : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : firstFailure.html_url);
           
           const worseningPoint = {
             date: currentDate,
@@ -2821,13 +2837,23 @@ export default function Dashboard() {
                         const handleClick = (e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          if (payload.worseningPoint?.commitUrl) {
-                            window.open(payload.worseningPoint.commitUrl, '_blank');
+                          const url = payload.worseningPoint?.commitUrl || payload.worseningPoint?.html_url;
+                          if (url) {
+                            window.open(url, '_blank');
                           }
                         };
                         
                         return (
                           <g onClick={handleClick} onMouseDown={handleClick} style={{ cursor: 'pointer' }} pointerEvents="all">
+                            {/* Large transparent clickable area */}
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={15}
+                              fill="transparent"
+                              pointerEvents="all"
+                              style={{ cursor: 'pointer' }}
+                            />
                             {/* Outer glow ring */}
                             <circle
                               cx={cx}
@@ -2837,7 +2863,7 @@ export default function Dashboard() {
                               stroke="#ff5722"
                               strokeWidth={2}
                               opacity={0.4}
-                              pointerEvents="all"
+                              pointerEvents="none"
                             />
                             {/* Highlighted dot */}
                             <circle
@@ -2847,7 +2873,7 @@ export default function Dashboard() {
                               fill="#ff5722"
                               stroke="#fff"
                               strokeWidth={2}
-                              pointerEvents="all"
+                              pointerEvents="none"
                             />
                           </g>
                         );
@@ -2981,13 +3007,23 @@ export default function Dashboard() {
                         const handleClick = (e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          if (payload.worseningPoint?.commitUrl) {
-                            window.open(payload.worseningPoint.commitUrl, '_blank');
+                          const url = payload.worseningPoint?.commitUrl || payload.worseningPoint?.html_url;
+                          if (url) {
+                            window.open(url, '_blank');
                           }
                         };
                         
                         return (
                           <g onClick={handleClick} onMouseDown={handleClick} style={{ cursor: 'pointer' }} pointerEvents="all">
+                            {/* Large transparent clickable area */}
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={15}
+                              fill="transparent"
+                              pointerEvents="all"
+                              style={{ cursor: 'pointer' }}
+                            />
                             {/* Outer glow ring */}
                             <circle
                               cx={cx}
@@ -2997,7 +3033,7 @@ export default function Dashboard() {
                               stroke="#ff5722"
                               strokeWidth={2}
                               opacity={0.4}
-                              pointerEvents="all"
+                              pointerEvents="none"
                             />
                             {/* Highlighted dot */}
                             <circle
@@ -3007,7 +3043,7 @@ export default function Dashboard() {
                               fill="#ff5722"
                               stroke="#fff"
                               strokeWidth={2}
-                              pointerEvents="all"
+                              pointerEvents="none"
                             />
                           </g>
                         );
