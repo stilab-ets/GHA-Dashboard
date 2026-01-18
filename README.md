@@ -9,121 +9,70 @@ GHA-Dashboard is a comprehensive dashboard for analyzing GitHub Actions workflow
 
 The system uses PostgreSQL for data persistence and supports real-time data extraction via WebSocket connections.
 
-## Prerequisites
+📺 **Installation Guide Video**: [Watch on YouTube](https://youtu.be/fYK8SyZ0yLc)
 
-Before contributing, ensure you have the following installed:
+## 1) Setup (GHA Dashboard)
 
-- **Docker and Docker Compose** (for running the backend services)
-- **Node.js and npm** (for the frontend extension)
-- **Git** (for version control)
-- **A GitHub Personal Access Token** (for API access to GitHub repositories)
+### Step 1: Install prerequisites (Only if you don't already have them)
 
-## Backend Setup
+- **Node.js + npm**: https://nodejs.org/
+- **Python**: https://www.python.org/downloads/
 
-The backend is containerized using Docker. It includes a Flask API, PostgreSQL database, and optional pgAdmin for database management.
-
-### 1. Clone the Repository
+### Step 2: Clone the project repository
 
 ```bash
 git clone https://github.com/stilab-ets/GHA-Dashboard.git
-cd GHA-Dashboard
 ```
 
-### 2. Environment Configuration
-
-For easier development, you can copy the provided `.env.example` file to `.env` and add your GitHub token (optional, as tokens can also be provided via the Chrome extension popup):
+### Step 3: Build the browser extension
 
 ```bash
-cp .env.example .env
-```
-
-Then edit `.env` to include your GitHub token:
-
-```env
-GITHUB_TOKEN=ghp_your_github_token_here
-```
-
-**Note**: The `.env` file is optional. Users can alternatively enter their GitHub token directly in the Chrome extension popup for each session.
-
-### 3. Start Backend Services
-
-```bash
-# Start all services (PostgreSQL + Flask API)
-docker-compose up -d --build
-```
-
-### 4. Verify Backend is Running
-
-```bash
-# Health check
-curl http://localhost:3000/health
-
-# Test data extraction (replace with a real repo)
-curl "http://localhost:3000/api/extraction?repo=facebook/react"
-```
-
-### Backend Services
-
-- **Flask API**: http://localhost:3000
-- **PostgreSQL**: localhost:5432
-
-### Useful Backend Commands
-
-```bash
-# View logs
-docker-compose logs -f backend
-
-# Access PostgreSQL CLI
-docker-compose exec postgres psql -U postgres -d gha_dashboard
-
-# Stop services
-docker-compose down
-
-# Reset everything (including data)
-docker-compose down -v
-docker-compose up -d --build
-```
-
-## Frontend Setup (Chrome Extension)
-
-The frontend is a React-based Chrome extension built with Vite.
-
-### 1. Install Dependencies
-
-```bash
-cd extension
+cd GHA-Dashboard/extension
 npm install
-```
-
-### 2. Development
-
-```bash
-# Start development server
-npm run dev
-```
-
-### 3. Build and Package
-
-```bash
-# Build and assemble extension
 npm run pack
-
-# Create distributable ZIP (Windows)
-npm run dist
 ```
 
-### 4. Load Extension in Browser
+### Step 4: Run the backend server
 
-1. Open Chrome/Edge and go to `chrome://extensions`
-2. Enable "Developer mode"
-3. Click "Load unpacked" and select the `build/` folder
+```bash
+cd ..
+cd backend
+python app.py
+```
 
-## Running the Full Application
+### Step 5: Load the extension in Chrome
 
-1. **Start Backend**: Follow backend setup above
-2. **Build Extension**: Follow frontend setup above
-3. **Load Extension**: Load the built extension in your browser
-4. **Use the Dashboard**: Navigate to any GitHub repository page and use the extension popup to access the dashboard
+1. Open Chrome and go to `chrome://extensions/`
+2. Enable **Developer mode** (top right)
+3. Click **Load unpacked**
+4. Select the folder: `GHA-Dashboard/extension/build/`
+
+### Step 6: Add your GitHub access token
+
+1. **Generate a GitHub token** (in case you don't have one)
+   - Go to: https://github.com/settings/tokens
+   - Click **Generate new token → Classic token**
+   - Select `repo` (or `public_repos` if not working with a private repo)
+   - Generate the token and copy it
+
+2. **Add the token to the extension**
+   - Click the GHA Dashboard extension icon in Chrome top right (puzzle icon)
+   - Paste your GitHub token into the token input field
+   - Click **Save**
+
+## 2) Data Collection & Navigation
+
+### Step 7: Open the target repository
+
+Go to: https://github.com/AUTOMATIC1111/stable-diffusion-webui
+
+### Step 8: Open the GHA Dashboard
+
+From the repository's middle menu, click on the **GHA Dashboard** tab added by the extension.
+
+### Step 9: Start data collection
+
+Click **Start Data Collection** and wait until the process completes.
 
 ## Contributing
 
