@@ -66,6 +66,11 @@ From the repository's middle menu, click on the **GHA Dashboard** tab added by t
 
 Click **Start Data Collection** and wait until the process completes.
 
+### Step 8: Submit your honest feedback
+
+After using GHA-Dashboard, please fill out this short form (2-3 miniutes) to submit your feedback
+https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKIqqWU9w--jA/viewform?usp=dialog
+
 ## Contributing
 
 ### Development Workflow
