@@ -1485,7 +1485,41 @@ export default function Dashboard() {
           </div>
         )}
 
-        <h2 style={{ marginTop: 0 }}>GitHub Actions Dashboard</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+          <h2 style={{ marginTop: 0, marginBottom: 0 }}>GitHub Actions Dashboard</h2>
+          <a
+            href="https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKIqqWU9w--jA/viewform?usp=dialog"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="feedback-button"
+            style={{
+              display: 'inline-block',
+              padding: '10px 20px',
+              backgroundColor: '#4caf50',
+              color: 'white',
+              textDecoration: 'none',
+              borderRadius: '6px',
+              fontWeight: 600,
+              fontSize: '14px',
+              transition: 'all 0.3s ease',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#45a049';
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#4caf50';
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+            }}
+          >
+            Submit Feedback Form
+          </a>
+        </div>
         
         {/* Filter Panel */}
         <div className="filter-panel card">
