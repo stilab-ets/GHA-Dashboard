@@ -9,7 +9,7 @@ GHA-Dashboard is a comprehensive dashboard for analyzing GitHub Actions workflow
 
 The system uses PostgreSQL for data persistence and supports real-time data extraction via WebSocket connections.
 
-📺 **Installation Guide Video**: [Watch on YouTube](https://youtu.be/fYK8SyZ0yLc)
+📺 **Installation Guide Video**: [Watch on YouTube](https://youtu.be/jxfAHsRjxsQ)
 
 ## 1) Setup (GHA Dashboard)
 
