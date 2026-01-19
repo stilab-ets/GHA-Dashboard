@@ -15,7 +15,6 @@ The system uses PostgreSQL for data persistence and supports real-time data extr
 
 ### Step 1: Install prerequisites (Only if you don't already have them)
 
-- **Node.js + npm**: https://nodejs.org/
 - **Python**: https://www.python.org/downloads/
 
 ### Step 2: Clone the project repository
@@ -24,30 +23,23 @@ The system uses PostgreSQL for data persistence and supports real-time data extr
 git clone https://github.com/stilab-ets/GHA-Dashboard.git
 ```
 
-### Step 3: Build the browser extension
+**Note**: If you don't have Git installed, you can download the project directly from [https://github.com/stilab-ets/GHA-Dashboard](https://github.com/stilab-ets/GHA-Dashboard) by clicking the green "Code" button and selecting "Download ZIP", then unzip the downloaded file.
+
+### Step 3: Run the backend server
 
 ```bash
-cd GHA-Dashboard/extension
-npm install
-npm run pack
-```
-
-### Step 4: Run the backend server
-
-```bash
-cd ..
-cd backend
+cd GHA-Dashboard/backend
 python app.py
 ```
 
-### Step 5: Load the extension in Chrome
+### Step 4: Load the extension in Chrome
 
 1. Open Chrome and go to `chrome://extensions/`
 2. Enable **Developer mode** (top right)
 3. Click **Load unpacked**
 4. Select the folder: `GHA-Dashboard/extension/build/`
 
-### Step 6: Add your GitHub access token
+### Step 5: Add your GitHub access token
 
 1. **Generate a GitHub token** (in case you don't have one)
    - Go to: https://github.com/settings/tokens
@@ -62,15 +54,15 @@ python app.py
 
 ## 2) Data Collection & Navigation
 
-### Step 7: Open the target repository
+### Step 6: Open the target repository
 
 Go to: https://github.com/AUTOMATIC1111/stable-diffusion-webui
 
-### Step 8: Open the GHA Dashboard
+### Step 7: Open the GHA Dashboard
 
 From the repository's middle menu, click on the **GHA Dashboard** tab added by the extension.
 
-### Step 9: Start data collection
+### Step 8: Start data collection
 
 Click **Start Data Collection** and wait until the process completes.
 
@@ -90,21 +82,6 @@ Click **Start Data Collection** and wait until the process completes.
 - `doc/`: Documentation and architecture diagrams
 - `docker-compose.yml`: Service orchestration
 
-### Testing
-
-```bash
-# Backend tests
-cd backend
-python -m pytest
-
-# Full system test
-./test-docker.sh
-
-# Manual API testing
-curl http://localhost:3000/health
-curl "http://localhost:3000/api/extraction?repo=facebook/react"
-```
-
 ### Key Technologies
 
 - **Backend**: Python, Flask, SQLAlchemy, PostgreSQL, WebSocket
@@ -122,7 +99,6 @@ curl "http://localhost:3000/api/extraction?repo=facebook/react"
 
 ### Extension Issues
 
-- Rebuild after changes: `npm run pack`
 - Reload extension in browser after updates
 - Check browser console for errors
 

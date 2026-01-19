@@ -352,3 +352,45 @@ html, body {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+/* InfoIcon and Popup Styles */
+.info-icon-popup {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 8px;
+    background: #222;
+    border: 1px solid #555;
+    border-radius: 6px;
+    padding: 12px;
+    min-width: 250px;
+    max-width: 350px;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    font-size: 13px;
+    line-height: 1.5;
+    color: #ddd;
+    word-wrap: break-word;
+}
+
+.info-icon-popup::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid #222;
+}
+
+@media (max-width: 600px) {
+    .info-icon-popup {
+        min-width: 200px;
+        max-width: 280px;
+        font-size: 12px;
+    }
+}
