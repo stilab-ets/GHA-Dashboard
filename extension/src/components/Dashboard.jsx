@@ -23,6 +23,128 @@ import {
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3', '#9c27b0', '#00bcd4'];
 
+// InfoIcon component for displaying help tooltips
+function InfoIcon({ explanation, id }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const iconRef = useRef(null);
+  const popupRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (iconRef.current && popupRef.current && 
+          !iconRef.current.contains(event.target) && 
+          !popupRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [isOpen]);
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block', marginLeft: '8px' }}>
+      <button
+        ref={iconRef}
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        style={{
+          width: '20px',
+          height: '20px',
+          borderRadius: '50%',
+          border: '1px solid #666',
+          background: '#333',
+          color: '#fff',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '12px',
+          padding: 0,
+          lineHeight: 1,
+          transition: 'all 0.2s ease'
+        }}
+        onMouseEnter={(e) => {
+          e.target.style.background = '#444';
+          e.target.style.borderColor = '#888';
+        }}
+        onMouseLeave={(e) => {
+          e.target.style.background = '#333';
+          e.target.style.borderColor = '#666';
+        }}
+        aria-label="Show explanation"
+      >
+        ?
+      </button>
+      {isOpen && (
+        <div
+          ref={popupRef}
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            marginBottom: '8px',
+            background: '#222',
+            border: '1px solid #555',
+            borderRadius: '6px',
+            padding: '12px',
+            minWidth: '250px',
+            maxWidth: '350px',
+            zIndex: 1000,
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+            fontSize: '13px',
+            lineHeight: '1.5',
+            color: '#ddd'
+          }}
+        >
+          <div style={{ marginBottom: '8px', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>
+            {explanation.title || 'Information'}
+          </div>
+          <div>{explanation.text}</div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsOpen(false);
+            }}
+            style={{
+              position: 'absolute',
+              top: '8px',
+              right: '8px',
+              background: 'transparent',
+              border: 'none',
+              color: '#888',
+              cursor: 'pointer',
+              fontSize: '18px',
+              lineHeight: 1,
+              padding: 0,
+              width: '20px',
+              height: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.color = '#fff';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.color = '#888';
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatTimeValue(seconds) {
   if (seconds < 60) return `${Math.round(seconds)}s`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
@@ -78,6 +200,41 @@ function isDateInRange(date, start, end) {
   return d >= s && d <= e;
 }
 
+function getDateRangeLabel(startStr, endStr) {
+  if (!startStr || !endStr) return null;
+  
+  const start = parseDateStr(startStr);
+  const end = parseDateStr(endStr);
+  if (!start || !end) return null;
+  
+  const now = new Date();
+  
+  // Check for Current Month
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  if (start.getTime() === firstDayOfMonth.getTime() && 
+      end.getTime() === lastDayOfMonth.getTime()) {
+    return 'Current month';
+  }
+  
+  // Check for Current Year
+  const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
+  const lastDayOfYear = new Date(now.getFullYear(), 11, 31);
+  if (start.getTime() === firstDayOfYear.getTime() && 
+      end.getTime() === lastDayOfYear.getTime()) {
+    return 'Current year';
+  }
+  
+  // Check for All Time (very wide range, typically 2000-2100)
+  // Check if the range spans at least 50 years (to catch "All Time" selections)
+  const yearsDiff = end.getFullYear() - start.getFullYear();
+  if (yearsDiff >= 50 && start.getFullYear() <= 2010 && end.getFullYear() >= 2090) {
+    return 'All time';
+  }
+  
+  return null; // Return null if it's a custom range
+}
+
 export default function Dashboard() {
   // ============================================
   // State Management
@@ -85,8 +242,11 @@ export default function Dashboard() {
 
   const getCurrentDefaults = () => {
     const now = new Date();
-    const defaultEnd = formatDateForInput(now);
-    const defaultStart = formatDateForInput(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000));
+    // Set default to current month (first day to last day)
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const defaultStart = formatDateForInput(firstDayOfMonth);
+    const defaultEnd = formatDateForInput(lastDayOfMonth);
     return { defaultStart, defaultEnd };
   };
 
@@ -1481,7 +1641,13 @@ export default function Dashboard() {
               >
                 <span>
                   {filters.start && filters.end 
-                    ? `${new Date(filters.start).toLocaleDateString()} - ${new Date(filters.end).toLocaleDateString()}`
+                    ? (() => {
+                        const periodLabel = getDateRangeLabel(filters.start, filters.end);
+                        if (periodLabel) {
+                          return `Period: ${periodLabel}`;
+                        }
+                        return `${new Date(filters.start).toLocaleDateString()} - ${new Date(filters.end).toLocaleDateString()}`;
+                      })()
                     : 'Select date range...'}
                 </span>
                 <span style={{ fontSize: '12px', opacity: 0.7 }}>▼</span>
@@ -1788,19 +1954,43 @@ export default function Dashboard() {
         {/* Stats */}
         <div className="stats-row">
           <div className="stat-card card">
-            <div className="title">Total runs</div>
+            <div className="title" style={{ display: 'flex', alignItems: 'center' }}>
+              Total runs
+              <InfoIcon explanation={{
+                title: 'Total Runs',
+                text: 'The total number of workflow runs collected in the selected date range. This includes all runs regardless of their status (success, failure, cancelled, etc.).'
+              }} />
+            </div>
             <div className="value">{data.originalTotalRuns !== undefined ? data.originalTotalRuns : data.totalRuns}</div>
           </div>
           <div className="stat-card card">
-            <div className="title">Success rate</div>
+            <div className="title" style={{ display: 'flex', alignItems: 'center' }}>
+              Success rate
+              <InfoIcon explanation={{
+                title: 'Success Rate',
+                text: 'The percentage of workflow runs that completed successfully. Calculated as (successful runs / total runs) × 100%. A higher success rate indicates more reliable workflows.'
+              }} />
+            </div>
             <div className="value">{`${(data.successRate * 100).toFixed(1)}%`}</div>
           </div>
           <div className="stat-card card">
-            <div className="title">Median duration</div>
+            <div className="title" style={{ display: 'flex', alignItems: 'center' }}>
+              Median duration
+              <InfoIcon explanation={{
+                title: 'Median Duration',
+                text: 'The median (middle value) execution time of all workflow runs in seconds. The median is less affected by outliers than the average, providing a more representative measure of typical workflow duration.'
+              }} />
+            </div>
             <div className="value">{`${data.medianDuration} s`}</div>
           </div>
           <div className="stat-card card">
-            <div className="title">MAD (Median Absolute Deviation)</div>
+            <div className="title" style={{ display: 'flex', alignItems: 'center' }}>
+              MAD (Median Absolute Deviation)
+              <InfoIcon explanation={{
+                title: 'Median Absolute Deviation (MAD)',
+                text: 'A measure of variability that shows how spread out the workflow durations are. MAD is the median of the absolute deviations from the median duration. Lower values indicate more consistent execution times, while higher values suggest greater variability.'
+              }} />
+            </div>
             <div className="value">{`${data.mad} s`}</div>
           </div>
         </div>
@@ -1809,7 +1999,13 @@ export default function Dashboard() {
         <div className="dashboard-grid">
           {/* Statistics Container with Tabs */}
           <div className="card" style={{ width: '100%', gridColumn: '1 / -1' }}>
-            <h3>Statistics</h3>
+            <h3 style={{ display: 'flex', alignItems: 'center', margin: 0 }}>
+              Statistics
+              <InfoIcon explanation={{
+                title: 'Statistics',
+                text: 'Detailed statistics tables showing workflow, job, branch, event trigger, and contributor metrics. Use the tabs to switch between different views. Each table displays total runs, success rates, and other relevant metrics for the selected filters.'
+              }} />
+            </h3>
             <div style={{ marginBottom: '20px', borderBottom: '1px solid #333' }}>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button
@@ -2351,7 +2547,13 @@ export default function Dashboard() {
 
           {/* Daily runs */}
           <div className="card">
-            <h3>Daily runs breakdown</h3>
+            <h3 style={{ display: 'flex', alignItems: 'center', margin: 0 }}>
+              Daily runs breakdown
+              <InfoIcon explanation={{
+                title: 'Daily Runs Breakdown',
+                text: 'A stacked bar chart showing the daily count of successful (green) and failed (red) workflow runs over time. This helps identify patterns in workflow execution and failure rates across different days.'
+              }} />
+            </h3>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={runsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#122" />
@@ -2368,7 +2570,13 @@ export default function Dashboard() {
           {/* Duration over time */}
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0 }}>Duration variability</h3>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
+                Duration variability
+                <InfoIcon explanation={{
+                  title: 'Duration Variability',
+                  text: 'Shows the variability of workflow execution times over time. Displays the minimum (green area), maximum (orange area), and median (blue line) durations. Use the brush at the bottom to zoom into specific time periods. High variability may indicate performance issues or inconsistent resource availability.'
+                }} />
+              </h3>
               <button
                 onClick={() => {
                   setDurationVariabilityZoom(null);
@@ -2424,7 +2632,13 @@ export default function Dashboard() {
           {/* Cumulative failure duration */}
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0 }}>Cumulative failure duration</h3>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
+                Cumulative failure duration
+                <InfoIcon explanation={{
+                  title: 'Cumulative Failure Duration',
+                  text: 'Shows the daily failure duration (red bars) and cumulative failure duration (orange line) over time. The cumulative line helps track the total time lost to failures. Use the brush at the bottom to zoom into specific periods. This metric helps quantify the impact of failures on development velocity.'
+                }} />
+              </h3>
               <button
                 onClick={() => {
                   setCumulativeFailureZoom(null);
@@ -2485,7 +2699,13 @@ export default function Dashboard() {
 
           {/* Time to Fix Box Plot */}
           <div className="card">
-            <h3>Time to Fix (Box Plot)</h3>
+            <h3 style={{ display: 'flex', alignItems: 'center', margin: 0 }}>
+              Time to Fix (Box Plot)
+              <InfoIcon explanation={{
+                title: 'Time to Fix (Box Plot)',
+                text: 'A box plot visualization showing the distribution of time-to-fix for each workflow. Time-to-fix is calculated from the time a workflow fails until it succeeds again. The box shows the interquartile range (IQR), the line inside is the median, and the whiskers extend to show the full range. Hover over data points to see detailed information including commit links.'
+              }} />
+            </h3>
             {timeToFix && timeToFix.length > 0 ? (
               <div style={{ width: '100%', height: '320px', position: 'relative', overflow: 'hidden' }}>
                 {tooltipData && (
@@ -2743,7 +2963,13 @@ export default function Dashboard() {
           {/* Duration Explosion Chart */}
           <div className="card card-span-2">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0 }}>Workflow Duration Over Time (with Explosion Detection)</h3>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
+                Workflow Duration Over Time (with Explosion Detection)
+                <InfoIcon explanation={{
+                  title: 'Workflow Duration Over Time (with Explosion Detection)',
+                  text: 'A line chart showing workflow duration trends over time with automatic detection of "duration explosions" - sudden increases in execution time. Worsening points are highlighted with warning indicators. Select a specific workflow from the dropdown to focus on individual workflows. Use the brush to zoom into specific time periods. This helps identify performance regressions and optimization opportunities.'
+                }} />
+              </h3>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <select 
                   value={selectedWorkflowForDuration}
@@ -2916,7 +3142,13 @@ export default function Dashboard() {
           {/* Failure Worsening Chart */}
           <div className="card card-span-2">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0 }}>Failure Rate Over Time (Worsening Detection)</h3>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
+                Failure Rate Over Time (Worsening Detection)
+                <InfoIcon explanation={{
+                  title: 'Failure Rate Over Time (Worsening Detection)',
+                  text: 'A line chart showing the failure rate percentage over time with automatic detection of "worsening" periods - when failure rates increase significantly compared to previous periods. Worsening points are highlighted with warning indicators and include links to the commits that may have caused the issue. Use the brush to zoom into specific time periods. This helps identify when and why workflows started failing more frequently.'
+                }} />
+              </h3>
               <button
                 onClick={() => {
                   setFailureWorseningZoom(null);
