@@ -4,16 +4,71 @@ from datetime import datetime, timezone, timedelta
 import time
 import math
 import logging
+import sys
+import os
 
+# Try to import performance logger
+try:
+    # Add backend root to path
+    backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+    from core.utils.logger import get_performance_logger
+    PERFORMANCE_LOGGING = True
+except ImportError:
+    PERFORMANCE_LOGGING = False
 
 
 def get_request(url, token):
     headers = {'Authorization': f'token {token}'}
     attempt = 0
     while attempt < 5:
+        # Start timing for API call
+        start_time = time.time()
         response = requests.get(url, headers=headers)
+        duration = time.time() - start_time
+
         if response.status_code == 200:
-            return response.json()
+            # Parse JSON once so we can log richer information
+            try:
+                data = response.json()
+            except ValueError:
+                data = None
+
+            # Log API call duration (with counts when possible)
+            if PERFORMANCE_LOGGING:
+                try:
+                    perf_logger = get_performance_logger()
+                    # Extract API endpoint type from URL
+                    if '/actions/runs' in url and '/jobs' in url:
+                        api_type = "JOBS_API"
+                    elif '/actions/runs' in url:
+                        api_type = "WORKFLOW_RUNS_API"
+                    elif '/actions/workflows' in url:
+                        api_type = "WORKFLOW_RUNS_API"
+                    else:
+                        api_type = "OTHER_API"
+
+                    # Build base log message
+                    log_msg = f"API_CALL - {api_type} - URL: {url} - Duration: {duration:.3f}s - Status: {response.status_code}"
+
+                    # Enrich with counts when we can infer them from the payload
+                    if isinstance(data, dict):
+                        # Jobs endpoint: add number of jobs returned
+                        if api_type == "JOBS_API" and 'jobs' in data and isinstance(data['jobs'], list):
+                            jobs_count = len(data['jobs'])
+                            log_msg += f" - Jobs: {jobs_count}"
+                        # Workflow runs endpoint: add number of runs returned
+                        elif api_type == "WORKFLOW_RUNS_API" and 'workflow_runs' in data and isinstance(data['workflow_runs'], list):
+                            runs_count = len(data['workflow_runs'])
+                            log_msg += f" - Runs: {runs_count}"
+
+                    perf_logger.info(log_msg)
+                except Exception:
+                    # Don't break if logging fails
+                    pass
+
+            return data
         elif response.status_code == 403 and 'X-RateLimit-Reset' in response.headers:
             reset_time = datetime.fromtimestamp(int(response.headers['X-RateLimit-Reset']), timezone.utc)
             sleep_time = (reset_time - datetime.now(timezone.utc)).total_seconds() + 10

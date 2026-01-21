@@ -25,21 +25,27 @@ git clone https://github.com/stilab-ets/GHA-Dashboard.git
 
 **Note**: If you don't have Git installed, you can download the project directly from [https://github.com/stilab-ets/GHA-Dashboard](https://github.com/stilab-ets/GHA-Dashboard) by clicking the green "Code" button and selecting "Download ZIP", then unzip the downloaded file.
 
-### Step 3: Run the backend server
+### Step 3: Install backend dependencies
 
 ```bash
 cd GHA-Dashboard/backend
+pip install -r requirements.txt
+```
+
+### Step 4: Run the backend server
+
+```bash
 python app.py
 ```
 
-### Step 4: Load the extension in Chrome
+### Step 5: Load the extension in Chrome
 
 1. Open Chrome and go to `chrome://extensions/`
 2. Enable **Developer mode** (top right)
 3. Click **Load unpacked**
 4. Select the folder: `GHA-Dashboard/extension/build/`
 
-### Step 5: Add your GitHub access token
+### Step 6: Add your GitHub access token
 
 1. **Generate a GitHub token** (in case you don't have one)
    - Go to: https://github.com/settings/tokens
@@ -54,18 +60,26 @@ python app.py
 
 ## 2) Data Collection & Navigation
 
-### Step 6: Open the target repository
+### Step 7: Open the target repository
 
 Go to: https://github.com/AUTOMATIC1111/stable-diffusion-webui
 
-### Step 7: Open the GHA Dashboard
+### Step 8: Open the GHA Dashboard
 
 From the repository's middle menu, click on the **GHA Dashboard** tab added by the extension.
 
-### Step 8: Start data collection
+### Step 9: Start data collection
 
 Click **Start Data Collection** and wait until the process completes.
 
+<<<<<<< Updated upstream
+=======
+### Step 10: Submit your honest feedback
+
+After using GHA-Dashboard, please fill out this short form (2-3 miniutes) to submit your feedback
+https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKIqqWU9w--jA/viewform?usp=dialog
+
+>>>>>>> Stashed changes
 ## Contributing
 
 ### Development Workflow

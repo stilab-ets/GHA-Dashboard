@@ -12,9 +12,32 @@ from dataclasses import dataclass
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
+# Try to use gevent for background tasks (if available)
+try:
+    from gevent import spawn, sleep as gevent_sleep
+    GEVENT_AVAILABLE = True
+except ImportError:
+    import threading
+    GEVENT_AVAILABLE = False
+
+# Import time for sleep (needed for non-gevent case)
+import time
+
+# Add backend to path for logger
+backend_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_path not in sys.path:
+    sys.path.insert(0, backend_path)
+
 # Import GHAminer streaming wrapper
 from ghaminer_stream import stream_workflow_runs_phase1, stream_job_details_phase2, load_config
 import time
+
+# Try to import performance logger
+try:
+    from core.utils.logger import setup_performance_logger
+    PERFORMANCE_LOGGING = True
+except ImportError:
+    PERFORMANCE_LOGGING = False
 
 
 @dataclass
@@ -37,6 +60,35 @@ def json_default(o: Any):
         return str(o)
 
 
+def _send_keepalive_periodic(ws: Any, stop_flag: list):
+    """
+    Background task that sends keepalive messages every 30 seconds
+    to prevent WebSocket timeout during rate limit waits.
+    Uses gevent if available, otherwise falls back to threading.
+    """
+    while not stop_flag[0]:
+        # Wait 30 seconds
+        if GEVENT_AVAILABLE:
+            gevent_sleep(30)
+        else:
+            time.sleep(30)
+        
+        # Check if we should stop
+        if stop_flag[0]:
+            break
+        
+        # Send keepalive message
+        try:
+            keepalive_msg = {
+                "type": "keepalive",
+                "message": "Connection alive - waiting for API rate limit..."
+            }
+            ws.send(json.dumps(keepalive_msg, default=json_default))
+        except Exception:
+            # Connection might be closed, stop
+            break
+
+
 def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None):
     """
     Stream workflow runs and jobs from GHAminer via WebSocket
@@ -44,6 +96,13 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
     print(f"[WebSocket] ========================================")
     print(f"[WebSocket] Starting GHAminer collection for {repo}")
     print(f"[WebSocket] ========================================")
+    
+    # Set up performance logger with repo name
+    if PERFORMANCE_LOGGING:
+        try:
+            setup_performance_logger(repo)
+        except Exception as e:
+            print(f"[WebSocket] Warning: Could not set up performance logger: {e}")
     
     if not token:
         token = os.getenv("GITHUB_TOKEN")
@@ -56,6 +115,21 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         ws.send(json.dumps(error_msg))
         ws.close()
         return
+    
+    # Start background keepalive task to prevent timeout during rate limit waits
+    # Use a list for mutable flag (works with both gevent and threading)
+    keepalive_stop = [False]
+    if GEVENT_AVAILABLE:
+        keepalive_task = spawn(_send_keepalive_periodic, ws, keepalive_stop)
+        print(f"[WebSocket] Started periodic keepalive task (every 30s) using gevent to prevent timeout during rate limit waits")
+    else:
+        keepalive_thread = threading.Thread(
+            target=_send_keepalive_periodic,
+            args=(ws, keepalive_stop),
+            daemon=True
+        )
+        keepalive_thread.start()
+        print(f"[WebSocket] Started periodic keepalive thread (every 30s) to prevent timeout during rate limit waits")
     
     try:
         # Load GHAminer config
@@ -261,5 +335,10 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             print("[WebSocket] Failed to send error message")
     
     finally:
+        # Stop the keepalive task/thread
+        keepalive_stop[0] = True
+        if not GEVENT_AVAILABLE and 'keepalive_thread' in locals():
+            if keepalive_thread.is_alive():
+                keepalive_thread.join(timeout=1.0)
         print(f"[WebSocket] Closing connection")
         ws.close()
