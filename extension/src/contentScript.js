@@ -56,16 +56,52 @@
   /* ---------------------------------------------------------
    * Create Dashboard Button
    * --------------------------------------------------------- */
+  let injectRetryCount = 0;
+  const MAX_INJECT_RETRIES = 20; // Try for up to 2 seconds (20 * 100ms)
+  
   const injectDashboardButton = () => {
-    if (document.querySelector("#gha-dashboard-nav-button")) return;
+    // Don't inject if already exists
+    if (document.querySelector("#gha-dashboard-nav-button")) {
+      injectRetryCount = 0; // Reset counter on success
+      return;
+    }
 
+    // Try multiple selectors to find the navigation container
     const nav =
       document.querySelector('nav[aria-label="Repository"]') ||
       document.querySelector('.UnderlineNav-body') ||
-      document.querySelector('[data-pjax-container] nav ul');
+      document.querySelector('[data-pjax-container] nav ul') ||
+      document.querySelector('nav.UnderlineNav ul.UnderlineNav-body');
 
     if (!nav) {
-      console.log('[GHA Dashboard] Navigation bar not found, retrying...');
+      injectRetryCount++;
+      if (injectRetryCount < MAX_INJECT_RETRIES) {
+        console.log(`[GHA Dashboard] Navigation bar not found, retrying... (${injectRetryCount}/${MAX_INJECT_RETRIES})`);
+        setTimeout(injectDashboardButton, 100);
+        return;
+      } else {
+        console.log('[GHA Dashboard] Navigation bar not found after max retries, will observe DOM for it');
+        injectRetryCount = 0;
+        // Set up a MutationObserver to watch for navigation bar
+        observeForNavigationBar();
+        return;
+      }
+    }
+
+    // Reset retry count on success
+    injectRetryCount = 0;
+
+    // Find the nav list - try multiple approaches
+    let navList = nav.querySelector('ul.UnderlineNav-body');
+    if (!navList) {
+      navList = nav.querySelector('ul');
+    }
+    if (!navList && nav.tagName === 'UL') {
+      navList = nav;
+    }
+
+    if (!navList) {
+      console.log('[GHA Dashboard] Navigation list not found, retrying...');
       setTimeout(injectDashboardButton, 100);
       return;
     }
@@ -93,14 +129,7 @@
     });
 
     navItem.appendChild(button);
-    
-    const navList = nav.querySelector('ul.UnderlineNav-body');
-    
-    if (navList) {
-      navList.appendChild(navItem);
-    } else {
-      nav.appendChild(navItem);
-    }
+    navList.appendChild(navItem);
     
     dashboardButton = button;
 
@@ -124,6 +153,61 @@
     });
 
     console.log('[GHA Dashboard] Button injected into navigation bar');
+  };
+
+  /* ---------------------------------------------------------
+   * Observe DOM for navigation bar to appear and persist
+   * --------------------------------------------------------- */
+  let navigationObserver = null;
+  const observeForNavigationBar = () => {
+    // Disconnect existing observer if any
+    if (navigationObserver) {
+      navigationObserver.disconnect();
+      navigationObserver = null;
+    }
+
+    navigationObserver = new MutationObserver((mutations) => {
+      // Check if navigation bar exists but button is missing
+      const nav = document.querySelector('nav[aria-label="Repository"]') ||
+                  document.querySelector('.UnderlineNav-body') ||
+                  document.querySelector('[data-pjax-container] nav ul') ||
+                  document.querySelector('nav.UnderlineNav ul.UnderlineNav-body');
+      
+      const existingButton = document.querySelector("#gha-dashboard-nav-button");
+      
+      // If navigation exists but button doesn't, inject it
+      if (nav && !existingButton) {
+        console.log('[GHA Dashboard] Navigation bar detected, injecting button');
+        injectDashboardButton();
+      }
+      
+      // Check if navigation was replaced (button exists but is orphaned or nav was replaced)
+      if (existingButton) {
+        let buttonInNav = false;
+        if (nav) {
+          buttonInNav = nav.contains(existingButton);
+        }
+        
+        // If button is orphaned or nav doesn't exist, re-inject
+        if (!buttonInNav) {
+          console.log('[GHA Dashboard] Navigation bar was replaced or button orphaned, re-injecting button');
+          existingButton.remove();
+          // Reset retry count to allow fresh injection
+          injectRetryCount = 0;
+          // Small delay to let GitHub finish updating the DOM
+          setTimeout(() => {
+            injectDashboardButton();
+          }, 50);
+        }
+      }
+    });
+
+    // Observe the document body for navigation bar changes
+    navigationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: false
+    });
   };
 
   /* ---------------------------------------------------------
@@ -337,7 +421,10 @@
   // Initialize when DOM is ready
   const initialize = () => {
     if (isGitHubRepoPage()) {
+      // Try injecting immediately
       injectDashboardButton();
+      // Also set up observer to catch navigation bar when it appears/updates
+      observeForNavigationBar();
     }
   };
 
@@ -364,9 +451,15 @@
           originalContent = null;
         }
         dashboardButton = null;
+        injectRetryCount = 0; // Reset retry count on navigation
         
         if (isGitHubRepoPage()) {
-          setTimeout(injectDashboardButton, 100);
+          // Re-setup observer for navigation bar
+          observeForNavigationBar();
+          // Try injecting immediately
+          setTimeout(() => {
+            injectDashboardButton();
+          }, 100);
         }
       }
     }).observe(document.body, { subtree: true, childList: true });
