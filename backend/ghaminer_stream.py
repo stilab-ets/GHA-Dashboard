@@ -5,6 +5,7 @@ Converts GHAminer's batch CSV collection into real-time WebSocket streaming
 import sys
 import os
 import json
+import time
 from datetime import datetime
 from typing import Any, Generator, Dict, List, Optional
 
@@ -13,8 +14,20 @@ ghaminer_src_path = os.path.join(os.path.dirname(__file__), 'ghaminer', 'src')
 if ghaminer_src_path not in sys.path:
     sys.path.insert(0, ghaminer_src_path)
 
+# Add backend to path for logger
+backend_path = os.path.dirname(__file__)
+if backend_path not in sys.path:
+    sys.path.insert(0, backend_path)
+
 import requests
 import yaml
+
+# Try to import performance logger
+try:
+    from core.utils.logger import get_performance_logger
+    PERFORMANCE_LOGGING = True
+except ImportError:
+    PERFORMANCE_LOGGING = False
 
 # Import GHAminer modules
 try:
@@ -157,7 +170,18 @@ def get_total_workflow_runs_count(repo: str, token: str) -> int:
             'X-GitHub-Api-Version': '2022-11-28'
         }
         import requests as req_module
+        
+        # Log API call duration
+        start_time = time.time()
         resp = req_module.get(api_url, headers=headers)
+        duration = time.time() - start_time
+        
+        if PERFORMANCE_LOGGING:
+            try:
+                perf_logger = get_performance_logger()
+                perf_logger.info(f"API_CALL - WORKFLOW_RUNS_COUNT_API - URL: {api_url} - Duration: {duration:.3f}s - Status: {resp.status_code}")
+            except:
+                pass
         
         if resp.status_code == 200:
             response = resp.json()
@@ -180,7 +204,15 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
     if config is None:
         config = load_config()
     
+    phase1_start_time = time.time()
     print(f"[GHAminer Stream] Phase 1: Starting workflow runs collection for {repo}")
+    
+    if PERFORMANCE_LOGGING:
+        try:
+            perf_logger = get_performance_logger()
+            perf_logger.info(f"PHASE_START - PHASE_1_WORKFLOW_RUNS_COLLECTION - Repository: {repo}")
+        except:
+            pass
     
     # Get total count upfront
     total_count = get_total_workflow_runs_count(repo, token)
@@ -204,24 +236,67 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
         while True:
             # Fetch workflow runs page
             api_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_id}/runs?page={page}&per_page=100"
-            
+
             # Use requests directly to get Link header for pagination
             headers = {'Authorization': f'token {token}'}
             import requests as req_module
+
+            # Measure API call duration
+            start_time = time.time()
             resp = req_module.get(api_url, headers=headers)
-            
+            duration = time.time() - start_time
+
             if resp.status_code != 200:
+                if PERFORMANCE_LOGGING:
+                    try:
+                        perf_logger = get_performance_logger()
+                        perf_logger.info(
+                            f"API_CALL - WORKFLOW_RUNS_API - URL: {api_url} - Duration: {duration:.3f}s "
+                            f"- Status: {resp.status_code} - Page: {page} - Runs: 0"
+                        )
+                    except Exception:
+                        pass
                 print(f"[GHAminer Stream] Failed to fetch page {page}: {resp.status_code}")
                 break
-            
+
             response = resp.json()
-            
+
             if not response or 'workflow_runs' not in response:
+                if PERFORMANCE_LOGGING:
+                    try:
+                        perf_logger = get_performance_logger()
+                        perf_logger.info(
+                            f"API_CALL - WORKFLOW_RUNS_API - URL: {api_url} - Duration: {duration:.3f}s "
+                            f"- Status: {resp.status_code} - Page: {page} - Runs: 0"
+                        )
+                    except Exception:
+                        pass
                 break
-            
+
             workflow_runs = response.get('workflow_runs', [])
+            runs_count = len(workflow_runs)
             if not workflow_runs:
+                if PERFORMANCE_LOGGING:
+                    try:
+                        perf_logger = get_performance_logger()
+                        perf_logger.info(
+                            f"API_CALL - WORKFLOW_RUNS_API - URL: {api_url} - Duration: {duration:.3f}s "
+                            f"- Status: {resp.status_code} - Page: {page} - Runs: 0"
+                        )
+                    except Exception:
+                        pass
                 break
+
+            # Log successful call including how many runs were returned
+            if PERFORMANCE_LOGGING:
+                try:
+                    perf_logger = get_performance_logger()
+                    perf_logger.info(
+                        f"API_CALL - WORKFLOW_RUNS_API - URL: {api_url} - Duration: {duration:.3f}s "
+                        f"- Status: {resp.status_code} - Page: {page} - Runs: {runs_count}"
+                    )
+                except Exception:
+                    pass
             
             print(f"[GHAminer Stream] Processing page {page} of workflow {workflow_id}: {len(workflow_runs)} runs")
             
@@ -280,7 +355,15 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
             else:
                 break
     
+    phase1_duration = time.time() - phase1_start_time
     print(f"[GHAminer Stream] Phase 1 complete: {total_runs} runs collected")
+    
+    if PERFORMANCE_LOGGING:
+        try:
+            perf_logger = get_performance_logger()
+            perf_logger.info(f"PHASE_END - PHASE_1_WORKFLOW_RUNS_COLLECTION - Total Duration: {phase1_duration:.3f}s - Total Runs: {total_runs}")
+        except:
+            pass
 
 
 def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, Any]], config: dict = None) -> Generator[tuple[Dict[str, Any], int, int], None, None]:
@@ -295,8 +378,16 @@ def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, An
         print(f"[GHAminer Stream] Phase 2: Skipped (fetch_job_details=False)")
         return
     
+    phase2_start_time = time.time()
     total_runs = len(all_runs)
     print(f"[GHAminer Stream] Phase 2: Starting job details collection for {total_runs} runs")
+    
+    if PERFORMANCE_LOGGING:
+        try:
+            perf_logger = get_performance_logger()
+            perf_logger.info(f"PHASE_START - PHASE_2_JOBS_COLLECTION - Repository: {repo} - Total Runs: {total_runs}")
+        except:
+            pass
     
     for idx, dashboard_run in enumerate(all_runs):
         # Dashboard dicts use 'id' field
@@ -361,7 +452,15 @@ def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, An
                 dashboard_run['jobs'] = []
             yield (dashboard_run, idx + 1, total_runs)
     
+    phase2_duration = time.time() - phase2_start_time
     print(f"[GHAminer Stream] Phase 2 complete: Job details collected for {total_runs} runs")
+    
+    if PERFORMANCE_LOGGING:
+        try:
+            perf_logger = get_performance_logger()
+            perf_logger.info(f"PHASE_END - PHASE_2_JOBS_COLLECTION - Total Duration: {phase2_duration:.3f}s - Total Runs: {total_runs}")
+        except:
+            pass
 
 
 def stream_ghaminer_data(repo: str, token: str, config: dict = None) -> Generator[Dict[str, Any], None, None]:

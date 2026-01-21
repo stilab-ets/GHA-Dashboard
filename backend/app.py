@@ -140,7 +140,15 @@ if __name__ == "__main__":
         try:
             from gevent import pywsgi
             print("Using gevent WSGI server (WebSocket support for Flask-Sock)")
-            server = pywsgi.WSGIServer(('0.0.0.0', port), app, log=None)
+            # Note: WSGIServer doesn't support timeout parameter directly
+            # Instead, we use periodic keepalive messages (every 30s) to prevent connection timeouts
+            # during GitHub API rate limit waits
+            server = pywsgi.WSGIServer(
+                ('0.0.0.0', port), 
+                app, 
+                log=None
+            )
+            print(f"WebSocket server configured - using periodic keepalive messages to prevent timeout during rate limit waits")
             server.serve_forever()
         except Exception as e:
             print(f"WARNING: Error starting gevent server: {e}")
