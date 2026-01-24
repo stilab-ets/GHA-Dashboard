@@ -137,6 +137,21 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         print(f"[WebSocket] GHAminer config loaded: fetch_job_details={config.get('fetch_job_details', True)}")
         
         all_runs_list = []
+        new_runs_count = 0
+        existing_runs_count = 0
+        
+        # Check if we have existing data and send it immediately if no new collection needed
+        # This allows the frontend to show data right away
+        try:
+            from data.persistence import DataPersistence
+            persistence = DataPersistence()
+            existing_runs_dict = persistence.get_all_runs(repo)
+            if existing_runs_dict:
+                existing_runs_list = list(existing_runs_dict.values())
+                existing_runs_count = len(existing_runs_list)
+                print(f"[WebSocket] Found {existing_runs_count} existing runs in cache")
+        except Exception as e:
+            print(f"[WebSocket] Could not check existing data: {e}")
         
         # ========================================
         # PHASE 1: Collect all workflow runs (without jobs)
@@ -149,10 +164,12 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         last_keepalive = 0
         estimated_total = 0
         
-        for dashboard_run, current_count, estimated, all_runs in stream_workflow_runs_phase1(repo, token, config):
+        for dashboard_run, current_count, estimated, all_runs, new_count, existing_count in stream_workflow_runs_phase1(repo, token, config):
             all_runs_list = all_runs  # Keep updating
             total_runs = current_count
             estimated_total = estimated
+            new_runs_count = new_count
+            existing_runs_count = existing_count
             batch.append(dashboard_run)
             
             # Calculate elapsed time and ETA for Phase 1
@@ -169,11 +186,13 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     "hasMore": True,
                     "phase": "workflow_runs",
                     "totalRuns": estimated_total,
+                    "newRuns": new_runs_count,
+                    "existingRuns": existing_runs_count,
                     "elapsed_time": elapsed_time,
                     "eta_seconds": eta_seconds
                 }
                 ws.send(json.dumps(msg, default=json_default))
-                print(f"[WebSocket] Sent batch: {len(batch)} runs (total: {total_runs}/{estimated_total} runs)")
+                print(f"[WebSocket] Sent batch: {len(batch)} runs (total: {total_runs}/{estimated_total} runs, new: {new_runs_count}, existing: {existing_runs_count})")
                 batch.clear()
                 last_keepalive = total_runs
             
@@ -199,6 +218,8 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                 "hasMore": False,
                 "phase": "workflow_runs",
                 "totalRuns": total_runs,
+                "newRuns": new_runs_count,
+                "existingRuns": existing_runs_count,
                 "elapsed_time": elapsed_time,
                 "eta_seconds": None
             }
@@ -211,96 +232,135 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             "type": "phase_complete",
             "phase": "workflow_runs",
             "totalRuns": total_runs,
+            "newRuns": new_runs_count,
+            "existingRuns": existing_runs_count,
             "elapsed_time": phase1_elapsed
         }
         ws.send(json.dumps(phase1_complete_msg, default=json_default))
-        print(f"[WebSocket] Phase 1 complete: {total_runs} runs collected in {phase1_elapsed:.2f} seconds")
+        print(f"[WebSocket] Phase 1 complete: {total_runs} total runs ({new_runs_count} new, {existing_runs_count} existing) in {phase1_elapsed:.2f} seconds")
         
         # ========================================
         # PHASE 2: Collect job details (if enabled)
+        # Always run Phase 2 if we have runs (even if Phase 1 collected 0 new runs)
         # ========================================
-        if config.get("fetch_job_details", True) and all_runs_list:
-            print(f"[WebSocket] Starting Phase 2: Job details collection")
-            phase2_start_time = time.time()
-            phase2_batch_size = 50  # Smaller batches for job details
-            batch = []
-            jobs_collected = 0
-            last_keepalive = 0
+        if config.get("fetch_job_details", True):
+            # Ensure we have runs for Phase 2
+            if not all_runs_list:
+                # Try to load existing runs from persistence
+                try:
+                    from data.persistence import DataPersistence
+                    persistence = DataPersistence()
+                    all_existing_runs_dict = persistence.get_all_runs(repo)
+                    all_runs_list = list(all_existing_runs_dict.values())
+                    print(f"[WebSocket] Loaded {len(all_runs_list)} existing runs for Phase 2")
+                except Exception as e:
+                    print(f"[WebSocket] Warning: Failed to load existing runs for Phase 2: {e}")
             
-            for updated_run, current_count, total_runs_count in stream_job_details_phase2(repo, token, all_runs_list, config):
-                # Count jobs
-                if updated_run.get('jobs'):
-                    jobs_collected += len(updated_run['jobs'])
+            if all_runs_list:
+                print(f"[WebSocket] Starting Phase 2: Job details collection")
+                phase2_start_time = time.time()
+                phase2_batch_size = 50  # Smaller batches for job details
+                batch = []
+                jobs_collected = 0
+                last_keepalive = 0
                 
-                batch.append(updated_run)
+                for updated_run, current_count, total_runs_count in stream_job_details_phase2(repo, token, all_runs_list, config):
+                    # Count jobs
+                    if updated_run.get('jobs'):
+                        jobs_collected += len(updated_run['jobs'])
+                    
+                    batch.append(updated_run)
+                    
+                    # Calculate elapsed time and ETA for Phase 2
+                    elapsed_time = time.time() - phase2_start_time
+                    runs_per_second = current_count / elapsed_time if elapsed_time > 0 else 0
+                    eta_seconds = (total_runs_count - current_count) / runs_per_second if runs_per_second > 0 and total_runs_count > current_count else None
+                    
+                    # Send batch to frontend (batch size 50 for Phase 2)
+                    if len(batch) >= phase2_batch_size:
+                        msg = {
+                            "type": "runs",
+                            "data": batch,
+                            "page": (current_count // phase2_batch_size) + 1,
+                            "hasMore": True,
+                            "phase": "jobs",
+                            "totalRuns": total_runs_count,
+                            "elapsed_time": elapsed_time,
+                            "eta_seconds": eta_seconds
+                        }
+                        ws.send(json.dumps(msg, default=json_default))
+                        print(f"[WebSocket] Sent batch: {len(batch)} runs (total: {current_count}/{total_runs_count} runs, {jobs_collected} jobs)")
+                        batch.clear()
+                        last_keepalive = current_count
+                    
+                    # Send job progress update (with timing info)
+                    if current_count % 10 == 0 or current_count == total_runs_count:
+                        job_progress_msg = {
+                            "type": "job_progress",
+                            "runs_processed": current_count,
+                            "total_runs": total_runs_count,
+                            "jobs_collected": jobs_collected,
+                            "elapsed_time": elapsed_time,
+                            "eta_seconds": eta_seconds
+                        }
+                        try:
+                            ws.send(json.dumps(job_progress_msg, default=json_default))
+                        except:
+                            pass
+                    
+                    # Send keepalive every 50 runs to prevent timeout
+                    if current_count - last_keepalive >= 50:
+                        keepalive_msg = {
+                            "type": "log",
+                            "message": f"Phase 2: Still collecting job details... {current_count}/{total_runs_count} runs processed"
+                        }
+                        try:
+                            ws.send(json.dumps(keepalive_msg, default=json_default))
+                            last_keepalive = current_count
+                        except:
+                            pass
                 
-                # Calculate elapsed time and ETA for Phase 2
-                elapsed_time = time.time() - phase2_start_time
-                runs_per_second = current_count / elapsed_time if elapsed_time > 0 else 0
-                eta_seconds = (total_runs_count - current_count) / runs_per_second if runs_per_second > 0 and total_runs_count > current_count else None
-                
-                # Send batch to frontend (batch size 50 for Phase 2)
-                if len(batch) >= phase2_batch_size:
+                # Send remaining Phase 2 batch
+                if batch:
+                    elapsed_time = time.time() - phase2_start_time
                     msg = {
                         "type": "runs",
                         "data": batch,
-                        "page": (current_count // phase2_batch_size) + 1,
-                        "hasMore": True,
+                        "page": (len(all_runs_list) // phase2_batch_size) + 1,
+                        "hasMore": False,
                         "phase": "jobs",
-                        "totalRuns": total_runs_count,
+                        "totalRuns": len(all_runs_list),
                         "elapsed_time": elapsed_time,
-                        "eta_seconds": eta_seconds
+                        "eta_seconds": None
                     }
                     ws.send(json.dumps(msg, default=json_default))
-                    print(f"[WebSocket] Sent batch: {len(batch)} runs (total: {current_count}/{total_runs_count} runs, {jobs_collected} jobs)")
-                    batch.clear()
-                    last_keepalive = current_count
+                    print(f"[WebSocket] Sent final Phase 2 batch: {len(batch)} runs")
                 
-                # Send job progress update (with timing info)
-                if current_count % 10 == 0 or current_count == total_runs_count:
-                    job_progress_msg = {
-                        "type": "job_progress",
-                        "runs_processed": current_count,
-                        "total_runs": total_runs_count,
-                        "jobs_collected": jobs_collected,
-                        "elapsed_time": elapsed_time,
-                        "eta_seconds": eta_seconds
-                    }
-                    try:
-                        ws.send(json.dumps(job_progress_msg, default=json_default))
-                    except:
-                        pass
+                phase2_elapsed = time.time() - phase2_start_time
+                total_jobs = jobs_collected
                 
-                # Send keepalive every 50 runs to prevent timeout
-                if current_count - last_keepalive >= 50:
-                    keepalive_msg = {
-                        "type": "log",
-                        "message": f"Phase 2: Still collecting job details... {current_count}/{total_runs_count} runs processed"
-                    }
-                    try:
-                        ws.send(json.dumps(keepalive_msg, default=json_default))
-                        last_keepalive = current_count
-                    except:
-                        pass
-            
-            # Send remaining Phase 2 batch
-            if batch:
-                elapsed_time = time.time() - phase2_start_time
-                msg = {
-                    "type": "runs",
-                    "data": batch,
-                    "page": (len(all_runs_list) // phase2_batch_size) + 1,
-                    "hasMore": False,
-                    "phase": "jobs",
-                    "totalRuns": len(all_runs_list),
-                    "elapsed_time": elapsed_time,
-                    "eta_seconds": None
-                }
-                ws.send(json.dumps(msg, default=json_default))
-                print(f"[WebSocket] Sent final Phase 2 batch: {len(batch)} runs")
-            
-            phase2_elapsed = time.time() - phase2_start_time
-            total_jobs = jobs_collected
+                # If no runs were processed in Phase 2 but we have existing runs, send them now
+                # This ensures the frontend has the data even when all jobs already exist
+                if len(all_runs_list) > 0 and jobs_collected == 0 and new_runs_count == 0:
+                    print(f"[WebSocket] Sending {len(all_runs_list)} existing runs to frontend (no new data collected)")
+                    # Send all existing runs in batches
+                    batch_size = 100
+                    for i in range(0, len(all_runs_list), batch_size):
+                        batch = all_runs_list[i:i + batch_size]
+                        msg = {
+                            "type": "runs",
+                            "data": batch,
+                            "page": (i // batch_size) + 1,
+                            "hasMore": i + batch_size < len(all_runs_list),
+                            "phase": "jobs",
+                            "totalRuns": len(all_runs_list),
+                            "elapsed_time": phase2_elapsed,
+                            "eta_seconds": None
+                        }
+                        ws.send(json.dumps(msg, default=json_default))
+            else:
+                phase2_elapsed = 0
+                total_jobs = 0
         else:
             phase2_elapsed = 0
             total_jobs = 0
@@ -310,6 +370,8 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             "type": "complete",
             "phase": "jobs" if config.get('fetch_job_details', True) else "workflow_runs",
             "totalRuns": total_runs,
+            "newRuns": new_runs_count,
+            "existingRuns": existing_runs_count,
             "totalJobs": total_jobs,
             "elapsed_time": phase1_elapsed + phase2_elapsed
         }
@@ -317,7 +379,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         
         print(f"[WebSocket] ========================================")
         print(f"[WebSocket] Collection complete!")
-        print(f"[WebSocket] Total runs: {total_runs}")
+        print(f"[WebSocket] Total runs: {total_runs} ({new_runs_count} new, {existing_runs_count} existing)")
         print(f"[WebSocket] Total jobs: {total_jobs}")
         print(f"[WebSocket] Phase 1 time: {phase1_elapsed:.2f} seconds")
         print(f"[WebSocket] Phase 2 time: {phase2_elapsed:.2f} seconds")

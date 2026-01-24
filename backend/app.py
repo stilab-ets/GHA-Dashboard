@@ -94,6 +94,95 @@ def websocket_data(ws, repositoryName: str):
 
 
 # ============================================
+# Data Check Endpoint
+# ============================================
+@app.route("/api/data/check/<path:repositoryName>")
+def check_data(repositoryName: str):
+    """
+    Check if data exists for a repository and return metadata.
+    """
+    from urllib.parse import unquote
+    repo = unquote(repositoryName)
+    
+    # Validate repository format
+    if "/" not in repo or repo.count("/") != 1:
+        return jsonify({
+            "error": f"Invalid repository format: {repo}. Expected format: owner/repo"
+        }), 400
+    
+    try:
+        from data.persistence import DataPersistence
+        persistence = DataPersistence()
+        
+        # Check if data exists
+        all_runs = persistence.get_all_runs(repo)
+        runs_with_jobs = persistence.get_runs_with_jobs(repo)
+        
+        # Get last updated time
+        data = persistence._load_data(repo)
+        last_updated = data.get('last_updated')
+        
+        if all_runs:
+            return jsonify({
+                "exists": True,
+                "totalRuns": len(all_runs),
+                "runsWithJobs": len(runs_with_jobs),
+                "lastUpdated": last_updated
+            }), 200
+        else:
+            return jsonify({
+                "exists": False,
+                "totalRuns": 0,
+                "runsWithJobs": 0,
+                "lastUpdated": None
+            }), 200
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/data/load/<path:repositoryName>")
+def load_data(repositoryName: str):
+    """
+    Load existing data for a repository.
+    """
+    from urllib.parse import unquote
+    repo = unquote(repositoryName)
+    
+    # Validate repository format
+    if "/" not in repo or repo.count("/") != 1:
+        return jsonify({
+            "error": f"Invalid repository format: {repo}. Expected format: owner/repo"
+        }), 400
+    
+    try:
+        from data.persistence import DataPersistence
+        persistence = DataPersistence()
+        
+        # Load all runs
+        all_runs_dict = persistence.get_all_runs(repo)
+        all_runs = list(all_runs_dict.values())
+        
+        # Load jobs for each run
+        for run in all_runs:
+            run_id = str(run.get('id', ''))
+            if run_id:
+                jobs = persistence.get_jobs_for_run(repo, run_id)
+                if jobs:
+                    run['jobs'] = jobs
+        
+        return jsonify({
+            "runs": all_runs,
+            "totalRuns": len(all_runs)
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+# ============================================
 # Debug Endpoint
 # ============================================
 @app.route("/api/debug")
