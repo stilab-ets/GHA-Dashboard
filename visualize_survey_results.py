@@ -214,11 +214,23 @@ def create_likert_chart(data, questions, labels, title, filename):
 
 def create_software_dev_experience_chart(data, filename='software_dev_experience_chart.png'):
     """Create bar chart for Software Development Experience."""
-    fig, ax = plt.subplots(figsize=(10, 7))
-    
     # Software Development Experience
     dev_exp = data['Years of Experience in Software Development:'].value_counts()
     total = len(data)
+    
+    # Print results
+    print("\n" + "=" * 60)
+    print("Software Development Experience Results")
+    print("=" * 60)
+    print(f"{'Years Experience':<25} {'Participants':<15} {'Percentage':<15}")
+    print("-" * 60)
+    for years, count in dev_exp.items():
+        percentage = (count / total) * 100
+        print(f"{str(years):<25} {int(count):<15} {percentage:.1f}%")
+    print(f"{'Total':<25} {total:<15} {'100.0%':<15}")
+    print("=" * 60)
+    
+    fig, ax = plt.subplots(figsize=(10, 7))
     colors = sns.color_palette("viridis", len(dev_exp))
     bars = ax.bar(range(len(dev_exp)), dev_exp.values, color=colors, 
                    edgecolor='white', linewidth=2.5)
@@ -254,11 +266,23 @@ def create_software_dev_experience_chart(data, filename='software_dev_experience
 
 def create_workflow_experience_chart(data, filename='workflow_experience_chart.png'):
     """Create bar chart for Workflow/Pipeline Experience."""
-    fig, ax = plt.subplots(figsize=(10, 7))
-    
     # Workflow/Pipeline Experience
     workflow_exp = data['Years of Experience in automated Workflows / Pipelines:'].value_counts()
     total = len(data)
+    
+    # Print results
+    print("\n" + "=" * 60)
+    print("Workflow/Pipeline Experience Results")
+    print("=" * 60)
+    print(f"{'Years Experience':<25} {'Participants':<15} {'Percentage':<15}")
+    print("-" * 60)
+    for years, count in workflow_exp.items():
+        percentage = (count / total) * 100
+        print(f"{str(years):<25} {int(count):<15} {percentage:.1f}%")
+    print(f"{'Total':<25} {total:<15} {'100.0%':<15}")
+    print("=" * 60)
+    
+    fig, ax = plt.subplots(figsize=(10, 7))
     colors = sns.color_palette("plasma", len(workflow_exp))
     bars = ax.bar(range(len(workflow_exp)), workflow_exp.values, color=colors,
                    edgecolor='white', linewidth=2.5)
