@@ -647,7 +647,7 @@ function calculateTimeToFix(filteredRuns) {
 // ============================================
 // Convert raw runs to Dashboard format
 // ============================================
-function convertRunsToDashboard(runs, repo, filters) {
+export function convertRunsToDashboard(runs, repo, filters) {
   if (!runs || runs.length === 0) {
     return {
       repo,

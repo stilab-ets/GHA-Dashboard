@@ -1,5 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
-import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally } from '../websocket';
+import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard } from '../websocket';
+
+// We need to access the internal convertRunsToDashboard function
+// Since it's not exported, we'll use filterRunsLocally which uses it internally
 import '../styles/dashboardStyles.css';
 import {
   ResponsiveContainer,
@@ -298,6 +301,10 @@ export default function Dashboard() {
   const [currentRepo, setCurrentRepo] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [collectionStarted, setCollectionStarted] = useState(false);
+  const [dataExists, setDataExists] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [existingRunsCount, setExistingRunsCount] = useState(0);
+  const [checkingData, setCheckingData] = useState(true);
   const prevDatesRef = useRef({ start: defaultStart, end: defaultEnd });
 
   const [openDropdowns, setOpenDropdowns] = useState({
@@ -409,12 +416,175 @@ export default function Dashboard() {
     extractRepo();
   }, []);
 
+  // Check for existing data when repo changes and auto-load it
+  useEffect(() => {
+    if (currentRepo && !collectionStarted && !data) {
+      setCheckingData(true);
+      checkExistingData(currentRepo).then((result) => {
+        setCheckingData(false);
+        if (result && result.exists) {
+          // Auto-load existing data immediately
+          console.log('[Dashboard] Found existing data, auto-loading...');
+          loadExistingData(currentRepo).then((loaded) => {
+            if (loaded) {
+              console.log('[Dashboard] Existing data loaded successfully');
+              // Update data existence status
+              setDataExists(true);
+              setExistingRunsCount(result.totalRuns || 0);
+              setLastUpdated(result.lastUpdated);
+            } else {
+              console.error('[Dashboard] Failed to load existing data');
+            }
+          }).catch((err) => {
+            console.error('[Dashboard] Error in loadExistingData:', err);
+          });
+        } else {
+          setDataExists(false);
+        }
+      }).catch((err) => {
+        console.error('[Dashboard] Error in checkExistingData:', err);
+        setCheckingData(false);
+      });
+    }
+  }, [currentRepo, collectionStarted, data]);
+
   // ============================================
   // Data Loading Functions
   // ============================================
 
+  // Check if data exists for the current repo
+  const checkExistingData = async (repo) => {
+    if (!repo) return;
+    
+    try {
+      const encodedRepo = encodeURIComponent(repo);
+      const response = await fetch(`http://localhost:3000/api/data/check/${encodedRepo}`);
+      if (response.ok) {
+        const result = await response.json();
+        setDataExists(result.exists);
+        setLastUpdated(result.lastUpdated);
+        setExistingRunsCount(result.totalRuns || 0);
+        return result;
+      }
+    } catch (err) {
+      console.error('[Dashboard] Error checking existing data:', err);
+    }
+    return { exists: false };
+  };
+
+  // Load existing data from cache
+  const loadExistingData = async (repo) => {
+    if (!repo) return false;
+    
+    try {
+      const encodedRepo = encodeURIComponent(repo);
+      const response = await fetch(`http://localhost:3000/api/data/load/${encodedRepo}`);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.runs && result.runs.length > 0) {
+          console.log(`[Dashboard] Loaded ${result.runs.length} runs from API`);
+          
+          // Store runs in Chrome storage - this triggers the storage listener in websocket.js
+          if (typeof chrome !== 'undefined' && chrome.storage) {
+            await new Promise((resolve) => {
+              chrome.storage.local.set({ 
+                wsRuns: result.runs,
+                wsStatus: {
+                  isStreaming: false,
+                  isComplete: true,
+                  repo: repo,
+                  totalRuns: result.runs.length
+                }
+              }, () => {
+                // Wait a bit for the storage listener to update _runsByRepo
+                setTimeout(resolve, 200);
+              });
+            });
+          }
+          
+          // Now process the runs into dashboard format
+          // Use convertRunsToDashboard directly (no dependency on _runsByRepo)
+          const processedData = processRunsToDashboardFormat(result.runs, repo);
+          
+          if (processedData) {
+            console.log('[Dashboard] Processed data successfully:', processedData.totalRuns, 'runs');
+            setData(processedData);
+            setDataLoaded(true);
+            setCollectionStarted(true);
+            setLoading(false);
+            return true;
+          } else {
+            console.error('[Dashboard] processRunsToDashboardFormat returned null, runs count:', result.runs.length);
+            // This shouldn't happen now that we use convertRunsToDashboard directly
+            // But if it does, return false so the UI shows the button
+            return false;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Dashboard] Error loading existing data:', err);
+    }
+    return false;
+  };
+
+  // Process runs into dashboard format using convertRunsToDashboard directly
+  const processRunsToDashboardFormat = (runs, repo = null) => {
+    if (!runs || runs.length === 0) {
+      console.log('[Dashboard] processRunsToDashboardFormat: No runs provided');
+      return null;
+    }
+    
+    const repoToUse = repo || currentRepo;
+    if (!repoToUse) {
+      console.error('[Dashboard] processRunsToDashboardFormat: No repo available');
+      return null;
+    }
+    
+    console.log(`[Dashboard] Processing ${runs.length} runs for repo: ${repoToUse}`);
+    
+    // Store runs in Chrome storage - this will trigger the storage listener in websocket.js
+    // which will populate _runsByRepo for future use
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.set({ 
+        wsRuns: runs,
+        wsStatus: {
+          isStreaming: false,
+          isComplete: true,
+          repo: repoToUse,
+          totalRuns: runs.length
+        }
+      });
+    }
+    
+    // Use convertRunsToDashboard directly instead of filterRunsLocally
+    // This avoids the dependency on _runsByRepo being populated
+    const startDate = dateFiltersRef.current.start || filters.start;
+    const endDate = dateFiltersRef.current.end || filters.end;
+    
+    try {
+      const dashboardData = convertRunsToDashboard(runs, repoToUse, {
+        workflow: ['all'],
+        branch: ['all'],
+        actor: ['all'],
+        startDate: startDate,
+        endDate: endDate
+      });
+      
+      if (dashboardData) {
+        console.log(`[Dashboard] Successfully converted to dashboard format: ${dashboardData.totalRuns} runs`);
+      } else {
+        console.error('[Dashboard] convertRunsToDashboard returned null');
+      }
+      
+      return dashboardData;
+    } catch (err) {
+      console.error('[Dashboard] Error in convertRunsToDashboard:', err);
+      return null;
+    }
+  };
+
   // Load data (only when dates change)
-  const loadDashboardData = async () => {
+  const loadDashboardData = async (collectMore = false) => {
     setCollectionStarted(true);
     setLoading(true);
     setError(null);
@@ -498,6 +668,15 @@ export default function Dashboard() {
           });
         }
         
+        // Update collection stats if available
+        if (partialData.newRuns !== undefined) {
+          setProgress(prev => ({
+            ...prev,
+            newRuns: partialData.newRuns,
+            existingRuns: partialData.existingRuns
+          }));
+        }
+        
         // Get the latest filter values from ref (including date range)
         const latestFilters = {
           workflow: filters.workflow,
@@ -509,17 +688,25 @@ export default function Dashboard() {
         
         // Apply local filters using latest filter values (including date range)
         const filteredData = applyLocalFiltersWithFilters(partialData, latestFilters);
-        setData(filteredData);
         
-        setProgress({ 
+        // Always set data, even during collection (not just at the end)
+        // This ensures data is shown as it's collected
+        if (filteredData) {
+          setData(filteredData);
+          setLoading(false);
+        }
+        
+        setProgress(prev => ({ 
+          ...prev,
           items: partialData.totalRuns || 0, 
           complete: isComplete,
           isStreaming: !isComplete
-        });
-        setLoading(false);
+        }));
         
         if (isComplete) {
           setDataLoaded(true);
+          // Update data existence status after collection
+          checkExistingData(repo);
         }
       };
       
@@ -895,6 +1082,18 @@ export default function Dashboard() {
   // If no data but collection has started, show loading or error (already handled above)
   // If we have data, continue to render dashboard
   if (!data) {
+    // Show loading state while checking for existing data
+    if (checkingData) {
+      return (
+        <div className="dashboard dark container">
+          <div style={{ textAlign: 'center', padding: '60px 40px' }}>
+            <h2 style={{ marginBottom: '20px', color: '#fff' }}>GitHub Actions Dashboard</h2>
+            <p style={{ color: '#ccc', fontSize: '16px' }}>Checking for existing data...</p>
+          </div>
+        </div>
+      );
+    }
+    
     // This should not be reached if button logic is correct, but as fallback:
     if (!collectionStarted) {
       return (
@@ -906,7 +1105,7 @@ export default function Dashboard() {
             </p>
             <button 
               className="primary-button" 
-              onClick={loadDashboardData}
+              onClick={() => loadDashboardData(false)}
               style={{
                 padding: '16px 32px',
                 fontSize: '18px',
@@ -1485,40 +1684,62 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
           <h2 style={{ marginTop: 0, marginBottom: 0 }}>GitHub Actions Dashboard</h2>
-          <a
-            href="https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKIqqWU9w--jA/viewform?usp=dialog"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="feedback-button"
-            style={{
-              display: 'inline-block',
-              padding: '10px 20px',
-              backgroundColor: '#4caf50',
-              color: 'white',
-              textDecoration: 'none',
-              borderRadius: '6px',
-              fontWeight: 600,
-              fontSize: '14px',
-              transition: 'all 0.3s ease',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-              border: 'none',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#45a049';
-              e.target.style.transform = 'translateY(-2px)';
-              e.target.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#4caf50';
-              e.target.style.transform = 'translateY(0)';
-              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
-            }}
-          >
-            Submit Feedback Form
-          </a>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+            {/* Collection Info */}
+            {dataExists && lastUpdated && (
+              <div style={{ 
+                fontSize: '14px', 
+                color: '#ccc',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span>📊 {existingRunsCount} runs</span>
+                <span style={{ color: '#666' }}>•</span>
+                <span>Last updated: {new Date(lastUpdated).toLocaleDateString()}</span>
+              </div>
+            )}
+            
+            {progress.isStreaming && (
+              <div style={{ 
+                fontSize: '14px', 
+                color: '#4caf50',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                {progress.newRuns !== undefined && progress.existingRuns !== undefined && (
+                  <>
+                    <span>🆕 {progress.newRuns} new</span>
+                    <span style={{ color: '#666' }}>•</span>
+                    <span>📦 {progress.existingRuns} existing</span>
+                  </>
+                )}
+              </div>
+            )}
+            
+            {dataExists && !progress.isStreaming && (
+              <button
+                onClick={() => loadDashboardData(true)}
+                className="primary-button"
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  background: 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontWeight: '500'
+                }}
+              >
+                🔄 Collect More Data
+              </button>
+            )}
+          </div>
         </div>
         
         {/* Filter Panel */}
