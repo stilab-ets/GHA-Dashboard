@@ -1687,8 +1687,8 @@ export default function Dashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
           <h2 style={{ marginTop: 0, marginBottom: 0 }}>GitHub Actions Dashboard</h2>
           
-          {/* Collection Info */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+            {/* Collection Info */}
             {dataExists && lastUpdated && (
               <div style={{ 
                 fontSize: '14px', 
