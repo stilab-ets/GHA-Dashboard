@@ -14,6 +14,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_sock import Sock
 import json
+import requests
 
 from analysis.endpoint import AggregationFilters, send_data
 from typing import cast
@@ -36,7 +37,52 @@ def health():
         "service": "GHA Dashboard Backend (GHAminer)",
         "ghaminer_configured": os.path.exists(os.path.join(os.path.dirname(__file__), 'ghaminer', 'src', 'config.yaml'))
     }, 200
+    
+    
+# ============================================
+# Authentication Endpoint
+# ============================================
+@app.post("/auth/github")
+def github_auth():
+    data = request.get_json()
+    code = data["code"]
 
+    response = requests.post(
+        "https://github.com/login/oauth/access_token",
+        headers={
+            "Accept": "application/json"
+        },
+        data={
+            "client_id": os.getenv("GITHUB_CLIENT_ID"),
+            "client_secret": os.getenv("GITHUB_CLIENT_SECRET"),
+            "code": code
+        }
+    )
+
+    token_data = response.json()
+    access_token = token_data.get("access_token")
+
+    if not access_token:
+        return jsonify({
+            "success": False,
+            "error": "OAuth exchange failed"
+        }), 401
+        
+    user_response = requests.get(
+        "https://api.github.com/user",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github+json"
+        }
+    )
+    
+    user = user_response.json()
+
+    return jsonify({
+        "success": True,
+        "token": access_token, # TODO: encrypter le token avant de le retourner au client
+        "username": user["login"]
+    })
 
 # ============================================
 # WebSocket Endpoint
