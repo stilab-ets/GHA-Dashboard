@@ -146,3 +146,9 @@ dist
 ### VSCode ###
 .vscode/
 .history/
+
+### Local configuration files ###
+# Extension Key
+extension.pem
+public.pem
+public.der
