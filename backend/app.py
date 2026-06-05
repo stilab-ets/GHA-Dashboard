@@ -13,6 +13,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_sock import Sock
+import argparse
 import json
 import requests
 
@@ -20,6 +21,12 @@ from analysis.endpoint import AggregationFilters, send_data
 from typing import cast
 from datetime import date
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--e2e", action="store_true", help="Enable E2E test mode")
+
+args = parser.parse_args()
+
+E2E_MODE = args.e2e
 
 # Initialize Flask app
 load_dotenv()
@@ -44,6 +51,14 @@ def health():
 # ============================================
 @app.post("/auth/github")
 def github_auth():
+    if E2E_MODE:
+        # In E2E mode, return a dummy token for testing purposes
+        return jsonify({
+            "success": True,
+            "token": os.getenv("TEST_GITHUB_TOKEN"),  # TODO: encode token before sending to client for better security
+            "username": os.getenv("TEST_GITHUB_USERNAME")
+        })
+
     data = request.get_json()
     code = data["code"]
 
@@ -80,7 +95,7 @@ def github_auth():
 
     return jsonify({
         "success": True,
-        "token": access_token, # TODO: encrypter le token avant de le retourner au client
+        "token": access_token, # TODO: encode token before sending to client for better security
         "username": user["login"]
     })
 
