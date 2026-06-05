@@ -1,24 +1,21 @@
 const { test: base, chromium } = require('@playwright/test');
 const path = require('path');
-const os = require('os');
-const fs = require('fs');
 
 exports.test = base.extend({
   context: async ({}, use) => {
     const pathToExtension = path.resolve(__dirname, '..', 'build');
 
-    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-'));
-    const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: process.env.E2E_HEADLESS === 'true',
-
+    const context = await chromium.launchPersistentContext('', {
+      headless: true,
       args: [
         `--disable-extensions-except=${pathToExtension}`,
-        `--load-extension=${pathToExtension}`
+        `--load-extension=${pathToExtension}`,
+        '--no-first-run',
+        '--no-default-browser-check'
       ]
     });
 
     await use(context);
-
     await context.close();
   },
 
@@ -31,13 +28,7 @@ exports.test = base.extend({
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    if (!worker) {
-      throw new Error('Service worker not found');
-    }
-
-    const extensionId = worker.url().split('/')[2];
-
-    await use(extensionId);
+    await use(worker ? worker.url().split('/')[2] : null);
   }
 });
 
