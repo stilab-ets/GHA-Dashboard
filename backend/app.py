@@ -113,7 +113,7 @@ def github_auth():
         # In E2E mode, return a dummy token for testing purposes
         return jsonify({
             "success": True,
-            "token": os.getenv("TEST_GITHUB_TOKEN"),  # TODO: encode token before sending to client for better security
+            "token": os.getenv("TEST_GITHUB_TOKEN"),
             "username": os.getenv("TEST_GITHUB_USERNAME")
         })
 
@@ -153,7 +153,7 @@ def github_auth():
 
     return jsonify({
         "success": True,
-        "token": access_token, # TODO: encode token before sending to client for better security
+        "token": access_token,
         "username": user["login"]
     })
 

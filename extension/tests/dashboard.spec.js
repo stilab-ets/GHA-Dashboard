@@ -22,33 +22,10 @@ test('dashboard button is injected on stable-diffusion repository page', async (
   ).toBeVisible();
 });
 
-test('dashboard iframe opens correctly when dashboard button is clicked', async ({ context }) => {
+test('dashboard page opens correctly when dashboard button is clicked', async ({ context }) => {
   const page = await context.newPage();
 
   await page.goto(REPOSITORY_URL);
-
-  await expect(
-    page.locator('#gha-dashboard-nav-button')
-  ).toBeVisible();
-
-  await page.locator('#gha-dashboard-nav-button').click();
-
-  const dashboardIframe = page.locator(
-    '#gha-dashboard-iframe'
-  );
-
-  await expect(dashboardIframe).toBeVisible();
-
-  const iframeSrc =
-    await dashboardIframe.getAttribute('src');
-
-  expect(iframeSrc).toContain('dashboard.html');
-});
-
-test('dashboard page loads inside iframe', async ({ context }) => {
-  const page = await context.newPage();
-
-  await page.goto('https://github.com/microsoft/playwright');
 
   await page.locator('#gha-dashboard-nav-button').click();
 
