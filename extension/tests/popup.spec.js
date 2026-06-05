@@ -33,13 +33,13 @@ test('save token in chrome.storage.local via popup (direct token access)', async
 
   await page.evaluate(() => {
     return new Promise(resolve => {
-      chrome.storage.local.remove(['githubToken'], () => resolve());
+      chrome.storage.session.remove(['githubToken'], () => resolve());
     });
   });
 
   const before = await page.evaluate(() => {
     return new Promise(resolve => {
-      chrome.storage.local.get(['githubToken'], res => resolve(res.githubToken));
+      chrome.storage.session.get(['githubToken'], res => resolve(res.githubToken));
     });
   });
 
@@ -48,11 +48,11 @@ test('save token in chrome.storage.local via popup (direct token access)', async
   await page.fill('#github-token', testToken);
   await page.click('#save-token');
 
-  await expect(page.locator('#token-status')).toHaveText('Token saved');
+  await expect(page.locator('#token-status')).toHaveText('Token available for this browser session');
 
   const stored = await page.evaluate(() => {
     return new Promise(resolve => {
-      chrome.storage.local.get(['githubToken'], res => {
+      chrome.storage.session.get(['githubToken'], res => {
         resolve(res.githubToken);
       });
     });
@@ -81,13 +81,13 @@ test('save token in chrome.storage.local via popup (oauth flow access)', async (
 
   await page.evaluate(() => {
     return new Promise(resolve => {
-      chrome.storage.local.remove(['githubToken'], () => resolve());
+      chrome.storage.session.remove(['githubToken'], () => resolve());
     });
   });
 
   const before = await page.evaluate(() => {
     return new Promise(resolve => {
-      chrome.storage.local.get(['githubToken'], res => resolve(res.githubToken));
+      chrome.storage.session.get(['githubToken'], res => resolve(res.githubToken));
     });
   });
 
@@ -99,7 +99,7 @@ test('save token in chrome.storage.local via popup (oauth flow access)', async (
 
   const stored = await page.evaluate(() => {
     return new Promise(resolve => {
-      chrome.storage.local.get(['githubToken'], res => {
+      chrome.storage.session.get(['githubToken'], res => {
         resolve(res.githubToken);
       });
     });

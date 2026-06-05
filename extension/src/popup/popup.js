@@ -13,7 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const CLIENT_ID = CONFIG.GITHUB_CLIENT_ID;
   const BACKEND_URL = CONFIG.BACKEND_URL;
 
-  // Pas afficher le token dans le champ. juste dire si cest la ou pas
+  // Don't show token, only say if it's available or not
   chrome.storage.session.get(["githubToken", "githubUsername"], (result) => {
     setAuthenticatedState(Boolean(result.githubToken), result.githubUsername);
   });
