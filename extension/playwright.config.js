@@ -4,6 +4,6 @@ module.exports = defineConfig({
   testDir: './tests',
 
   use: {
-    headless: false
+    headless: process.env.E2E_HEADLESS === 'true'
   }
 });

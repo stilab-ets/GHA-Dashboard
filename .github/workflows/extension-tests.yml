@@ -67,6 +67,8 @@ jobs:
         fi
 
     - name: Run tests
+      env:
+        E2E_HEADLESS: 'true'
       run: |
         cd extension
         npm run test:e2e
