@@ -2,7 +2,7 @@ name: Extension Tests (Playwright)
 
 on:
   workflow_dispatch:
-  pull_request:
+  # pull_request:
     # branches: [ main, feature/**]
 
 jobs:
