@@ -1,7 +1,5 @@
 const { test, expect } = require('./fixtures');
 
-const { test, expect } = require('./fixtures');
-
 test('extension loads (minimal check)', async ({ context }) => {
   const pages = context.backgroundPages();
   console.log('backgroundPages:', pages.length);
