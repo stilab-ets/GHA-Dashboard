@@ -24,13 +24,15 @@ exports.test = base.extend({
   },
 
   extensionId: async ({ context }, use) => {
-    let [background] = context.serviceWorkers();
+    let worker;
 
-    if (!background) {
-      background = await context.waitForEvent('serviceworker');
+    for (let i = 0; i < 30; i++) {
+      worker = context.serviceWorkers()[0];
+      if (worker) break;
+      await new Promise(r => setTimeout(r, 1000));
     }
 
-    const extensionId = background.url().split('/')[2];
+    const extensionId = worker.url().split('/')[2];
 
     await use(extensionId);
   }
