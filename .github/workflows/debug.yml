@@ -2,8 +2,8 @@ name: Extension Debug Tests (Playwright)
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [ main, feature/**]
+  # pull_request:
+  #   branches: [ main, feature/**]
 
 jobs:
   debug-tests:

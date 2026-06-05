@@ -2,8 +2,8 @@ name: Backend Tests
 
 on:
   workflow_dispatch:
-  # pull_request:
-  #   branches: [ main, feature/** ]
+  pull_request:
+    branches: [ main, feature/** ]
 
 jobs:
   test:
