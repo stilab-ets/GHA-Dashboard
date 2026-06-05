@@ -8,6 +8,6 @@ module.exports = defineConfig({
   ],
 
   use: {
-    headless: process.env.E2E_HEADLESS === 'true'
+    headless: false,
   }
 });
