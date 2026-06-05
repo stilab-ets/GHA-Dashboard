@@ -50,14 +50,21 @@ jobs:
         python app.py --e2e &
         
         # Wait for the backend to be ready before running tests
+        backend_ready=false
         for i in {1..30}; do
-          if curl -s http://localhost:5000/health > /dev/null 2>&1; then
-            echo "✅ Backend is ready"
+          if curl -s http://localhost:3000/health > /dev/null 2>&1; then
+            echo "Backend is ready"
+            backend_ready=true
             break
           fi
           echo "Waiting for backend... ($i/30)"
           sleep 1
         done
+        
+        if [ "$backend_ready" != "true" ]; then
+          echo "Backend failed to start within 30 seconds"
+          exit 1
+        fi
 
     - name: Run tests
       run: |
