@@ -10,22 +10,22 @@ test('extension loads (minimal check)', async ({ context }) => {
   expect(true).toBeTruthy();
 });
 
-/*
-test('service worker is registered (stable)', async ({ context }) => {
-  let worker;
+test('service worker exists', async ({ context }) => {
+  let [worker] = context.serviceWorkers();
 
-  // retry polling instead of event waiting (CI-safe)
-  for (let i = 0; i < 30; i++) {
-    worker = context.serviceWorkers()[0];
-    if (worker) break;
-    await new Promise(r => setTimeout(r, 1000));
+  if (!worker) {
+    worker = await context.waitForEvent('serviceworker');
   }
 
-  expect(worker, 'Service worker not found').toBeTruthy();
-
-  const url = worker.url();
-
-  expect(url).toBeTruthy();
-  expect(url).toContain('background');
+  expect(worker.url()).toContain('background');
 });
-*/
+
+test('dashboard button is injected on stable-diffusion repository page', async ({ context }) => {
+  const page = await context.newPage();
+
+  await page.goto(REPOSITORY_URL);
+
+  await expect(
+    page.locator('#gha-dashboard-nav-button')
+  ).toBeVisible();
+});

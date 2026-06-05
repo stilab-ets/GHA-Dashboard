@@ -13,9 +13,7 @@ exports.test = base.extend({
       headless: false,
       args: [
         `--disable-extensions-except=${pathToExtension}`,
-        `--load-extension=${pathToExtension}`,
-        '--no-first-run',
-        '--no-default-browser-check'
+        `--load-extension=${pathToExtension}`
       ]
     });
 
