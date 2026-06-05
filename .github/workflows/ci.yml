@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-tests:
+    uses: ./.github/workflows/backend-tests.yml
+
+  extension-tests:
+    uses: ./.github/workflows/extension-tests.yml
+
+  status-check:
+    needs: [ backend-tests, extension-tests ]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          if [[ "${{ needs.backend-tests.result }}" == "failure" || "${{ needs.extension-tests.result }}" == "failure" ]]; then
+            echo "Some tests failed"
+            exit 1
+          fi
+          echo "All tests passed"
