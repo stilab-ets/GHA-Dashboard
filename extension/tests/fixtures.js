@@ -5,31 +5,26 @@ exports.test = base.extend({
   context: async ({}, use) => {
     const pathToExtension = path.resolve(__dirname, '..', 'build');
 
-    const context = await chromium.launchPersistentContext('', {
-      headless: true,
+    const context = await chromium.launch({
+      headless: false,
       args: [
         `--disable-extensions-except=${pathToExtension}`,
         `--load-extension=${pathToExtension}`,
-        '--no-first-run',
-        '--no-default-browser-check'
-      ]
+      ],
     });
 
-    await use(context);
+    const c = await context.newContext();
+
+    await use(c);
+
     await context.close();
   },
 
   extensionId: async ({ context }, use) => {
-    let worker;
+    const workers = context.serviceWorkers();
 
-    for (let i = 0; i < 30; i++) {
-      worker = context.serviceWorkers()[0];
-      if (worker) break;
-      await new Promise(r => setTimeout(r, 1000));
-    }
-
-    await use(worker ? worker.url().split('/')[2] : null);
-  }
+    await use(workers[0] ? workers[0].url().split('/')[2] : null);
+  },
 });
 
 exports.expect = require('@playwright/test').expect;
