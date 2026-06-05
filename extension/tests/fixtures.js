@@ -5,11 +5,7 @@ const fs = require('fs');
 
 exports.test = base.extend({
   context: async ({}, use) => {
-    const pathToExtension = path.join(
-      __dirname,
-      '..',
-      'build'
-    );
+    const pathToExtension = path.resolve(__dirname, '..', 'build');
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-'));
     const context = await chromium.launchPersistentContext(userDataDir, {
@@ -33,6 +29,10 @@ exports.test = base.extend({
       worker = context.serviceWorkers()[0];
       if (worker) break;
       await new Promise(r => setTimeout(r, 1000));
+    }
+
+    if (!worker) {
+      throw new Error('Service worker not found');
     }
 
     const extensionId = worker.url().split('/')[2];

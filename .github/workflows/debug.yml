@@ -32,9 +32,14 @@ jobs:
         cd extension
         npx playwright install chromium
 
+    - name: Install Xvfb
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb
+
     - name: Run ONLY debug tests
       env:
         E2E_HEADLESS: 'true'
       run: |
         cd extension
-        npx playwright test tests/debug.spec.js
+        xvfb-run -a npx playwright test tests/debug.spec.js
