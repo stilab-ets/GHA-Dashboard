@@ -109,6 +109,14 @@
   border-color: #0256cc;
 }
 
+.authenticated-section {
+  margin-top: 8px;
+}
+
+.hidden {
+  display: none;
+}
+
 /* Status Message */
 .status-message {
   margin-top: 8px;
