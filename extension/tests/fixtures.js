@@ -10,7 +10,7 @@ exports.test = base.extend({
     );
 
     const context = await chromium.launchPersistentContext('', {
-      headless: false,
+      headless: process.env.E2E_HEADLESS === 'true',
 
       args: [
         `--disable-extensions-except=${pathToExtension}`,
