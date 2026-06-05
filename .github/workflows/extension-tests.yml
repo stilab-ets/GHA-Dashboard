@@ -2,8 +2,6 @@ name: Extension Tests (Playwright)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main, feature/** ]
   pull_request:
     branches: [ main, feature/**]
 
@@ -49,7 +47,7 @@ jobs:
     - name: Start backend e2e
       run: |
         cd backend
-        python app.py --e2e 
+        python app.py --e2e &
         
         # Wait for the backend to be ready before running tests
         for i in {1..30}; do
