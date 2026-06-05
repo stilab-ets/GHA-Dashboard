@@ -1,30 +1,39 @@
 const { test: base, chromium } = require('@playwright/test');
 const path = require('path');
+const os = require('os');
+const fs = require('fs');
 
 exports.test = base.extend({
   context: async ({}, use) => {
     const pathToExtension = path.resolve(__dirname, '..', 'build');
 
-    const context = await chromium.launch({
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-'));
+
+    const context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
       args: [
         `--disable-extensions-except=${pathToExtension}`,
         `--load-extension=${pathToExtension}`,
-      ],
+        '--no-first-run',
+        '--no-default-browser-check'
+      ]
     });
 
-    const c = await context.newContext();
-
-    await use(c);
-
+    await use(context);
     await context.close();
   },
 
   extensionId: async ({ context }, use) => {
-    const workers = context.serviceWorkers();
+    let worker;
 
-    await use(workers[0] ? workers[0].url().split('/')[2] : null);
-  },
+    for (let i = 0; i < 30; i++) {
+      worker = context.serviceWorkers()[0];
+      if (worker) break;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    await use(worker ? worker.url().split('/')[2] : null);
+  }
 });
 
 exports.expect = require('@playwright/test').expect;
