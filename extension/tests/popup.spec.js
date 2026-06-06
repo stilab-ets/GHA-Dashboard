@@ -65,13 +65,15 @@ test('save token in chrome.storage.local via popup (oauth flow access)', async (
   const page = await context.newPage();
 
   // Mock the chrome.identity API for OAuth flow
-  await page.addInitScript((token) => {
+  await page.addInitScript(() => {
+    window.crypto.randomUUID = () => "fixed-state";
     window.chrome = window.chrome || {};
-
+    
     window.chrome.identity = {
+      getRedirectURL: () => "https://callback",
       launchWebAuthFlow: (options, callback) => {
         setTimeout(() => {
-          callback(`https://callback?code=mock_code`);
+          callback("https://callback?code=mock_code&state=fixed-state");
         }, 10);
       }
     };

@@ -66,11 +66,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function loginWithGitHub() {
     const statusSpan = document.getElementById("token-status");
+    const redirectUri = chrome.identity.getRedirectURL();
+    const state = crypto.randomUUID();
+    chrome.storage.session.set({ oauthState: state });
 
     const url =
       `https://github.com/login/oauth/authorize` +
       `?client_id=${CLIENT_ID}` +
-      `&scope=repo,workflow,read:user`;
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&scope=${encodeURIComponent("repo workflow read:user")}` + 
+      `&state=${encodeURIComponent(state)}`;
 
     chrome.identity.launchWebAuthFlow(
       {
@@ -91,47 +96,64 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
           }
 
+          const returnedState = new URL(redirectUrl).searchParams.get("state");
           const code = new URL(redirectUrl).searchParams.get("code");
 
-          if (!code) {
-            statusSpan.textContent = "No authorization code found";
-            statusSpan.className = "status-message error";
-            return;
-          }
+          chrome.storage.session.get(["oauthState"], async (storageResult) => {
+            try {
+              if (storageResult.oauthState !== returnedState) {
+                statusSpan.textContent = "OAuth state mismatch";
+                statusSpan.className = "status-message error";
+                return;
+              }
 
-          statusSpan.textContent = "Exchanging code...";
-          statusSpan.className = "status-message info";
+              chrome.storage.session.remove(["oauthState"]);
 
-          const response = await fetch(`${BACKEND_URL}/auth/github`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ code }),
+              if (!code) {
+                statusSpan.textContent = "No authorization code found";
+                statusSpan.className = "status-message error";
+                return;
+              }
+
+              statusSpan.textContent = "Exchanging code...";
+              statusSpan.className = "status-message info";
+
+              const response = await fetch(`${BACKEND_URL}/auth/github`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ code }),
+              });
+
+              if (!response.ok) {
+                throw new Error("Backend error: " + response.status);
+              }
+
+              const authResult = await response.json();
+
+              if (!authResult.token) {
+                statusSpan.textContent = "No token received from backend";
+                statusSpan.className = "status-message error";
+                return;
+              }
+
+              chrome.storage.session.set(
+                {
+                  githubToken: authResult.token,
+                  githubUsername: authResult.username,
+                },
+                () => {
+                  chrome.storage.local.remove(["githubToken"]);
+                  setAuthenticatedState(true, authResult.username);
+                },
+              );
+            } catch (err) {
+              console.error(err);
+              statusSpan.textContent = "Login failed: " + err.message;
+              statusSpan.className = "status-message error";
+            }
           });
-
-          if (!response.ok) {
-            throw new Error("Backend error: " + response.status);
-          }
-
-          const result = await response.json();
-
-          if (!result.token) {
-            statusSpan.textContent = "Invalid backend response";
-            statusSpan.className = "status-message error";
-            return;
-          }
-
-          chrome.storage.session.set(
-            {
-              githubToken: result.token,
-              githubUsername: result.username,
-            },
-            () => {
-              chrome.storage.local.remove(["githubToken"]);
-              setAuthenticatedState(true, result.username);
-            },
-          );
         } catch (err) {
           console.error(err);
           statusSpan.textContent = "Login failed: " + err.message;
