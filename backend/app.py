@@ -34,7 +34,33 @@ E2E_MODE = args.e2e
 load_dotenv()
 app = Flask(__name__)
 sock = Sock(app)
-CORS(app)
+
+DEFAULT_EXTENSION_ORIGINS = "chrome-extension://hgehgkjceklknibnacgjhefociphnhaf"
+
+
+def get_allowed_extension_origins():
+    raw_origins = os.getenv("GHA_EXTENSION_ORIGINS", DEFAULT_EXTENSION_ORIGINS)
+    return [
+        origin.strip()
+        for origin in raw_origins.split(",")
+        if origin.strip()
+    ]
+
+
+def is_allowed_extension_origin(origin):
+    return origin in get_allowed_extension_origins()
+
+
+CORS(
+    app,
+    resources={
+        r"/*": {
+            "origins": get_allowed_extension_origins(),
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+        }
+    },
+)
 
 # in-memory store pour multiples extractions simultanées (TTL 5 mins)
 extractions = {}
@@ -220,6 +246,15 @@ def websocket_data(ws, extractionId: str):
     """
     WebSocket endpoint for streaming GitHub Actions data via GHAminer
     """
+    origin = request.headers.get("Origin")
+    if not is_allowed_extension_origin(origin):
+        ws.send(json.dumps({
+            "type": "error",
+            "message": "Forbidden WebSocket origin"
+        }))
+        ws.close()
+        return
+
     _cleanup_expired_extractions()
     extraction = extractions.get(extractionId)
 

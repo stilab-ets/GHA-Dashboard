@@ -168,7 +168,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
       };
 
       const extractionResponse = await fetch(
-        "http://localhost:3000/api/extractions",
+        "http://127.0.0.1:3000/api/extractions",
         {
           method: "POST",
           headers: {
@@ -194,7 +194,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         throw new Error("Backend did not return an extraction session");
       }
 
-      const wsUrl = `ws://localhost:3000/data/${encodeURIComponent(extraction.extractionId)}`;
+      const wsUrl = `ws://127.0.0.1:3000/data/${encodeURIComponent(extraction.extractionId)}`;
 
       wsCache.set(repo, {
         runs: [],
@@ -436,7 +436,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                   isStreaming: false,
                   isComplete: false,
                   error:
-                    "Unable to connect to API at ws://localhost:3000. Please verify the backend is running and reachable.",
+                    "Unable to connect to API at ws://127.0.0.1:3000. Please verify the backend is running and reachable.",
                   repo: repo,
                 },
               });
@@ -471,7 +471,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 isStreaming: false,
                 isComplete: false,
                 error:
-                  "Unable to connect to API at ws://localhost:3000. Please verify the backend is running and reachable.",
+                  "Unable to connect to API at ws://127.0.0.1:3000. Please verify the backend is running and reachable.",
                 repo: repo,
               },
             });

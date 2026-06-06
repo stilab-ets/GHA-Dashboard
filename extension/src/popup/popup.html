@@ -9,7 +9,8 @@
     <form class="token-form">
       <div class="form-group">
         <div id="manual-auth-section">
-          <label for="github-token" class="form-label">GitHub Token</label>
+          <div class="option-title">Option 1: GitHub Token</div>
+          <label for="github-token" class="form-label">Personal access token</label>
           <div class="input-group">
             <input type="password" id="github-token" placeholder="ghp_xxx..." autocomplete="off" class="form-input" />
             <button type="button" id="save-token" class="btn btn-primary">Save</button>
@@ -17,8 +18,9 @@
         </div>
 
         <div id="oauth-auth-section">
-          <hr class="separator" />
-          <label class="form-label">GitHub OAuth</label>
+          <hr class="option-separator" />
+          <div class="option-title">Option 2: GitHub OAuth</div>
+          <label class="form-label">Browser authentication</label>
           <button type="button" id="auth-token" class="btn btn-primary">Authenticate with GitHub</button>
         </div>
 
