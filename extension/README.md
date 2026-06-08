@@ -6,6 +6,7 @@ Contents
 - `package.json` - build & packaging scripts
 - `scripts/assemble.js` - assembles runtime files into `build/` after Vite build
 - `build/` - produced by `npm run pack`, ready to load as an unpacked extension
+- `tests/` - contains PlayWright tests (e2e) used by the CI pipeline
 
 Quick start (development)
 1. Install dependencies:
@@ -34,3 +35,22 @@ Build & package (produce ready-to-load `build/`)
    npm run dist
    ```
    This runs the pack step and then compresses the `build/` folder into `gha-dashboard.zip` at the repo root. The `dist` script uses PowerShell's `Compress-Archive` and therefore works on Windows.
+
+Run PlayWright tests:
+
+1. Create and fill .env file from .env.example in the `backend` folder
+
+2. Launch the backend in the `e2e` mode:
+   ```powershell
+   python app.py --e2e
+   ```
+
+3. Install `Chromium` for PlayWright:
+   ```powershell
+   npx playwright install chromium
+   ```
+
+4. Run the PlayWright tests:
+   ```powershell
+   npm run test:e2e
+   ```

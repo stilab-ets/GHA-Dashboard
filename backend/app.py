@@ -223,9 +223,10 @@ def create_extraction():
     _cleanup_expired_extractions()
     now = time.time()
 
-    #Générer ID extraction unique
+    #Generate an unique extraction ID
     extraction_id = secrets.token_urlsafe(32)
-    #Stocker info extraction en memoire avec TTL 5 mins
+
+    #Store extraction info in memory with TTL 5 mins
     extractions[extraction_id] = {
         "token": token,
         "repo": repo,

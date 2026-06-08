@@ -47,6 +47,16 @@ python app.py
 
 ### Step 6: Add your GitHub access token
 
+#### Option #1: Use GitHub OAuth (recommended)
+
+1. **Connect using your GitHub credentials**
+   - Click the GHA Dashboard extension icon in Chrome top right (puzzle icon)
+   - Click **Authenticate with GitHub**
+   - Click **Authorize**
+   - Enter your GitHub password
+
+#### Option #2: Use your own GitHub token
+
 1. **Generate a GitHub token** (in case you don't have one)
    - Go to: https://github.com/settings/tokens
    - Click **Generate new token → Classic token**
