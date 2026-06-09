@@ -119,7 +119,7 @@
       <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" style="fill: currentColor; margin-right: 4px;">
         <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"></path>
       </svg>
-      Actions Dashboard
+      GHA-Dashboard
     `;
     button.style.cssText = 'cursor: pointer; text-decoration: none;';
     
@@ -256,6 +256,9 @@
       if (iframe && iframe.dataset.intervalId) {
         clearInterval(parseInt(iframe.dataset.intervalId));
       }
+      if (iframe && typeof iframe._ghaResizeCleanup === 'function') {
+        iframe._ghaResizeCleanup();
+      }
     }
     
     if (dashboardContainer && dashboardContainer.parentNode) {
@@ -280,6 +283,12 @@
    * --------------------------------------------------------- */
   const createDashboard = () => {
     if (dashboardContainer && dashboardContainer.parentNode) {
+      const existingIframe = dashboardContainer.querySelector('#gha-dashboard-iframe');
+      if (existingIframe && typeof existingIframe._ghaResizeCleanup === 'function') {
+        existingIframe._ghaResizeCleanup();
+      } else if (existingIframe && existingIframe.dataset.intervalId) {
+        clearInterval(parseInt(existingIframe.dataset.intervalId));
+      }
       dashboardContainer.parentNode.removeChild(dashboardContainer);
     }
 
@@ -304,9 +313,11 @@
     container.style.cssText = `
       width: 100%;
       max-width: 100%;
+      min-width: 0;
       margin: 0;
       padding: 0;
       box-sizing: border-box;
+      overflow: hidden;
     `;
 
     // Create iframe with seamless integration
@@ -314,11 +325,15 @@
     iframe.id = 'gha-dashboard-iframe';
     iframe.style.cssText = `
       width: 100%;
+      max-width: 100%;
+      min-width: 0;
       height: 1000px;
       border: none;
       display: block;
       margin: 0;
       padding: 0;
+      box-sizing: border-box;
+      overflow: hidden;
     `;
     iframe.setAttribute('scrolling', 'no');
     
@@ -394,6 +409,14 @@
             subtree: true
           });
         }
+
+        const resizeObserver = typeof ResizeObserver !== 'undefined' && root
+          ? new ResizeObserver(resizeIframe)
+          : null;
+        if (resizeObserver) {
+          resizeObserver.observe(root);
+          resizeObserver.observe(iframeDoc.body);
+        }
         
         // Resize on window resize
         window.addEventListener('resize', resizeIframe);
@@ -401,6 +424,14 @@
         // Periodic check
         const intervalId = setInterval(resizeIframe, 500);
         iframe.dataset.intervalId = intervalId;
+        iframe._ghaResizeCleanup = () => {
+          clearInterval(intervalId);
+          observer.disconnect();
+          if (resizeObserver) {
+            resizeObserver.disconnect();
+          }
+          window.removeEventListener('resize', resizeIframe);
+        };
         
       } catch (e) {
         // Silent fail - likely CORS or element removed
