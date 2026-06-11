@@ -1,5 +1,7 @@
 import os
+import secrets
 import sys
+import time
 
 # Gevent monkey patch must be done before importing other modules
 try:
@@ -13,18 +15,108 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_sock import Sock
+import argparse
 import json
+import requests
 
 from analysis.endpoint import AggregationFilters, send_data
 from typing import cast
 from datetime import date
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--e2e", action="store_true", help="Enable E2E test mode")
+
+args = parser.parse_args()
+
+E2E_MODE = args.e2e
 
 # Initialize Flask app
 load_dotenv()
 app = Flask(__name__)
 sock = Sock(app)
-CORS(app)
+
+DEFAULT_EXTENSION_ORIGINS = "chrome-extension://hgehgkjceklknibnacgjhefociphnhaf"
+
+
+def get_allowed_extension_origins():
+    raw_origins = os.getenv("GHA_EXTENSION_ORIGINS", DEFAULT_EXTENSION_ORIGINS)
+    return [
+        origin.strip()
+        for origin in raw_origins.split(",")
+        if origin.strip()
+    ]
+
+
+def is_allowed_extension_origin(origin):
+    return origin in get_allowed_extension_origins()
+
+
+CORS(
+    app,
+    resources={
+        r"/*": {
+            "origins": get_allowed_extension_origins(),
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+        }
+    },
+)
+
+# in-memory store pour multiples extractions simultanées (TTL 5 mins)
+extractions = {}
+
+
+def _cleanup_expired_extractions():
+    now = time.time()
+    expired_ids = [
+        extraction_id
+        for extraction_id, extraction in extractions.items()
+        if extraction["expires_at"] <= now
+    ]
+    for extraction_id in expired_ids:
+        extractions.pop(extraction_id, None)
+
+
+def _first_filter_value(value):
+    if isinstance(value, list):
+        values = [item for item in value if item and item != "all"]
+        return values[0] if values else None
+    if value in (None, "", "all"):
+        return None
+    return value
+
+
+def _build_aggregation_filters(filters_payload):
+    filters = AggregationFilters()
+
+    if not isinstance(filters_payload, dict):
+        return filters
+
+    aggregation_period = filters_payload.get("aggregationPeriod")
+    if aggregation_period:
+        filters.aggregationPeriod = cast(str, aggregation_period)
+
+    start_date = filters_payload.get("startDate") or filters_payload.get("start")
+    if start_date:
+        filters.startDate = date.fromisoformat(cast(str, start_date))
+
+    end_date = filters_payload.get("endDate") or filters_payload.get("end")
+    if end_date:
+        filters.endDate = date.fromisoformat(cast(str, end_date))
+
+    branch = _first_filter_value(filters_payload.get("branch"))
+    if branch:
+        filters.branch = cast(str, branch)
+
+    author = _first_filter_value(filters_payload.get("author") or filters_payload.get("actor"))
+    if author:
+        filters.author = cast(str, author)
+
+    workflow_name = _first_filter_value(filters_payload.get("workflowName") or filters_payload.get("workflow"))
+    if workflow_name:
+        filters.workflowName = cast(str, workflow_name)
+
+    return filters
 
 # ============================================
 # Health Check
@@ -36,48 +128,149 @@ def health():
         "service": "GHA Dashboard Backend (GHAminer)",
         "ghaminer_configured": os.path.exists(os.path.join(os.path.dirname(__file__), 'ghaminer', 'src', 'config.yaml'))
     }, 200
+    
+    
+# ============================================
+# Authentication Endpoint
+# ============================================
+@app.post("/auth/github")
+def github_auth():
+    if E2E_MODE:
+        # In E2E mode, return a dummy token for testing purposes
+        return jsonify({
+            "success": True,
+            "token": os.getenv("TEST_GITHUB_TOKEN"),
+            "username": os.getenv("TEST_GITHUB_USERNAME")
+        })
 
+    data = request.get_json()
+    code = data["code"]
+
+    response = requests.post(
+        "https://github.com/login/oauth/access_token",
+        headers={
+            "Accept": "application/json"
+        },
+        data={
+            "client_id": os.getenv("GITHUB_CLIENT_ID"),
+            "client_secret": os.getenv("GITHUB_CLIENT_SECRET"),
+            "code": code
+        }
+    )
+
+    token_data = response.json()
+    access_token = token_data.get("access_token")
+
+    if not access_token:
+        return jsonify({
+            "success": False,
+            "error": "OAuth exchange failed"
+        }), 401
+        
+    user_response = requests.get(
+        "https://api.github.com/user",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github+json"
+        }
+    )
+    
+    user = user_response.json()
+
+    return jsonify({
+        "success": True,
+        "token": access_token,
+        "username": user["login"]
+    })
+
+# ============================================
+# Extraction Session Endpoint
+# ============================================
+@app.post("/api/extractions")
+def create_extraction():
+    auth_header = request.headers.get("Authorization", "")
+
+    if not auth_header.startswith("Bearer "):
+        return jsonify({
+            "success": False,
+            "error": "Missing Authorization bearer token"
+        }), 401
+
+    token = auth_header.removeprefix("Bearer ").strip()
+
+    if not token:
+        return jsonify({
+            "success": False,
+            "error": "Empty bearer token"
+        }), 401
+
+    data = request.get_json() or {}
+    repo = data.get("repo")
+    filters = data.get("filters", {})
+
+    if not repo or "/" not in repo or repo.count("/") != 1:
+        return jsonify({
+            "success": False,
+            "error": "Invalid repository format. Expected owner/repo"
+        }), 400
+
+    if not isinstance(filters, dict):
+        return jsonify({
+            "success": False,
+            "error": "Invalid filters payload"
+        }), 400
+
+    _cleanup_expired_extractions()
+    now = time.time()
+
+    #Generate an unique extraction ID
+    extraction_id = secrets.token_urlsafe(32)
+
+    #Store extraction info in memory with TTL 5 mins
+    extractions[extraction_id] = {
+        "token": token,
+        "repo": repo,
+        "filters": filters,
+        "expires_at": now + 300
+    }
+
+    return jsonify({
+        "success": True,
+        "extractionId": extraction_id
+    }), 201
 
 # ============================================
 # WebSocket Endpoint
 # ============================================
-@sock.route("/data/<path:repositoryName>")
-def websocket_data(ws, repositoryName: str):
+@sock.route("/data/<path:extractionId>")
+def websocket_data(ws, extractionId: str):
     """
     WebSocket endpoint for streaming GitHub Actions data via GHAminer
     """
-    filters = AggregationFilters()
+    origin = request.headers.get("Origin")
+    if not is_allowed_extension_origin(origin):
+        ws.send(json.dumps({
+            "type": "error",
+            "message": "Forbidden WebSocket origin"
+        }))
+        ws.close()
+        return
 
-    # Get token from query params
-    token = request.args.get("token", "")
+    _cleanup_expired_extractions()
+    extraction = extractions.get(extractionId)
 
-    aggregationPeriod = request.args.get("aggregationPeriod")
-    if aggregationPeriod != None:
-        filters.aggregationPeriod = cast(str, aggregationPeriod)
+    if not extraction:
+        error_msg = {
+            "type": "error",
+            "message": "Invalid or expired extraction session"
+        }
+        ws.send(json.dumps(error_msg))
+        ws.close()
+        extractions.pop(extractionId, None)
+        return
 
-    startDate = request.args.get("startDate")
-    if startDate != None:
-        filters.startDate = date.fromisoformat(startDate)
-
-    endDate = request.args.get("endDate")
-    if endDate != None:
-        filters.endDate = date.fromisoformat(endDate)
-
-    branch = request.args.get("branch")
-    if branch != None:
-        filters.branch = branch
-
-    author = request.args.get("author")
-    if author != None:
-        filters.author = author
-
-    workflowName = request.args.get("workflowName")
-    if workflowName != None:
-        filters.workflowName = workflowName
-
-    # Decode URL-encoded repository name and validate
-    from urllib.parse import unquote
-    repo = unquote(repositoryName)
+    token = extraction["token"]
+    repo = extraction["repo"]
     
     # Validate repository format (should be owner/repo)
     if "/" not in repo or repo.count("/") != 1:
@@ -89,8 +282,23 @@ def websocket_data(ws, repositoryName: str):
         ws.close()
         return
 
-    # Stream data using GHAminer
-    send_data(ws, repo, filters, token)
+    try:
+        filters = _build_aggregation_filters(extraction.get("filters", {}))
+    except ValueError as e:
+        error_msg = {
+            "type": "error",
+            "message": f"Invalid extraction filters: {e}"
+        }
+        ws.send(json.dumps(error_msg))
+        ws.close()
+        extractions.pop(extractionId, None)
+        return
+
+    try:
+        # Stream data using GHAminer
+        send_data(ws, repo, filters, token)
+    finally:
+        extractions.pop(extractionId, None)
 
 
 # ============================================
@@ -202,7 +410,8 @@ def debug():
     return jsonify({
         "environment": {
             "FLASK_ENV": os.getenv("FLASK_ENV"),
-            "GITHUB_TOKEN_SET": bool(os.getenv("GITHUB_TOKEN"))
+            "GITHUB_TOKEN_SET": bool(os.getenv("GITHUB_TOKEN")),
+            "ALLOW_ENV_GITHUB_TOKEN_FALLBACK": os.getenv("ALLOW_ENV_GITHUB_TOKEN_FALLBACK") == "1"
         },
         "ghaminer": {
             "config_path": ghaminer_config_path,
@@ -219,10 +428,13 @@ def debug():
 # ============================================
 if __name__ == "__main__":
     port = int(os.getenv("FLASK_RUN_PORT", 3000))
+    host = os.getenv("FLASK_RUN_HOST", "127.0.0.1")
     debug = os.getenv("FLASK_DEBUG", "1") == "1"
+    env_token_set = bool(os.getenv("GITHUB_TOKEN"))
+    env_token_fallback_enabled = os.getenv("ALLOW_ENV_GITHUB_TOKEN_FALLBACK") == "1"
 
-    print(f"Starting GHA Dashboard Backend (GHAminer) on port {port}")
-    print(f"GitHub Token configured: {bool(os.getenv('GITHUB_TOKEN'))}")
+    print(f"Starting GHA Dashboard Backend (GHAminer) on {host}:{port}")
+    print(f"GitHub env token fallback enabled: {env_token_fallback_enabled} (GITHUB_TOKEN configured: {env_token_set})")
 
     # Use gevent for WebSocket support with Flask-Sock
     if GEVENT_AVAILABLE:
@@ -233,7 +445,7 @@ if __name__ == "__main__":
             # Instead, we use periodic keepalive messages (every 30s) to prevent connection timeouts
             # during GitHub API rate limit waits
             server = pywsgi.WSGIServer(
-                ('0.0.0.0', port), 
+                (host, port), 
                 app, 
                 log=None
             )
@@ -244,7 +456,7 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
             print("Falling back to Flask dev server (WebSockets may not work)")
-            app.run(host="0.0.0.0", port=port, debug=debug)
+            app.run(host=host, port=port, debug=debug)
     else:
         print("WARNING: gevent not installed, using Flask dev server (WebSockets may not work)")
-        app.run(host="0.0.0.0", port=port, debug=debug)
+        app.run(host=host, port=port, debug=debug)

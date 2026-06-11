@@ -586,7 +586,7 @@ export default function Dashboard() {
     
     try {
       const encodedRepo = encodeURIComponent(repo);
-      const response = await fetch(`http://localhost:3000/api/data/check/${encodedRepo}`);
+      const response = await fetch(`http://127.0.0.1:3000/api/data/check/${encodedRepo}`);
       if (response.ok) {
         const result = await response.json();
         setDataExists(result.exists);
@@ -606,7 +606,7 @@ export default function Dashboard() {
     
     try {
       const encodedRepo = encodeURIComponent(repo);
-      const response = await fetch(`http://localhost:3000/api/data/load/${encodedRepo}`);
+      const response = await fetch(`http://127.0.0.1:3000/api/data/load/${encodedRepo}`);
       if (response.ok) {
         const result = await response.json();
         if (result.runs && result.runs.length > 0) {

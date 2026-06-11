@@ -55,3 +55,6 @@ temp
 
 # OS
 Thumbs.db
+
+# extension build
+extension/build

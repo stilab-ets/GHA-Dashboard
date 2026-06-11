@@ -16,11 +16,13 @@ This guide explains how to install, run, and use the dashboard.
 ###  Required Software
 - Docker & Docker Compose
 - Google Chrome (for the extension)
-- GitHub Personal Access Token (PAT) with `repo` or `public_repo` permission
+- (Optional) GitHub Personal Access Token (PAT) with `repo` or `public_repo` permission
 
 ###  Configure your Token
 - Open the Chrome extension popup.
-- Paste your GitHub Personal Access Token (PAT) in the “Token” field.
+- #### 2 Ways to Authenticate
+  - Option #1 (recommended): Login using GitHub OAuth to generate the token
+  - Option #2: Paste your GitHub Personal Access Token (PAT) in the “Token” field.
 - Save your changes.
 Once configured, the extension automatically uses your token to fetch GitHub Actions data.
 
@@ -67,7 +69,7 @@ Click Load unpacked
 Select the folder: /extension
 The “GHA Dashboard” icon will appear in Chrome.
 
-Le folder c'est /extension/build
+The folder to select is /extension/build
 
 ##  4. Using the Dashboard
 
@@ -162,6 +164,13 @@ docker compose up --build
 ```
 
 ##  9. Contact & Support
-- Author : Anthony monton, Vyshmi Nagendran, Fatma Aljane, Gabriel Aubé, Valentin Palashev
+
+- @jaykay9999
+-----
+- Authors : Cassandre Ashley Javel, Alexander Pan, Maksym Pravdin, Vincent Renaud, Danny Alexander Villeda 
+- Project : PFE009 Development of a dashboard for monitoring workflows with GitHub Actions – Final Year Project (ÉTS)
+- Year : 2026
+-----
+- Authors : Anthony Monton, Vyshmi Nagendran, Fatma Aljane, Gabriel Aubé, Valentin Palashev
 - Project : PFE017 Design and Development of an Intelligent Dashboard for Monitoring GitHub Actions – Final Year Project (ÉTS)
 - Year : 2025
