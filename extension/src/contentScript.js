@@ -256,6 +256,9 @@
       if (iframe && iframe.dataset.intervalId) {
         clearInterval(parseInt(iframe.dataset.intervalId));
       }
+      if (iframe && typeof iframe._ghaResizeCleanup === 'function') {
+        iframe._ghaResizeCleanup();
+      }
     }
     
     if (dashboardContainer && dashboardContainer.parentNode) {
@@ -280,6 +283,12 @@
    * --------------------------------------------------------- */
   const createDashboard = () => {
     if (dashboardContainer && dashboardContainer.parentNode) {
+      const existingIframe = dashboardContainer.querySelector('#gha-dashboard-iframe');
+      if (existingIframe && typeof existingIframe._ghaResizeCleanup === 'function') {
+        existingIframe._ghaResizeCleanup();
+      } else if (existingIframe && existingIframe.dataset.intervalId) {
+        clearInterval(parseInt(existingIframe.dataset.intervalId));
+      }
       dashboardContainer.parentNode.removeChild(dashboardContainer);
     }
 
@@ -304,9 +313,11 @@
     container.style.cssText = `
       width: 100%;
       max-width: 100%;
+      min-width: 0;
       margin: 0;
       padding: 0;
       box-sizing: border-box;
+      overflow: hidden;
     `;
 
     // Create iframe with seamless integration
@@ -314,11 +325,15 @@
     iframe.id = 'gha-dashboard-iframe';
     iframe.style.cssText = `
       width: 100%;
+      max-width: 100%;
+      min-width: 0;
       height: 1000px;
       border: none;
       display: block;
       margin: 0;
       padding: 0;
+      box-sizing: border-box;
+      overflow: hidden;
     `;
     iframe.setAttribute('scrolling', 'no');
     
@@ -394,6 +409,14 @@
             subtree: true
           });
         }
+
+        const resizeObserver = typeof ResizeObserver !== 'undefined' && root
+          ? new ResizeObserver(resizeIframe)
+          : null;
+        if (resizeObserver) {
+          resizeObserver.observe(root);
+          resizeObserver.observe(iframeDoc.body);
+        }
         
         // Resize on window resize
         window.addEventListener('resize', resizeIframe);
@@ -401,6 +424,14 @@
         // Periodic check
         const intervalId = setInterval(resizeIframe, 500);
         iframe.dataset.intervalId = intervalId;
+        iframe._ghaResizeCleanup = () => {
+          clearInterval(intervalId);
+          observer.disconnect();
+          if (resizeObserver) {
+            resizeObserver.disconnect();
+          }
+          window.removeEventListener('resize', resizeIframe);
+        };
         
       } catch (e) {
         // Silent fail - likely CORS or element removed

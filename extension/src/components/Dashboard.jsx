@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard } from '../websocket';
 
 // We need to access the internal convertRunsToDashboard function
@@ -26,11 +27,137 @@ import {
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3', '#9c27b0', '#00bcd4'];
 
+function UIIcon({ name }) {
+  const icons = {
+    moon: <><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.7 6.7 0 0 0 21 12.8Z" /></>,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" /></>,
+    expand: <><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" /><path d="M3 3l6 6M21 3l-6 6M21 21l-6-6M3 21l6-6" /></>,
+    zoom: <><circle cx="11" cy="11" r="7" /><path d="M11 8v6M8 11h6M16.5 16.5 21 21" /></>,
+    reset: <><path d="M4 7v5h5" /><path d="M20 17a8 8 0 0 1-13.4 3.9L4 18" /><path d="M20 7a8 8 0 0 0-13.4-3.9L4 6" /></>,
+    play: <path d="M8 5v14l11-7-11-7Z" />,
+    check: <path d="M20 6 9 17l-5-5" />,
+    clock: <><circle cx="12" cy="12" r="8" /><path d="M12 7v6l4 2" /></>,
+    pulse: <path d="M3 13h4l3-7 4 13 3-7h4" />,
+    workflow: <><circle cx="6" cy="6" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><path d="M8 7.5 11 16M16 7.5 13 16" /></>,
+    jobs: <><path d="M5 12c2.5-4 5.5-4 8 0s5.5 4 8 0" /><path d="M5 16c2.5-4 5.5-4 8 0s5.5 4 8 0" /></>,
+    branch: <><circle cx="7" cy="5" r="2" /><circle cx="17" cy="12" r="2" /><circle cx="7" cy="19" r="2" /><path d="M7 7v10M9 6c4 0 8 2 8 6M9 18c4 0 8-2 8-6" /></>,
+    events: <><path d="M4 13h3l2-5 4 10 2-5h5" /><path d="M4 7h4M16 7h4" /></>,
+    contributors: <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M3.5 19c.8-3.6 3-5 5.5-5s4.7 1.4 5.5 5" /><path d="M13.5 15c1-.9 2.1-1.3 3.5-1.3 2.1 0 3.8 1.2 4.5 4.3" /></>
+  };
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      {icons[name] || icons.play}
+    </svg>
+  );
+}
+
+function ThemeToggle({ theme, onToggle }) {
+  const isLight = theme === 'light';
+  return (
+    <button
+      className="theme-toggle"
+      type="button"
+      aria-label={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
+      aria-pressed={isLight}
+      onClick={onToggle}
+    >
+      <span className="theme-knob" aria-hidden="true">
+        <span className="theme-icon sun-icon"><UIIcon name="sun" /></span>
+        <span className="theme-icon moon-icon"><UIIcon name="moon" /></span>
+      </span>
+    </button>
+  );
+}
+
+function PanelIconButton({ icon, label, onClick, disabled = false }) {
+  return (
+    <button
+      className="panel-icon-button"
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <UIIcon name={icon} />
+    </button>
+  );
+}
+
+function PanelControls({ panelId, zoomed, onZoom, onReset }) {
+  return (
+    <div className="panel-controls" aria-label="Panel controls">
+      <PanelIconButton icon="zoom" label="Zoom into graph data" onClick={() => onZoom(panelId)} />
+      <PanelIconButton icon="reset" label="Reset zoom" onClick={onReset} disabled={!zoomed} />
+    </div>
+  );
+}
+
+function MetricCard({ tone = 'info', icon, title, explanation, value, note, children }) {
+  return (
+    <div className={`stat-card metric-card metric-${tone} card`}>
+      <div className="metric-accent" aria-hidden="true" />
+      <div className="metric-title">
+        <span className={`metric-icon metric-icon-${tone}`} aria-hidden="true"><UIIcon name={icon} /></span>
+        <span>{title}</span>
+        <InfoIcon explanation={explanation} />
+      </div>
+      <div className="metric-body">
+        <div>
+          <div className="value">{value}</div>
+          {note && <div className={`metric-note ${tone}`}>{note}</div>}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // InfoIcon component for displaying help tooltips
 function InfoIcon({ explanation, id }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [popupStyle, setPopupStyle] = useState(null);
+  const [popupPlacement, setPopupPlacement] = useState('above');
   const iconRef = useRef(null);
   const popupRef = useRef(null);
+
+  const updatePopupPosition = () => {
+    if (!iconRef.current) return;
+
+    const rect = iconRef.current.getBoundingClientRect();
+    const popupRect = popupRef.current?.getBoundingClientRect();
+    const viewportPadding = 12;
+    const popupWidth = Math.min(popupRect?.width || 320, window.innerWidth - viewportPadding * 2);
+    const popupHeight = Math.min(popupRect?.height || 220, window.innerHeight - viewportPadding * 2);
+    const gap = 10;
+    const left = Math.min(
+      Math.max(rect.left, viewportPadding),
+      window.innerWidth - viewportPadding - popupWidth
+    );
+    const spaceAbove = rect.top - viewportPadding;
+    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+    const placeAbove = spaceAbove >= popupHeight + gap || spaceAbove >= spaceBelow;
+    const top = placeAbove
+      ? Math.max(viewportPadding, Math.min(rect.top - gap - popupHeight, window.innerHeight - viewportPadding - popupHeight))
+      : Math.max(viewportPadding, Math.min(rect.bottom + gap, window.innerHeight - viewportPadding - popupHeight));
+
+    setPopupPlacement(placeAbove ? 'above' : 'below');
+
+    setPopupStyle({
+      position: 'fixed',
+      left: `${left}px`,
+      top: `${top}px`,
+      transform: 'none',
+      width: `${popupWidth}px`,
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (isOpen) {
+      updatePopupPosition();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -42,9 +169,17 @@ function InfoIcon({ explanation, id }) {
     };
 
     if (isOpen) {
+      updatePopupPosition();
       document.addEventListener('mousedown', handleClickOutside);
+
+      const handleReposition = () => updatePopupPosition();
+      window.addEventListener('resize', handleReposition);
+      window.addEventListener('scroll', handleReposition, true);
+
       return () => {
         document.removeEventListener('mousedown', handleClickOutside);
+        window.removeEventListener('resize', handleReposition);
+        window.removeEventListener('scroll', handleReposition, true);
       };
     }
   }, [isOpen]);
@@ -86,63 +221,51 @@ function InfoIcon({ explanation, id }) {
         ?
       </button>
       {isOpen && (
-        <div
-          ref={popupRef}
-          style={{
-            position: 'absolute',
-            bottom: '100%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            marginBottom: '8px',
-            background: '#222',
-            border: '1px solid #555',
-            borderRadius: '6px',
-            padding: '12px',
-            minWidth: '250px',
-            maxWidth: '350px',
-            zIndex: 1000,
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-            fontSize: '13px',
-            lineHeight: '1.5',
-            color: '#ddd'
-          }}
-        >
-          <div style={{ marginBottom: '8px', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>
-            {explanation.title || 'Information'}
-          </div>
-          <div>{explanation.text}</div>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsOpen(false);
-            }}
-            style={{
-              position: 'absolute',
-              top: '8px',
-              right: '8px',
-              background: 'transparent',
-              border: 'none',
-              color: '#888',
-              cursor: 'pointer',
-              fontSize: '18px',
-              lineHeight: 1,
-              padding: 0,
-              width: '20px',
-              height: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.color = '#fff';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.color = '#888';
-            }}
+        createPortal(
+          <div
+            ref={popupRef}
+            className="info-icon-popup"
+            data-placement={popupPlacement}
+            style={popupStyle || undefined}
           >
-            ×
-          </button>
-        </div>
+            <div style={{ marginBottom: '8px', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>
+              {explanation.title || 'Information'}
+            </div>
+            <div>{explanation.text}</div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+              }}
+              style={{
+                position: 'absolute',
+                top: '8px',
+                right: '8px',
+                background: 'transparent',
+                border: 'none',
+                color: '#888',
+                cursor: 'pointer',
+                fontSize: '18px',
+                lineHeight: 1,
+                padding: 0,
+                width: '20px',
+                height: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.color = '#fff';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.color = '#888';
+              }}
+            >
+              ×
+            </button>
+          </div>,
+          document.body
+        )
       )}
     </div>
   );
@@ -271,6 +394,7 @@ export default function Dashboard() {
     phase2_elapsed: null,
     phase2_eta: null
   });
+  const lastKnownTotalRunsRef = useRef(0);
   
   // Real-time elapsed time counter
   const [localElapsed, setLocalElapsed] = useState(0);
@@ -278,7 +402,8 @@ export default function Dashboard() {
   const [phase2StartTime, setPhase2StartTime] = useState(null);
   const elapsedIntervalRef = useRef(null);
   const [jobProgress, setJobProgress] = useState({ runs_processed: 0, total_runs: 0, jobs_collected: 0, isCollecting: false });
-  
+  const [dashboardTheme, setDashboardTheme] = useState('dark');
+  const [collectionPaused, setCollectionPaused] = useState(false);
   // Filter states
   const [availableFilters, setAvailableFilters] = useState({
     workflows: ['all'],
@@ -325,10 +450,13 @@ export default function Dashboard() {
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   
   // Zoom states for different charts (controlled Brush with startIndex/endIndex)
+  const [dailyRunsZoom, setDailyRunsZoom] = useState(null);
   const [durationVariabilityZoom, setDurationVariabilityZoom] = useState(null);
   const [cumulativeFailureZoom, setCumulativeFailureZoom] = useState(null);
+  const [timeToFixZoom, setTimeToFixZoom] = useState(null);
   const [durationExplosionZoom, setDurationExplosionZoom] = useState(null);
   const [failureWorseningZoom, setFailureWorseningZoom] = useState(null);
+  const [durationExplosionBrushKey, setDurationExplosionBrushKey] = useState(0);
 
   const dropdownRefs = {
     workflow: useRef(null),
@@ -584,11 +712,32 @@ export default function Dashboard() {
   };
 
   // Load data (only when dates change)
-  const loadDashboardData = async (collectMore = false) => {
+  const loadDashboardData = async (collectMore = false, options = {}) => {
+    const preserveStreamingCache = !!options.preserveStreamingCache;
     setCollectionStarted(true);
     setLoading(true);
     setError(null);
-    setProgress({ items: 0, complete: false, isStreaming: true });
+    setCollectionPaused(false);
+    setProgress(prev => preserveStreamingCache
+      ? {
+          ...prev,
+          complete: false,
+          isStreaming: true,
+          phase: 'workflow_runs',
+          totalRuns: prev.totalRuns || lastKnownTotalRunsRef.current || 0
+        }
+      : {
+          items: 0,
+          complete: false,
+          isStreaming: true,
+          phase: 'workflow_runs',
+          totalRuns: 0,
+          elapsed_time: null,
+          eta_seconds: null,
+          phase1_elapsed: null,
+          phase2_elapsed: null,
+          phase2_eta: null
+        });
     setDataLoaded(false);
     
     try {
@@ -653,7 +802,9 @@ export default function Dashboard() {
         setFilters(prev => ({ ...prev, start: defaultStart, end: defaultEnd }));
       }
 
-      clearWebSocketCache(repo);
+      if (!preserveStreamingCache) {
+        clearWebSocketCache(repo);
+      }
       
       // Get current filter values to use in callback (avoid closure issues)
       const currentFilters = { ...filters, start: dateFiltersRef.current.start, end: dateFiltersRef.current.end };
@@ -726,6 +877,14 @@ export default function Dashboard() {
     }
   };
 
+  const cancelCollection = () => {
+    console.info('[Dashboard] Cancel collection is currently disabled.');
+  };
+
+  const resumeCollection = () => {
+    console.info('[Dashboard] Resume collection is currently disabled.');
+  };
+
   // ============================================
   // Filter Functions
   // ============================================
@@ -796,6 +955,7 @@ export default function Dashboard() {
         console.log('[Dashboard] wsStatus changed', {
           isStreaming: status.isStreaming,
           isComplete: status.isComplete,
+          isPaused: status.isPaused,
           totalRuns: status.totalRuns,
           collectedRuns: status.collectedRuns,
           runsWithJobs: status.runsWithJobs,
@@ -804,6 +964,11 @@ export default function Dashboard() {
           phase1_elapsed: status.phase1_elapsed,  // Debug: Phase 1 elapsed time
           phase2_elapsed: status.phase2_elapsed   // Debug: Phase 2 elapsed time
         });
+
+        setCollectionPaused(!!status.isPaused);
+        if (status.totalRuns) {
+          lastKnownTotalRunsRef.current = status.totalRuns;
+        }
         
         // Update main progress state (controls the streaming indicator)
         setProgress(prev => {
@@ -838,7 +1003,7 @@ export default function Dashboard() {
             complete: status.isComplete || false,
             isStreaming: status.isStreaming || false,
             phase: status.phase || prev.phase || 'workflow_runs',
-            totalRuns: status.totalRuns || prev.totalRuns || 0, // Total count from API
+            totalRuns: status.totalRuns || prev.totalRuns || lastKnownTotalRunsRef.current || 0, // Total count from API
             elapsed_time: status.elapsed_time || prev.elapsed_time || null,
             eta_seconds: status.eta_seconds || prev.eta_seconds || null,
             phase1_elapsed: status.phase1_elapsed || prev.phase1_elapsed || null,
@@ -903,6 +1068,9 @@ export default function Dashboard() {
     chrome.storage.local.get(['wsStatus'], (result) => {
       const status = result.wsStatus || {};
       if (status) {
+        if (status.totalRuns) {
+          lastKnownTotalRunsRef.current = status.totalRuns;
+        }
         setProgress({
           items: (status.collectedRuns !== undefined && status.collectedRuns !== null) 
             ? status.collectedRuns 
@@ -910,7 +1078,7 @@ export default function Dashboard() {
           complete: status.isComplete || false,
           isStreaming: status.isStreaming || false,
           phase: status.phase || 'workflow_runs',
-          totalRuns: status.totalRuns || 0, // Total count from API
+          totalRuns: status.totalRuns || lastKnownTotalRunsRef.current || 0, // Total count from API
           elapsed_time: status.elapsed_time || null,
           eta_seconds: status.eta_seconds || null,
           phase1_elapsed: status.phase1_elapsed || null,
@@ -998,52 +1166,35 @@ export default function Dashboard() {
   // Show start collection button if collection hasn't started yet
   if (!collectionStarted && !loading && !data) {
     return (
-      <div className="dashboard dark container">
-        <div style={{ textAlign: 'center', padding: '60px 40px' }}>
-          <h2 style={{ marginBottom: '20px', color: '#fff' }}>GitHub Actions Dashboard</h2>
-          <p style={{ marginBottom: '30px', color: '#ccc', fontSize: '16px' }}>
-            Ready to collect workflow run data for <strong style={{ color: '#4caf50' }}>{currentRepo || 'this repository'}</strong>
-          </p>
-          <p style={{ marginBottom: '40px', color: '#999', fontSize: '14px' }}>
-            Click the button below to start collecting all workflow runs from GitHub.
-            <br />
-            This will fetch all available runs regardless of the date filters shown.
-          </p>
-          <button 
-            className="primary-button" 
-            onClick={loadDashboardData}
-            style={{
-              padding: '16px 32px',
-              fontSize: '18px',
-              fontWeight: '600',
-              background: 'linear-gradient(135deg, #4caf50 0%, #45a049 100%)',
-              border: 'none',
-              borderRadius: '8px',
-              color: 'white',
-              cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(76, 175, 80, 0.4)',
-              transition: 'all 0.3s ease',
-              minWidth: '200px'
-            }}
-            onMouseOver={(e) => {
-              e.target.style.transform = 'translateY(-2px)';
-              e.target.style.boxShadow = '0 6px 16px rgba(76, 175, 80, 0.5)';
-            }}
-            onMouseOut={(e) => {
-              e.target.style.transform = 'translateY(0)';
-              e.target.style.boxShadow = '0 4px 12px rgba(76, 175, 80, 0.4)';
-            }}
-          >
-            🚀 Start Data Collection
-          </button>
-        </div>
+      <div className={`dashboard ${dashboardTheme} container`}>
+        <section className="collection-start card">
+          <div>
+            <p className="eyebrow">{currentRepo || 'GitHub repository'}</p>
+            <h2>GitHub Actions Dashboard</h2>
+            <p>
+              Ready to collect workflow run data for <strong>{currentRepo || 'this repository'}</strong>
+            </p>
+            <p className="collection-start-note">
+              Collect all available workflow runs first, then use workflow, branch, actor, and date filters on the dashboard.
+            </p>
+          </div>
+          <div className="collection-start-actions">
+            <ThemeToggle
+              theme={dashboardTheme}
+              onToggle={() => setDashboardTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+            />
+            <button className="primary-action primary-action-large" onClick={loadDashboardData} type="button">
+              Start Data Collection
+            </button>
+          </div>
+        </section>
       </div>
     );
   }
 
   if (loading && !data && collectionStarted) {
     return (
-      <div className="dashboard dark container">
+      <div className={`dashboard ${dashboardTheme} container`}>
         <div style={{ textAlign: 'center', padding: '40px' }}>
           <div className="spinner" style={{ 
             border: '4px solid #f3f3f3',
@@ -1061,7 +1212,7 @@ export default function Dashboard() {
   }
   
   if (error) return (
-    <div className="dashboard dark container">
+    <div className={`dashboard ${dashboardTheme} container`}>
       <div className="card" style={{
         borderLeft: '4px solid #f44336',
         background: 'linear-gradient(90deg, rgba(244,67,54,0.1) 0%, rgba(244,67,54,0.05) 100%)',
@@ -1073,7 +1224,7 @@ export default function Dashboard() {
           {error}
         </p>
         <div style={{ marginTop: '12px' }}>
-          <button className="primary-button" onClick={loadDashboardData}>Retry</button>
+          <button className="primary-action" onClick={loadDashboardData} type="button">Retry</button>
         </div>
       </div>
     </div>
@@ -1085,10 +1236,10 @@ export default function Dashboard() {
     // Show loading state while checking for existing data
     if (checkingData) {
       return (
-        <div className="dashboard dark container">
+        <div className={`dashboard ${dashboardTheme} container`}>
           <div style={{ textAlign: 'center', padding: '60px 40px' }}>
-            <h2 style={{ marginBottom: '20px', color: '#fff' }}>GitHub Actions Dashboard</h2>
-            <p style={{ color: '#ccc', fontSize: '16px' }}>Checking for existing data...</p>
+            <h2>GitHub Actions Dashboard</h2>
+            <p>Checking for existing data...</p>
           </div>
         </div>
       );
@@ -1097,30 +1248,18 @@ export default function Dashboard() {
     // This should not be reached if button logic is correct, but as fallback:
     if (!collectionStarted) {
       return (
-        <div className="dashboard dark container">
-          <div style={{ textAlign: 'center', padding: '60px 40px' }}>
-            <h2 style={{ marginBottom: '20px', color: '#fff' }}>GitHub Actions Dashboard</h2>
-            <p style={{ marginBottom: '30px', color: '#ccc', fontSize: '16px' }}>
-              Ready to collect workflow run data for <strong style={{ color: '#4caf50' }}>{currentRepo || 'this repository'}</strong>
+        <div className={`dashboard ${dashboardTheme} container`}>
+          <div className="collection-start card">
+            <h2>GitHub Actions Dashboard</h2>
+            <p>
+              Ready to collect workflow run data for <strong>{currentRepo || 'this repository'}</strong>
             </p>
             <button 
-              className="primary-button" 
+              className="primary-action primary-action-large" 
               onClick={() => loadDashboardData(false)}
-              style={{
-                padding: '16px 32px',
-                fontSize: '18px',
-                fontWeight: '600',
-                background: 'linear-gradient(135deg, #4caf50 0%, #45a049 100%)',
-                border: 'none',
-                borderRadius: '8px',
-                color: 'white',
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(76, 175, 80, 0.4)',
-                transition: 'all 0.3s ease',
-                minWidth: '200px'
-              }}
+              type="button"
             >
-              🚀 Start Data Collection
+              Start Data Collection
             </button>
           </div>
         </div>
@@ -1129,7 +1268,7 @@ export default function Dashboard() {
     return null;
   }
   
-  if (data.noData) return <div className="dashboard dark container" style={{ textAlign: 'center', padding: '2rem' }}>
+  if (data.noData) return <div className={`dashboard ${dashboardTheme} container`} style={{ textAlign: 'center', padding: '2rem' }}>
     <h2>No Data Available</h2>
     <p>{data.message}</p>
   </div>;
@@ -1497,6 +1636,105 @@ export default function Dashboard() {
     });
   };
 
+  const getNextZoomRange = (length, currentZoom = null) => {
+    if (!length || length <= 2) return null;
+
+    const currentStart = currentZoom?.startIndex ?? 0;
+    const currentEnd = currentZoom?.endIndex ?? length - 1;
+    const currentSize = currentEnd - currentStart + 1;
+    const nextSize = Math.max(2, Math.ceil(currentSize * 0.6));
+
+    if (nextSize >= currentSize) {
+      return { startIndex: currentStart, endIndex: currentEnd };
+    }
+
+    const center = Math.round((currentStart + currentEnd) / 2);
+    const startIndex = Math.max(0, Math.min(length - nextSize, center - Math.floor(nextSize / 2)));
+    return { startIndex, endIndex: startIndex + nextSize - 1 };
+  };
+
+  const getZoomedData = (items, zoom) => {
+    if (!zoom || !Array.isArray(items)) return items;
+    return items.slice(zoom.startIndex, zoom.endIndex + 1);
+  };
+
+  const durationExplosionData = getDurationExplosionData(selectedWorkflowForDuration);
+  const failureWorseningData = getFailureWorseningData();
+  const visibleRunsOverTime = getZoomedData(runsOverTime, dailyRunsZoom);
+  const visibleTimeToFix = getZoomedData(timeToFix, timeToFixZoom);
+
+  const getPanelZoom = (panelId) => {
+    switch (panelId) {
+      case 'dailyRuns':
+        return dailyRunsZoom;
+      case 'durationVariability':
+        return durationVariabilityZoom;
+      case 'cumulativeFailure':
+        return cumulativeFailureZoom;
+      case 'timeToFix':
+        return timeToFixZoom;
+      case 'durationExplosion':
+        return durationExplosionZoom;
+      case 'failureWorsening':
+        return failureWorseningZoom;
+      default:
+        return null;
+    }
+  };
+
+  const setPanelZoom = (panelId, zoom) => {
+    switch (panelId) {
+      case 'dailyRuns':
+        setDailyRunsZoom(zoom);
+        break;
+      case 'durationVariability':
+        setDurationVariabilityZoom(zoom);
+        break;
+      case 'cumulativeFailure':
+        setCumulativeFailureZoom(zoom);
+        break;
+      case 'timeToFix':
+        setTimeToFixZoom(zoom);
+        break;
+      case 'durationExplosion':
+        setDurationExplosionZoom(zoom);
+        break;
+      case 'failureWorsening':
+        setFailureWorseningZoom(zoom);
+        break;
+      default:
+        break;
+    }
+  };
+
+  const getPanelDataLength = (panelId) => {
+    switch (panelId) {
+      case 'dailyRuns':
+      case 'durationVariability':
+        return runsOverTime.length;
+      case 'cumulativeFailure':
+        return failureDurationOverTime.length;
+      case 'timeToFix':
+        return timeToFix.length;
+      case 'durationExplosion':
+        return durationExplosionData.length;
+      case 'failureWorsening':
+        return failureWorseningData.length;
+      default:
+        return 0;
+    }
+  };
+
+  const zoomPanelData = (panelId) => {
+    const nextZoom = getNextZoomRange(getPanelDataLength(panelId), getPanelZoom(panelId));
+    setPanelZoom(panelId, nextZoom);
+  };
+
+  const resetPanelZoom = (panelId, afterReset = null) => {
+    setPanelZoom(panelId, null);
+    if (afterReset) afterReset();
+  };
+
   // Custom Box Plot Component
   const BoxPlot = ({ data, x, y, width, height, min, q1, median, q3, max, mean }) => {
     const boxHeight = height * 0.6;
@@ -1614,133 +1852,103 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="dashboard dark">
+    <div className={`dashboard ${dashboardTheme}`}>
       <div className="container">
-        {/* Streaming indicator */}
-        {progress.isStreaming && (
-          <div style={{ 
-            padding: '15px 20px', 
-            background: progress.phase === 'workflow_runs' 
-              ? 'linear-gradient(90deg, #2196f3 0%, #1976d2 100%)' 
-              : 'linear-gradient(90deg, #ff9800 0%, #f44336 100%)',
-            color: 'white',
-            borderRadius: '8px',
-            marginBottom: '20px',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-          }}>
-            {/* First row: Spinner and collecting text */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div className="spinner" style={{ 
-                border: '3px solid rgba(255,255,255,0.3)',
-                borderTop: '3px solid white',
-                borderRadius: '50%',
-                width: '20px',
-                height: '20px',
-                animation: 'spin 1s linear infinite'
-              }}></div>
-                <span style={{ fontWeight: 600 }}>
-                  {progress.phase === 'workflow_runs' ? 'Collecting workflow runs...' : 'Collecting job details...'}
-                </span>
-            </div>
-              {/* Progress: X / Total */}
-            <span style={{ 
-              background: 'rgba(255,255,255,0.2)', 
-              padding: '4px 12px', 
-              borderRadius: '12px',
-              fontSize: '14px',
-              fontWeight: 700
-            }}>
-                {progress.phase === 'workflow_runs' 
-                  ? `${progress.items} / ${progress.totalRuns || '?'} runs`
+        {(progress.isStreaming || collectionPaused) && (
+          <section className={`collection-banner ${collectionPaused ? 'paused' : ''}`} aria-label="Collection status">
+            <div className="status-dot" aria-hidden="true" />
+            <div>
+              <p className="banner-title">
+                {collectionPaused
+                  ? 'Collection paused'
+                  : progress.phase === 'workflow_runs'
+                    ? 'Collecting workflow runs'
+                    : 'Collecting job details'}
+              </p>
+              <p className="banner-meta">
+                {progress.phase === 'workflow_runs' || collectionPaused
+                  ? `${progress.items || 0} / ${progress.totalRuns || '?'} runs`
                   : `${jobProgress.runs_processed || 0} / ${jobProgress.total_runs || 0} runs (${jobProgress.jobs_collected || 0} jobs)`}
-            </span>
+              </p>
             </div>
-            
-            {/* Second row: Time elapsed and ETA (under the collecting text) */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '14px', fontWeight: 500, paddingLeft: '32px' }}>
-              {progress.phase === 'workflow_runs' ? (
-                <>
-                  <span>Time Elapsed: <strong>{formatDuration(localElapsed || progress.elapsed_time || 0)}</strong></span>
-                  {progress.eta_seconds && (
-                    <span>ETA: <strong>{formatDuration(progress.eta_seconds)}</strong></span>
-                  )}
-                </>
-              ) : (
-                <>
-                  {progress.phase1_elapsed && (
-                    <span>Phase 1 Elapsed: <strong>{formatDuration(progress.phase1_elapsed)}</strong></span>
-                  )}
-                  <span>Phase 2 Elapsed: <strong>{formatDuration(localElapsed || 0)}</strong></span>
-                  {progress.phase1_elapsed && (
-                    <span>Total Elapsed: <strong>{formatDuration((progress.phase1_elapsed || 0) + (localElapsed || 0))}</strong></span>
-                  )}
-                  {progress.phase2_eta && (
-                    <span>ETA: <strong>{formatDuration(progress.phase2_eta)}</strong></span>
-                  )}
-                </>
+            <div className="banner-progress" aria-hidden="true">
+              <span style={{
+                width: progress.totalRuns
+                  ? `${Math.min(100, Math.round(((progress.items || jobProgress.runs_processed || 0) / progress.totalRuns) * 100))}%`
+                  : '12%'
+              }} />
+            </div>
+            <dl className="banner-times">
+              <div>
+                <dt>Elapsed</dt>
+                <dd>{formatDuration(localElapsed || progress.elapsed_time || progress.phase2_elapsed || 0)}</dd>
+              </div>
+              {(progress.eta_seconds || progress.phase2_eta) && (
+                <div>
+                  <dt>ETA</dt>
+                  <dd>{formatDuration(progress.eta_seconds || progress.phase2_eta)}</dd>
+                </div>
               )}
-            </div>
-          </div>
+            </dl>
+            {collectionPaused ? (
+              <button className="resume-action" type="button" onClick={resumeCollection}>Resume collection</button>
+            ) : (
+              <button className="cancel-action" type="button" onClick={cancelCollection}>Cancel collection</button>
+            )}
+          </section>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
-          <h2 style={{ marginTop: 0, marginBottom: 0 }}>GitHub Actions Dashboard</h2>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+        <section className="overall-health-section card" aria-label="Overall health check">
+          <div className="overall-health-header">
+            <div>
+              <p className="eyebrow">Overall health check</p>
+              <h3>Workflow health summary</h3>
+            </div>
+          </div>
+          <div className="overall-health-grid">
+            <div className="overall-health-card overall-health-warning" aria-label="Duration worsening warning placeholder">
+              <h4>Warnings</h4>
+            </div>
+            <div className="overall-health-card overall-health-danger" aria-label="Failure rate warning placeholder">
+              <h4>Failures</h4>
+            </div>
+            <div className="overall-health-card overall-health-info" aria-label="Workflow status summary placeholder">
+              <h4>Overall health</h4>
+            </div>
+          </div>
+        </section>
+
+        <header className="dashboard-header">
+          <div>
+            <p className="eyebrow">{currentRepo || 'GitHub repository'}</p>
+            <h2>GitHub Actions Dashboard</h2>
+          </div>
+
+          <div className="header-actions">
             {/* Collection Info */}
             {dataExists && lastUpdated && (
-              <div style={{ 
-                fontSize: '14px', 
-                color: '#ccc',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <span>📊 {existingRunsCount} runs</span>
-                <span style={{ color: '#666' }}>•</span>
+              <div className="collection-meta">
+                <span>{existingRunsCount} runs</span>
                 <span>Last updated: {new Date(lastUpdated).toLocaleDateString()}</span>
               </div>
             )}
             
             {progress.isStreaming && (
-              <div style={{ 
-                fontSize: '14px', 
-                color: '#4caf50',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
+              <div className="collection-meta success">
                 {progress.newRuns !== undefined && progress.existingRuns !== undefined && (
                   <>
-                    <span>🆕 {progress.newRuns} new</span>
-                    <span style={{ color: '#666' }}>•</span>
-                    <span>📦 {progress.existingRuns} existing</span>
+                    <span>{progress.newRuns} new</span>
+                    <span>{progress.existingRuns} existing</span>
                   </>
                 )}
               </div>
             )}
-            
-            {dataExists && !progress.isStreaming && (
-              <button
-                onClick={() => loadDashboardData(true)}
-                className="primary-button"
-                style={{
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  background: 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)',
-                  border: 'none',
-                  borderRadius: '6px',
-                  color: 'white',
-                  cursor: 'pointer',
-                  fontWeight: '500'
-                }}
-              >
-                🔄 Collect More Data
-              </button>
-            )}
+            <ThemeToggle
+              theme={dashboardTheme}
+              onToggle={() => setDashboardTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+            />
           </div>
-        </div>
+        </header>
         
         {/* Filter Panel */}
         <div className="filter-panel card">
@@ -1866,33 +2074,12 @@ export default function Dashboard() {
             </div>
 
             {/* Date Range Picker */}
-            <div className="filter-group" ref={datePickerRef} style={{ position: 'relative' }}>
+            <div className="filter-group date-range-group" ref={datePickerRef}>
               <label>Date Range</label>
               <button
+                className="dropdown-toggle"
                 onClick={() => setDatePickerOpen(!datePickerOpen)}
-                style={{
-                  width: '100%',
-                  padding: '10px 15px',
-                  background: '#222',
-                  border: '1px solid #444',
-                  borderRadius: '4px',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontSize: '14px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseOver={(e) => {
-                  e.target.style.background = '#2a2a2a';
-                  e.target.style.borderColor = '#555';
-                }}
-                onMouseOut={(e) => {
-                  e.target.style.background = '#222';
-                  e.target.style.borderColor = '#444';
-                }}
+                type="button"
               >
                 <span>
                   {filters.start && filters.end 
@@ -1905,7 +2092,7 @@ export default function Dashboard() {
                       })()
                     : 'Select date range...'}
                 </span>
-                <span style={{ fontSize: '12px', opacity: 0.7 }}>▼</span>
+                <span className="dropdown-arrow">▼</span>
               </button>
               
               {datePickerOpen && (() => {
@@ -1948,19 +2135,7 @@ export default function Dashboard() {
                 }
 
                 return (
-                  <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    marginTop: '5px',
-                    background: '#1a1a1a',
-                    border: '1px solid #444',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    zIndex: 1000,
-                    width: '340px',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
-                  }}>
+                  <div className="date-picker-popover">
                     {/* Quick Action Buttons */}
                     <div style={{ marginBottom: '20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <button
@@ -2204,135 +2379,171 @@ export default function Dashboard() {
               })()}
             </div>
           </div>
+          {dataExists && !progress.isStreaming && (
+            <div className="filter-action">
+              <span>Data</span>
+              <button
+                onClick={() => loadDashboardData(true)}
+                className="primary-action"
+                type="button"
+              >
+                Collect More Data
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Stats */}
         <div className="stats-row">
-          <div className="stat-card card">
-            <div className="title" style={{ display: 'flex', alignItems: 'center' }}>
-              Total runs
-              <InfoIcon explanation={{
+          <MetricCard
+            tone="info"
+            icon="play"
+            title="Total runs"
+            value={data.totalRuns}
+            note={data.originalTotalRuns !== undefined && data.originalTotalRuns !== data.totalRuns ? `Filtered from ${data.originalTotalRuns} raw runs` : 'Runs executed'}
+            explanation={{
                 title: 'Total Runs',
                 text: 'The total number of workflow runs collected in the selected date range. This includes all runs regardless of their status (success, failure, cancelled, etc.).'
-              }} />
+            }}
+          >
+            <div className="metric-mini total-runs-visual" aria-hidden="true">
+              <span style={{ width: `${Math.min(100, Math.round(((data.totalRuns || 0) / Math.max(data.originalTotalRuns || data.totalRuns || 1, 1)) * 100))}%` }} />
             </div>
-            <div className="value">{data.originalTotalRuns !== undefined ? data.originalTotalRuns : data.totalRuns}</div>
-          </div>
-          <div className="stat-card card">
-            <div className="title" style={{ display: 'flex', alignItems: 'center' }}>
-              Success rate
-              <InfoIcon explanation={{
+          </MetricCard>
+          <MetricCard
+            tone="success"
+            icon="check"
+            title="Success rate"
+            value={`${(data.successRate * 100).toFixed(1)}%`}
+            note={`${Math.round((data.successRate || 0) * (data.totalRuns || 0))} successful`}
+            explanation={{
                 title: 'Success Rate',
                 text: 'The percentage of workflow runs that completed successfully. Calculated as (successful runs / total runs) × 100%. A higher success rate indicates more reliable workflows.'
-              }} />
+            }}
+          >
+            <div className="success-gauge" role="img" aria-label={`Success rate ${(data.successRate * 100).toFixed(1)} percent`}>
+              <svg viewBox="0 0 120 70" aria-hidden="true">
+                <path className="gauge-track" d="M18 60 A42 42 0 0 1 102 60" />
+                <path className="gauge-fill" style={{ strokeDashoffset: 108 - (108 * (data.successRate || 0)) }} d="M18 60 A42 42 0 0 1 102 60" />
+              </svg>
             </div>
-            <div className="value">{`${(data.successRate * 100).toFixed(1)}%`}</div>
-          </div>
-          <div className="stat-card card">
-            <div className="title" style={{ display: 'flex', alignItems: 'center' }}>
-              Median duration
-              <InfoIcon explanation={{
+          </MetricCard>
+          <MetricCard
+            tone="warning"
+            icon="clock"
+            title="Median duration"
+            value={`${data.medianDuration} s`}
+            note="Typical run time"
+            explanation={{
                 title: 'Median Duration',
                 text: 'The median (middle value) execution time of all workflow runs in seconds. The median is less affected by outliers than the average, providing a more representative measure of typical workflow duration.'
-              }} />
-            </div>
-            <div className="value">{`${data.medianDuration} s`}</div>
-          </div>
-          <div className="stat-card card">
-            <div className="title" style={{ display: 'flex', alignItems: 'center' }}>
-              MAD (Median Absolute Deviation)
-              <InfoIcon explanation={{
+            }}
+          >
+            <svg className="metric-mini duration-sparkline" viewBox="0 0 120 34" role="img" aria-label="Median duration trend">
+              <path className="spark-area" d="M4 28 L4 22 C22 26 30 18 42 20 C55 23 62 12 74 15 C88 17 96 9 116 6 L116 34 L4 34 Z" />
+              <path className="spark-line" d="M4 22 C22 26 30 18 42 20 C55 23 62 12 74 15 C88 17 96 9 116 6" />
+            </svg>
+          </MetricCard>
+          <MetricCard
+            tone="danger"
+            icon="pulse"
+            title="MAD"
+            value={`${data.mad} s`}
+            note="Run time variability"
+            explanation={{
                 title: 'Median Absolute Deviation (MAD)',
                 text: 'A measure of variability that shows how spread out the workflow durations are. MAD is the median of the absolute deviations from the median duration. Lower values indicate more consistent execution times, while higher values suggest greater variability.'
-              }} />
+            }}
+          >
+            <div className="metric-mini mad-visual" aria-hidden="true">
+              <span style={{ height: '35%' }} />
+              <span style={{ height: '58%' }} />
+              <span style={{ height: '82%' }} />
+              <span style={{ height: '46%' }} />
+              <span style={{ height: '72%' }} />
+              <span style={{ height: '50%' }} />
             </div>
-            <div className="value">{`${data.mad} s`}</div>
-          </div>
+          </MetricCard>
         </div>
 
         {/* Charts */}
         <div className="dashboard-grid">
           {/* Statistics Container with Tabs */}
-          <div className="card" style={{ width: '100%', gridColumn: '1 / -1' }}>
-            <h3 style={{ display: 'flex', alignItems: 'center', margin: 0 }}>
+          <div className="card stats-panel">
+            <h3 className="stats-title">
               Statistics
               <InfoIcon explanation={{
                 title: 'Statistics',
                 text: 'Detailed statistics tables showing workflow, job, branch, event trigger, and contributor metrics. Use the tabs to switch between different views. Each table displays total runs, success rates, and other relevant metrics for the selected filters.'
               }} />
             </h3>
-            <div style={{ marginBottom: '20px', borderBottom: '1px solid #333' }}>
-              <div style={{ display: 'flex', gap: '10px' }}>
+            <div className="stats-tabs-wrap">
+              <div className="stats-tabs" role="tablist" aria-label="Statistics views">
                 <button
+                  id="stats-tab-workflows"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'workflows'}
+                  aria-controls="stats-panel-workflows"
+                  className={`stats-tab-button ${activeStatsTab === 'workflows' ? 'active' : ''}`}
                   onClick={() => setActiveStatsTab('workflows')}
-                  style={{
-                    padding: '10px 20px',
-                    background: activeStatsTab === 'workflows' ? '#4caf50' : '#222',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                    borderRadius: '4px 4px 0 0'
-                  }}
                 >
+                  <span className="tab-icon"><UIIcon name="workflow" /></span>
                   Workflows
                 </button>
                 <button
+                  id="stats-tab-jobs"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'jobs'}
+                  aria-controls="stats-panel-jobs"
+                  className={`stats-tab-button ${activeStatsTab === 'jobs' ? 'active' : ''}`}
                   onClick={() => setActiveStatsTab('jobs')}
-                  style={{
-                    padding: '10px 20px',
-                    background: activeStatsTab === 'jobs' ? '#4caf50' : '#222',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                    borderRadius: '4px 4px 0 0'
-                  }}
                 >
+                  <span className="tab-icon"><UIIcon name="jobs" /></span>
                   Jobs
                 </button>
                 <button
+                  id="stats-tab-branch"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'branch'}
+                  aria-controls="stats-panel-branch"
+                  className={`stats-tab-button ${activeStatsTab === 'branch' ? 'active' : ''}`}
                   onClick={() => setActiveStatsTab('branch')}
-                  style={{
-                    padding: '10px 20px',
-                    background: activeStatsTab === 'branch' ? '#4caf50' : '#222',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                    borderRadius: '4px 4px 0 0'
-                  }}
                 >
+                  <span className="tab-icon"><UIIcon name="branch" /></span>
                   Branch
                 </button>
                 <button
+                  id="stats-tab-events"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'events'}
+                  aria-controls="stats-panel-events"
+                  className={`stats-tab-button ${activeStatsTab === 'events' ? 'active' : ''}`}
                   onClick={() => setActiveStatsTab('events')}
-                  style={{
-                    padding: '10px 20px',
-                    background: activeStatsTab === 'events' ? '#4caf50' : '#222',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                    borderRadius: '4px 4px 0 0'
-                  }}
                 >
+                  <span className="tab-icon"><UIIcon name="events" /></span>
                   Event Triggers
                 </button>
                 <button
+                  id="stats-tab-contributors"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'contributors'}
+                  aria-controls="stats-panel-contributors"
+                  className={`stats-tab-button ${activeStatsTab === 'contributors' ? 'active' : ''}`}
                   onClick={() => setActiveStatsTab('contributors')}
-                  style={{
-                    padding: '10px 20px',
-                    background: activeStatsTab === 'contributors' ? '#4caf50' : '#222',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                    borderRadius: '4px 4px 0 0'
-                  }}
                 >
+                  <span className="tab-icon"><UIIcon name="contributors" /></span>
                   Contributors
                 </button>
               </div>
             </div>
             
             {activeStatsTab === 'workflows' && (
-              <div className="table-wrapper">
+              <div id="stats-panel-workflows" role="tabpanel" aria-labelledby="stats-tab-workflows" className="table-wrapper">
                 <table className="branch-table">
                   <thead>
                     <tr>
@@ -2402,7 +2613,7 @@ export default function Dashboard() {
             
             {activeStatsTab === 'jobs' && (() => {
               return (
-                <div className="table-wrapper">
+                <div id="stats-panel-jobs" role="tabpanel" aria-labelledby="stats-tab-jobs" className="table-wrapper">
                 {/* Show progress while collecting jobs (Phase 2) */}
                 {jobProgress.isCollecting && jobProgress.total_runs > 0 && (
                   <div style={{
@@ -2523,39 +2734,31 @@ export default function Dashboard() {
             })()}
             
             {activeStatsTab === 'branch' && (
-              <div>
-                <div style={{ marginBottom: '15px', borderBottom: '1px solid #333' }}>
-                  <div style={{ display: 'flex', gap: '10px' }}>
+              <div id="stats-panel-branch" role="tabpanel" aria-labelledby="stats-tab-branch">
+                <div className="branch-event-tabs-wrap">
+                  <div className="branch-event-tabs" role="tablist" aria-label="Branch event filters">
                     <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeBranchEventTab === 'all'}
                       onClick={() => setActiveBranchEventTab('all')}
-                      style={{
-                        padding: '8px 16px',
-                        background: activeBranchEventTab === 'all' ? '#2196f3' : '#222',
-                        color: '#fff',
-                        border: 'none',
-                        cursor: 'pointer',
-                        borderRadius: '4px'
-                      }}
+                      className={`branch-event-tab ${activeBranchEventTab === 'all' ? 'active' : ''}`}
                     >
                       All Events
                     </button>
                     {eventStats.map(e => (
                       <button
                         key={e.name}
+                        type="button"
+                        role="tab"
+                        aria-selected={activeBranchEventTab === e.name}
                         onClick={() => setActiveBranchEventTab(e.name)}
-                        style={{
-                          padding: '8px 16px',
-                          background: activeBranchEventTab === e.name ? '#2196f3' : '#222',
-                          color: '#fff',
-                          border: 'none',
-                          cursor: 'pointer',
-                          borderRadius: '4px'
-                        }}
+                        className={`branch-event-tab ${activeBranchEventTab === e.name ? 'active' : ''}`}
                       >
                         {e.name}
                       </button>
                     ))}
-          </div>
+                  </div>
                 </div>
             <div className="table-wrapper">
               <table className="branch-table">
@@ -2635,7 +2838,7 @@ export default function Dashboard() {
             )}
             
             {activeStatsTab === 'events' && (
-              <div className="table-wrapper">
+              <div id="stats-panel-events" role="tabpanel" aria-labelledby="stats-tab-events" className="table-wrapper">
                 <table className="branch-table">
                   <thead>
                     <tr>
@@ -2705,7 +2908,7 @@ export default function Dashboard() {
             )}
 
             {activeStatsTab === 'contributors' && (
-              <div>
+              <div id="stats-panel-contributors" role="tabpanel" aria-labelledby="stats-tab-contributors">
                 {/* Search bar for filtering contributors */}
                 <div style={{ marginBottom: '15px' }}>
                   <input
@@ -2801,16 +3004,28 @@ export default function Dashboard() {
           </div>
 
           {/* Daily runs */}
-          <div className="card">
-            <h3 style={{ display: 'flex', alignItems: 'center', margin: 0 }}>
-              Daily runs breakdown
-              <InfoIcon explanation={{
-                title: 'Daily Runs Breakdown',
-                text: 'A stacked bar chart showing the daily count of successful (green) and failed (red) workflow runs over time. This helps identify patterns in workflow execution and failure rates across different days.'
-              }} />
-            </h3>
+          <div className="card dashboard-chart-card modern-panel">
+            <div className="chart-card-header">
+              <div>
+                <p className="eyebrow">Runs over time</p>
+                <h3>
+                  Daily runs breakdown
+                  <InfoIcon explanation={{
+                    title: 'Daily Runs Breakdown',
+                    text: 'A stacked bar chart showing the daily count of successful (green) and failed (red) workflow runs over time. This helps identify patterns in workflow execution and failure rates across different days.'
+                  }} />
+                </h3>
+              </div>
+              <span className="status-pill success">Daily count</span>
+              <PanelControls
+                panelId="dailyRuns"
+                zoomed={!!dailyRunsZoom}
+                onZoom={zoomPanelData}
+                onReset={() => resetPanelZoom('dailyRuns')}
+              />
+            </div>
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={runsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <BarChart data={visibleRunsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#122" />
                 <XAxis dataKey="date" stroke="#bcd" />
                 <YAxis stroke="#bcd" />
@@ -2823,32 +3038,24 @@ export default function Dashboard() {
           </div>
 
           {/* Duration over time */}
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
-                Duration variability
-                <InfoIcon explanation={{
-                  title: 'Duration Variability',
-                  text: 'Shows the variability of workflow execution times over time. Displays the minimum (green area), maximum (orange area), and median (blue line) durations. Use the brush at the bottom to zoom into specific time periods. High variability may indicate performance issues or inconsistent resource availability.'
-                }} />
-              </h3>
-              <button
-                onClick={() => {
-                  setDurationVariabilityZoom(null);
-                }}
-                style={{
-                  padding: '5px 10px',
-                  background: durationVariabilityZoom ? '#4caf50' : '#333',
-                  color: '#fff',
-                  border: '1px solid #555',
-                  borderRadius: '4px',
-                  cursor: durationVariabilityZoom ? 'pointer' : 'default',
-                  fontSize: '11px'
-                }}
-                disabled={!durationVariabilityZoom}
-              >
-                Reset Zoom
-              </button>
+          <div className="card dashboard-chart-card modern-panel">
+            <div className="chart-card-header">
+              <div>
+                <p className="eyebrow">Duration variability</p>
+                <h3>
+                  Min, median, max
+                  <InfoIcon explanation={{
+                    title: 'Duration Variability',
+                    text: 'Shows the variability of workflow execution times over time. Displays the minimum (green area), maximum (orange area), and median (blue line) durations. Use the brush at the bottom to zoom into specific time periods. High variability may indicate performance issues or inconsistent resource availability.'
+                  }} />
+                </h3>
+              </div>
+              <PanelControls
+                panelId="durationVariability"
+                zoomed={!!durationVariabilityZoom}
+                onZoom={zoomPanelData}
+                onReset={() => resetPanelZoom('durationVariability', () => setDurationVariabilityZoom(null))}
+              />
             </div>
             <ResponsiveContainer width="100%" height={280}>
               <ComposedChart 
@@ -2885,32 +3092,25 @@ export default function Dashboard() {
           </div>
 
           {/* Cumulative failure duration */}
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
-                Cumulative failure duration
-                <InfoIcon explanation={{
-                  title: 'Cumulative Failure Duration',
-                  text: 'Shows the daily failure duration (red bars) and cumulative failure duration (orange line) over time. The cumulative line helps track the total time lost to failures. Use the brush at the bottom to zoom into specific periods. This metric helps quantify the impact of failures on development velocity.'
-                }} />
-              </h3>
-              <button
-                onClick={() => {
-                  setCumulativeFailureZoom(null);
-                }}
-                style={{
-                  padding: '5px 10px',
-                  background: cumulativeFailureZoom ? '#4caf50' : '#333',
-                  color: '#fff',
-                  border: '1px solid #555',
-                  borderRadius: '4px',
-                  cursor: cumulativeFailureZoom ? 'pointer' : 'default',
-                  fontSize: '11px'
-                }}
-                disabled={!cumulativeFailureZoom}
-              >
-                Reset Zoom
-              </button>
+          <div className="card dashboard-chart-card modern-panel">
+            <div className="chart-card-header">
+              <div>
+                <p className="eyebrow">Failure duration</p>
+                <h3>
+                  Cumulative failure duration
+                  <InfoIcon explanation={{
+                    title: 'Cumulative Failure Duration',
+                    text: 'Shows the daily failure duration (red bars) and cumulative failure duration (orange line) over time. The cumulative line helps track the total time lost to failures. Use the brush at the bottom to zoom into specific periods. This metric helps quantify the impact of failures on development velocity.'
+                  }} />
+                </h3>
+              </div>
+              <span className="status-pill danger">{`${(data.successRate < 1 ? (100 - data.successRate * 100) : 0).toFixed(1)}% failure rate`}</span>
+              <PanelControls
+                panelId="cumulativeFailure"
+                zoomed={!!cumulativeFailureZoom}
+                onZoom={zoomPanelData}
+                onReset={() => resetPanelZoom('cumulativeFailure', () => setCumulativeFailureZoom(null))}
+              />
             </div>
             {failureDurationOverTime && failureDurationOverTime.length > 0 && 
              failureDurationOverTime.some(item => (item.dailyFailureDuration || 0) > 0 || (item.cumulativeFailureDuration || 0) > 0) ? (
@@ -2953,15 +3153,27 @@ export default function Dashboard() {
           </div>
 
           {/* Time to Fix Box Plot */}
-          <div className="card">
-            <h3 style={{ display: 'flex', alignItems: 'center', margin: 0 }}>
-              Time to Fix (Box Plot)
-              <InfoIcon explanation={{
-                title: 'Time to Fix (Box Plot)',
-                text: 'A box plot visualization showing the distribution of time-to-fix for each workflow. Time-to-fix is calculated from the time a workflow fails until it succeeds again. The box shows the interquartile range (IQR), the line inside is the median, and the whiskers extend to show the full range. Hover over data points to see detailed information including commit links.'
-              }} />
-            </h3>
-            {timeToFix && timeToFix.length > 0 ? (
+          <div className="card dashboard-chart-card modern-panel">
+            <div className="chart-card-header">
+              <div>
+                <p className="eyebrow">Time to fix</p>
+                <h3>
+                  Time to Fix (Box Plot)
+                  <InfoIcon explanation={{
+                    title: 'Time to Fix (Box Plot)',
+                    text: 'A box plot visualization showing the distribution of time-to-fix for each workflow. Time-to-fix is calculated from the time a workflow fails until it succeeds again. The box shows the interquartile range (IQR), the line inside is the median, and the whiskers extend to show the full range. Hover over data points to see detailed information including commit links.'
+                  }} />
+                </h3>
+              </div>
+              <span className="status-pill warning">{`${topFailedWorkflows.length || timeToFix.length} regressions`}</span>
+              <PanelControls
+                panelId="timeToFix"
+                zoomed={!!timeToFixZoom}
+                onZoom={zoomPanelData}
+                onReset={() => resetPanelZoom('timeToFix')}
+              />
+            </div>
+            {visibleTimeToFix && visibleTimeToFix.length > 0 ? (
               <div style={{ width: '100%', height: '320px', position: 'relative', overflow: 'hidden' }}>
                 {tooltipData && (
                   <div 
@@ -2998,19 +3210,19 @@ export default function Dashboard() {
                     const plotHeight = chartHeight - margin.top - margin.bottom;
                     
                     // Get the appropriate time unit based on data
-                    const timeUnit = getTimeUnit(timeToFix);
+                    const timeUnit = getTimeUnit(visibleTimeToFix);
                     
                     // Handle large values by using 95th percentile or reasonable max
-                    const allValues = timeToFix.flatMap(d => [d.min, d.q1, d.median, d.q3, d.max, d.mean].filter(v => v > 0));
+                    const allValues = visibleTimeToFix.flatMap(d => [d.min, d.q1, d.median, d.q3, d.max, d.mean].filter(v => v > 0));
                     const sortedValues = [...allValues].sort((a, b) => a - b);
                     const p95Index = Math.floor(sortedValues.length * 0.95);
-                    const reasonableMax = sortedValues.length > 0 ? Math.max(sortedValues[p95Index] || sortedValues[sortedValues.length - 1], Math.max(...timeToFix.map(d => d.max || 0)) * 0.1) : 1;
+                    const reasonableMax = sortedValues.length > 0 ? Math.max(sortedValues[p95Index] || sortedValues[sortedValues.length - 1], Math.max(...visibleTimeToFix.map(d => d.max || 0)) * 0.1) : 1;
                     
                     // Convert reasonableMax to the selected unit for display
                     const reasonableMaxInUnit = reasonableMax / timeUnit.divisor;
                     
                     const xScale = reasonableMax > 0 ? plotWidth / reasonableMax : 1;
-                    const boxSpacing = plotHeight / (timeToFix.length + 1);
+                    const boxSpacing = plotHeight / (visibleTimeToFix.length + 1);
                     const boxHeight = Math.min(boxSpacing * 0.6, 40);
                     
                     return (
@@ -3065,7 +3277,7 @@ export default function Dashboard() {
                         })}
                         
                         {/* Y-axis labels (workflow names) */}
-                        {timeToFix.map((item, index) => {
+                        {visibleTimeToFix.map((item, index) => {
                           const yPos = (index + 1) * boxSpacing;
                           return (
                             <text 
@@ -3082,7 +3294,7 @@ export default function Dashboard() {
                         })}
                         
                         {/* Box plots */}
-                        {timeToFix.map((item, index) => {
+                        {visibleTimeToFix.map((item, index) => {
                           const yPos = (index + 1) * boxSpacing;
                           // Cap values at reasonableMax to prevent overflow
                           const minX = Math.min((item.min || 0), reasonableMax) * xScale;
@@ -3216,48 +3428,44 @@ export default function Dashboard() {
           </div>
 
           {/* Duration Explosion Chart */}
-          <div className="card card-span-2">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
-                Workflow Duration Over Time (with Explosion Detection)
-                <InfoIcon explanation={{
-                  title: 'Workflow Duration Over Time (with Explosion Detection)',
-                  text: 'A line chart showing workflow duration trends over time with automatic detection of "duration explosions" - sudden increases in execution time. Worsening points are highlighted with warning indicators. Select a specific workflow from the dropdown to focus on individual workflows. Use the brush to zoom into specific time periods. This helps identify performance regressions and optimization opportunities.'
-                }} />
-              </h3>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div className="card card-span-2 dashboard-chart-card modern-panel">
+            <div className="chart-card-header">
+              <div>
+                <p className="eyebrow">Workflow duration over time</p>
+                <h3>
+                  Explosion detection
+                  <InfoIcon explanation={{
+                    title: 'Workflow Duration Over Time (with Explosion Detection)',
+                    text: 'A line chart showing workflow duration trends over time with automatic detection of "duration explosions" - sudden increases in execution time. Worsening points are highlighted with warning indicators. Select a specific workflow from the dropdown to focus on individual workflows. Use the brush to zoom into specific time periods. This helps identify performance regressions and optimization opportunities.'
+                  }} />
+                </h3>
+              </div>
+              <div className="chart-header-actions">
                 <select 
+                  className="compact-select"
                   value={selectedWorkflowForDuration}
                   onChange={(e) => setSelectedWorkflowForDuration(e.target.value)}
-                  style={{ padding: '8px', background: '#222', color: '#fff', border: '1px solid #444' }}
                 >
                   <option value="all">All Workflows</option>
                   {workflowStats.map(w => (
                     <option key={w.name} value={w.name}>{w.name}</option>
                   ))}
                 </select>
-                <button
-                  onClick={() => {
+                <PanelControls
+                  panelId="durationExplosion"
+                  zoomed={!!durationExplosionZoom}
+                  onZoom={zoomPanelData}
+                  onReset={() => resetPanelZoom('durationExplosion', () => {
                     setDurationExplosionBrushKey(prev => prev + 1);
-                  }}
-                  style={{
-                    padding: '5px 10px',
-                    background: '#4caf50',
-                    color: '#fff',
-                    border: '1px solid #555',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '11px'
-                  }}
-                >
-                  Reset Zoom
-                </button>
+                    setDurationExplosionZoom(null);
+                  })}
+                />
               </div>
             </div>
             {workflowStats.length > 0 ? (
               <ResponsiveContainer width="100%" height={320}>
                 <LineChart 
-                  data={getDurationExplosionData(selectedWorkflowForDuration)} 
+                  data={durationExplosionData} 
                   margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#122" />
@@ -3375,6 +3583,7 @@ export default function Dashboard() {
                     dataKey="date" 
                     height={30}
                     stroke="#8884d8"
+                    key={durationExplosionBrushKey}
                     startIndex={durationExplosionZoom?.startIndex}
                     endIndex={durationExplosionZoom?.endIndex}
                     onChange={(e) => {
@@ -3395,37 +3604,29 @@ export default function Dashboard() {
           </div>
 
           {/* Failure Worsening Chart */}
-          <div className="card card-span-2">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center' }}>
-                Failure Rate Over Time (Worsening Detection)
-                <InfoIcon explanation={{
-                  title: 'Failure Rate Over Time (Worsening Detection)',
-                  text: 'A line chart showing the failure rate percentage over time with automatic detection of "worsening" periods - when failure rates increase significantly compared to previous periods. Worsening points are highlighted with warning indicators and include links to the commits that may have caused the issue. Use the brush to zoom into specific time periods. This helps identify when and why workflows started failing more frequently.'
-                }} />
-              </h3>
-              <button
-                onClick={() => {
-                  setFailureWorseningZoom(null);
-                }}
-                style={{
-                  padding: '5px 10px',
-                  background: failureWorseningZoom ? '#4caf50' : '#333',
-                  color: '#fff',
-                  border: '1px solid #555',
-                  borderRadius: '4px',
-                  cursor: failureWorseningZoom ? 'pointer' : 'default',
-                  fontSize: '11px'
-                }}
-                disabled={!failureWorseningZoom}
-              >
-                Reset Zoom
-              </button>
-        </div>
+          <div className="card card-span-2 dashboard-chart-card modern-panel">
+            <div className="chart-card-header">
+              <div>
+                <p className="eyebrow">Failure rate over time</p>
+                <h3>
+                  Worsening detection
+                  <InfoIcon explanation={{
+                    title: 'Failure Rate Over Time (Worsening Detection)',
+                    text: 'A line chart showing the failure rate percentage over time with automatic detection of "worsening" periods - when failure rates increase significantly compared to previous periods. Worsening points are highlighted with warning indicators and include links to the commits that may have caused the issue. Use the brush to zoom into specific time periods. This helps identify when and why workflows started failing more frequently.'
+                  }} />
+                </h3>
+              </div>
+              <PanelControls
+                panelId="failureWorsening"
+                zoomed={!!failureWorseningZoom}
+                onZoom={zoomPanelData}
+                onReset={() => resetPanelZoom('failureWorsening', () => setFailureWorseningZoom(null))}
+              />
+            </div>
             {workflowStats.length > 0 ? (
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart 
-                  data={getFailureWorseningData()} 
+                  data={failureWorseningData} 
                   margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#122" />
