@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard } from '../websocket';
+import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo } from '../websocket';
 
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -21,17 +21,16 @@ import {
   BarChart,
   Bar,
   Area,
-  ReferenceLine,
-  Brush
+  ReferenceLine
 } from 'recharts';
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3', '#9c27b0', '#00bcd4'];
+const SHOW_OVERALL_HEALTH_CHECK = false;
 
 function UIIcon({ name }) {
   const icons = {
-    moon: <><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.7 6.7 0 0 0 21 12.8Z" /></>,
-    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" /></>,
     expand: <><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" /><path d="M3 3l6 6M21 3l-6 6M21 21l-6-6M3 21l6-6" /></>,
+    collapse: <><path d="M9 3v6H3M15 3v6h6M21 15h-6v6M3 15h6v6" /><path d="M9 9 3 3M15 9l6-6M15 15l6 6M9 15l-6 6" /></>,
     zoom: <><circle cx="11" cy="11" r="7" /><path d="M11 8v6M8 11h6M16.5 16.5 21 21" /></>,
     reset: <><path d="M4 7v5h5" /><path d="M20 17a8 8 0 0 1-13.4 3.9L4 18" /><path d="M20 7a8 8 0 0 0-13.4-3.9L4 6" /></>,
     play: <path d="M8 5v14l11-7-11-7Z" />,
@@ -52,30 +51,26 @@ function UIIcon({ name }) {
   );
 }
 
-function ThemeToggle({ theme, onToggle }) {
-  const isLight = theme === 'light';
-  return (
-    <button
-      className="theme-toggle"
-      type="button"
-      aria-label={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
-      aria-pressed={isLight}
-      onClick={onToggle}
-    >
-      <span className="theme-knob" aria-hidden="true">
-        <span className="theme-icon sun-icon"><UIIcon name="sun" /></span>
-        <span className="theme-icon moon-icon"><UIIcon name="moon" /></span>
-      </span>
-    </button>
-  );
+function getInitialTheme() {
+  if (typeof window !== 'undefined') {
+    const themeParam = new URLSearchParams(window.location.search).get('theme');
+    if (themeParam === 'light' || themeParam === 'dark') return themeParam;
+
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+      return 'light';
+    }
+  }
+
+  return 'dark';
 }
 
-function PanelIconButton({ icon, label, onClick, disabled = false }) {
+function PanelIconButton({ icon, label, onClick, disabled = false, pressed = undefined }) {
   return (
     <button
       className="panel-icon-button"
       type="button"
       aria-label={label}
+      aria-pressed={pressed}
       title={label}
       onClick={onClick}
       disabled={disabled}
@@ -85,12 +80,139 @@ function PanelIconButton({ icon, label, onClick, disabled = false }) {
   );
 }
 
-function PanelControls({ panelId, zoomed, onZoom, onReset }) {
+function PanelControls({ panelId, isFullscreen, onFullscreenToggle }) {
   return (
     <div className="panel-controls" aria-label="Panel controls">
-      <PanelIconButton icon="zoom" label="Zoom into graph data" onClick={() => onZoom(panelId)} />
-      <PanelIconButton icon="reset" label="Reset zoom" onClick={onReset} disabled={!zoomed} />
+      <PanelIconButton
+        icon={isFullscreen ? 'collapse' : 'expand'}
+        label={isFullscreen ? 'Close chart popup' : 'Open chart popup'}
+        onClick={() => onFullscreenToggle(panelId)}
+        pressed={isFullscreen}
+      />
     </div>
+  );
+}
+
+function ChartCard({ panelId, extraClass = '', isFullscreen, children }) {
+  const className = [
+    'card dashboard-chart-card modern-panel',
+    extraClass
+  ].filter(Boolean).join(' ');
+
+  const portalTarget = typeof document !== 'undefined'
+    ? document.querySelector('.dashboard') || document.body
+    : null;
+
+  const popup = isFullscreen && portalTarget
+    ? createPortal(
+      <div
+        className="dashboard-chart-popup-layer"
+        role="dialog"
+        aria-modal="false"
+        aria-label={`${panelId} chart popup`}
+      >
+        <div className={`${className} dashboard-chart-popup`}>
+          {children}
+        </div>
+      </div>,
+      portalTarget
+    )
+    : null;
+
+  return (
+    <>
+      <div className={className}>{children}</div>
+      {popup}
+    </>
+  );
+}
+
+function SafeResponsiveContainer({ children }) {
+  const hostRef = useRef(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const element = hostRef.current;
+    if (!element) return undefined;
+
+    let animationFrameId = null;
+
+    const measure = () => {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+
+      animationFrameId = window.requestAnimationFrame(() => {
+        animationFrameId = null;
+        const rect = element.getBoundingClientRect();
+        const nextSize = {
+          width: Math.max(0, Math.floor(rect.width)),
+          height: Math.max(0, Math.floor(rect.height))
+        };
+
+        setSize(prevSize => (
+          prevSize.width === nextSize.width && prevSize.height === nextSize.height
+            ? prevSize
+            : nextSize
+        ));
+      });
+    };
+
+    measure();
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(measure)
+      : null;
+
+    if (resizeObserver) {
+      resizeObserver.observe(element);
+    }
+
+    window.addEventListener('resize', measure);
+
+    return () => {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
+
+  const isReady = size.width > 0 && size.height > 0;
+
+  return (
+    <div
+      ref={hostRef}
+      className="safe-responsive-container"
+      style={{ width: '100%', height: '100%', minWidth: 1, minHeight: 1 }}
+    >
+      {isReady ? (
+        <ResponsiveContainer width={size.width} height={size.height}>
+          {children}
+        </ResponsiveContainer>
+      ) : null}
+    </div>
+  );
+}
+
+function getSuccessGaugeTone(successRate) {
+  const percent = (successRate || 0) * 100;
+
+  if (percent < 75) return 'danger';
+  if (percent < 95) return 'warning';
+  return 'success';
+}
+
+function SuccessFailurePercent({ successRate, failureRate }) {
+  return (
+    <span className="success-failure-values">
+      <span className="success-percent">{successRate.toFixed(0)}%</span>
+      <span className="ratio-separator">/</span>
+      <span className="failure-percent">{failureRate.toFixed(0)}%</span>
+    </span>
   );
 }
 
@@ -161,9 +283,9 @@ function InfoIcon({ explanation, id }) {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (iconRef.current && popupRef.current && 
-          !iconRef.current.contains(event.target) && 
-          !popupRef.current.contains(event.target)) {
+      if (iconRef.current && popupRef.current &&
+        !iconRef.current.contains(event.target) &&
+        !popupRef.current.contains(event.target)) {
         setIsOpen(false);
       }
     };
@@ -314,8 +436,8 @@ function getFirstDayOfMonth(year, month) {
 function isSameDay(date1, date2) {
   if (!date1 || !date2) return false;
   return date1.getFullYear() === date2.getFullYear() &&
-         date1.getMonth() === date2.getMonth() &&
-         date1.getDate() === date2.getDate();
+    date1.getMonth() === date2.getMonth() &&
+    date1.getDate() === date2.getDate();
 }
 
 function isDateInRange(date, start, end) {
@@ -328,36 +450,36 @@ function isDateInRange(date, start, end) {
 
 function getDateRangeLabel(startStr, endStr) {
   if (!startStr || !endStr) return null;
-  
+
   const start = parseDateStr(startStr);
   const end = parseDateStr(endStr);
   if (!start || !end) return null;
-  
+
   const now = new Date();
-  
+
   // Check for Current Month
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  if (start.getTime() === firstDayOfMonth.getTime() && 
-      end.getTime() === lastDayOfMonth.getTime()) {
+  if (start.getTime() === firstDayOfMonth.getTime() &&
+    end.getTime() === lastDayOfMonth.getTime()) {
     return 'Current month';
   }
-  
+
   // Check for Current Year
   const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
   const lastDayOfYear = new Date(now.getFullYear(), 11, 31);
-  if (start.getTime() === firstDayOfYear.getTime() && 
-      end.getTime() === lastDayOfYear.getTime()) {
+  if (start.getTime() === firstDayOfYear.getTime() &&
+    end.getTime() === lastDayOfYear.getTime()) {
     return 'Current year';
   }
-  
+
   // Check for All Time (very wide range, typically 2000-2100)
   // Check if the range spans at least 50 years (to catch "All Time" selections)
   const yearsDiff = end.getFullYear() - start.getFullYear();
   if (yearsDiff >= 50 && start.getFullYear() <= 2010 && end.getFullYear() >= 2090) {
     return 'All time';
   }
-  
+
   return null; // Return null if it's a custom range
 }
 
@@ -382,10 +504,10 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false); // Start as false so button shows initially
   const [error, setError] = useState(null);
-  const [progress, setProgress] = useState({ 
-    items: 0, 
-    complete: false, 
-    isStreaming: false, 
+  const [progress, setProgress] = useState({
+    items: 0,
+    complete: false,
+    isStreaming: false,
     phase: 'workflow_runs',
     totalRuns: 0,
     elapsed_time: null,
@@ -395,14 +517,14 @@ export default function Dashboard() {
     phase2_eta: null
   });
   const lastKnownTotalRunsRef = useRef(0);
-  
+
   // Real-time elapsed time counter
   const [localElapsed, setLocalElapsed] = useState(0);
   const [phase1StartTime, setPhase1StartTime] = useState(null);
   const [phase2StartTime, setPhase2StartTime] = useState(null);
   const elapsedIntervalRef = useRef(null);
   const [jobProgress, setJobProgress] = useState({ runs_processed: 0, total_runs: 0, jobs_collected: 0, isCollecting: false });
-  const [dashboardTheme, setDashboardTheme] = useState('dark');
+  const [dashboardTheme, setDashboardTheme] = useState(getInitialTheme);
   const [collectionPaused, setCollectionPaused] = useState(false);
   // Filter states
   const [availableFilters, setAvailableFilters] = useState({
@@ -410,10 +532,10 @@ export default function Dashboard() {
     branches: ['all'],
     actors: ['all']
   });
-  
+
   // Store date filters in a ref to preserve them during collection
   const dateFiltersRef = useRef({ start: defaultStart, end: defaultEnd });
-  
+
   const [filters, setFilters] = useState({
     workflow: ['all'],
     branch: ['all'],
@@ -421,6 +543,15 @@ export default function Dashboard() {
     start: defaultStart,
     end: defaultEnd
   });
+
+  const getActiveDateRange = () => ({
+    start: filters.start || defaultStart,
+    end: filters.end || defaultEnd
+  });
+
+  useEffect(() => {
+    dateFiltersRef.current = getActiveDateRange();
+  }, [filters.start, filters.end]);
 
   // Current repo state
   const [currentRepo, setCurrentRepo] = useState(null);
@@ -431,6 +562,53 @@ export default function Dashboard() {
   const [existingRunsCount, setExistingRunsCount] = useState(0);
   const [checkingData, setCheckingData] = useState(true);
   const prevDatesRef = useRef({ start: defaultStart, end: defaultEnd });
+
+  useEffect(() => {
+    const applyTheme = (theme) => {
+      if (theme === 'light' || theme === 'dark') {
+        setDashboardTheme(theme);
+      }
+    };
+
+    applyTheme(new URLSearchParams(window.location.search).get('theme'));
+
+    const handleMessage = (event) => {
+      if (event.data?.type === 'GHA_DASHBOARD_THEME') {
+        applyTheme(event.data.theme);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.tabs) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const activeTab = tabs && tabs[0];
+        if (activeTab && typeof activeTab.id === 'number') {
+          const key = `githubTheme_${activeTab.id}`;
+          chrome.storage.local.get([key, 'githubTheme'], (result) => {
+            applyTheme(result[key] || result.githubTheme);
+          });
+        } else {
+          chrome.storage.local.get(['githubTheme'], (result) => {
+            applyTheme(result.githubTheme);
+          });
+        }
+      });
+    } else if (window.matchMedia) {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
+      const syncSystemTheme = () => setDashboardTheme(mediaQuery.matches ? 'light' : 'dark');
+      syncSystemTheme();
+      mediaQuery.addEventListener('change', syncSystemTheme);
+      return () => {
+        window.removeEventListener('message', handleMessage);
+        mediaQuery.removeEventListener('change', syncSystemTheme);
+      };
+    }
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
 
   const [openDropdowns, setOpenDropdowns] = useState({
     workflow: false,
@@ -448,15 +626,25 @@ export default function Dashboard() {
   const [selectedWorkflowForDuration, setSelectedWorkflowForDuration] = useState('all');
   const [tooltipData, setTooltipData] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
-  
-  // Zoom states for different charts (controlled Brush with startIndex/endIndex)
+  const [fullscreenPanelId, setFullscreenPanelId] = useState(null);
+
+  // Zoom states for different charts
   const [dailyRunsZoom, setDailyRunsZoom] = useState(null);
   const [durationVariabilityZoom, setDurationVariabilityZoom] = useState(null);
   const [cumulativeFailureZoom, setCumulativeFailureZoom] = useState(null);
   const [timeToFixZoom, setTimeToFixZoom] = useState(null);
   const [durationExplosionZoom, setDurationExplosionZoom] = useState(null);
   const [failureWorseningZoom, setFailureWorseningZoom] = useState(null);
+
+  // Brush keys are used to force Recharts to reset the visual zoom state
+  const [dailyRunsBrushKey, setDailyRunsBrushKey] = useState(0);
+  const [durationVariabilityBrushKey, setDurationVariabilityBrushKey] = useState(0);
+  const [cumulativeFailureBrushKey, setCumulativeFailureBrushKey] = useState(0);
+  const [timeToFixBrushKey, setTimeToFixBrushKey] = useState(0);
   const [durationExplosionBrushKey, setDurationExplosionBrushKey] = useState(0);
+  const [failureWorseningBrushKey, setFailureWorseningBrushKey] = useState(0);
+
+  const isResettingBrushRef = useRef(false);
 
   const dropdownRefs = {
     workflow: useRef(null),
@@ -470,13 +658,155 @@ export default function Dashboard() {
   // ============================================
 
   useEffect(() => {
+    if (!window.parent || window.parent === window) return undefined;
+
+    let animationFrameId = null;
+
+    const getDashboardHeight = () => {
+      const root = document.getElementById('root');
+      const dashboard = root?.querySelector('.dashboard');
+      const container = dashboard?.querySelector('.container') || dashboard || root;
+      const dashboardTop = (dashboard || root)?.getBoundingClientRect().top + window.scrollY || 0;
+      const paddingBottom = dashboard
+        ? parseFloat(window.getComputedStyle(dashboard).paddingBottom) || 0
+        : 0;
+      const selectors = [
+        ':scope > *',
+        ':scope .container > *',
+        ':scope .dashboard-grid',
+        ':scope .dashboard-grid > *',
+        ':scope .stats-panel',
+        ':scope .table-wrapper'
+      ];
+      const measuredElements = Array.from(new Set(
+        selectors.flatMap((selector) => Array.from((dashboard || root).querySelectorAll(selector)))
+      )).filter((element) => {
+        const style = window.getComputedStyle(element);
+        return style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          !element.closest('.dashboard-chart-popup-layer') &&
+          !element.classList.contains('dashboard-chart-popup');
+      });
+
+      const contentBottom = measuredElements.reduce((bottom, element) => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        const marginBottom = parseFloat(style.marginBottom) || 0;
+        return Math.max(bottom, rect.bottom + window.scrollY + marginBottom);
+      }, (container || dashboard || root)?.getBoundingClientRect().bottom + window.scrollY || 0);
+
+      return Math.ceil(Math.max(360, contentBottom - dashboardTop + paddingBottom));
+    };
+
+    const postDashboardHeight = () => {
+      animationFrameId = null;
+      window.parent.postMessage({
+        type: 'GHA_DASHBOARD_HEIGHT',
+        height: getDashboardHeight()
+      }, '*');
+    };
+
+    const scheduleHeightPost = () => {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      animationFrameId = window.requestAnimationFrame(postDashboardHeight);
+    };
+
+    scheduleHeightPost();
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(scheduleHeightPost)
+      : null;
+    const mutationObserver = new MutationObserver(scheduleHeightPost);
+
+    [document.documentElement, document.body, document.getElementById('root')]
+      .filter(Boolean)
+      .forEach((element) => {
+        if (resizeObserver) resizeObserver.observe(element);
+      });
+
+    mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true
+    });
+
+    window.addEventListener('load', scheduleHeightPost);
+    window.addEventListener('resize', scheduleHeightPost);
+    const intervalId = window.setInterval(scheduleHeightPost, 1000);
+
+    return () => {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      if (resizeObserver) resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener('load', scheduleHeightPost);
+      window.removeEventListener('resize', scheduleHeightPost);
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const preventPageScrollWhileZooming = (event) => {
+      if (event.target?.closest?.('.chart-wheel-area')) {
+        if (event.cancelable) {
+          event.preventDefault();
+        }
+      }
+    };
+
+    document.addEventListener('wheel', preventPageScrollWhileZooming, {
+      capture: true,
+      passive: false
+    });
+
+    return () => {
+      document.removeEventListener('wheel', preventPageScrollWhileZooming, {
+        capture: true
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!fullscreenPanelId) return undefined;
+
+    const requestViewportMetrics = () => {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'GHA_DASHBOARD_VIEWPORT_METRICS_REQUEST' }, '*');
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setFullscreenPanelId(null);
+      }
+    };
+
+    requestViewportMetrics();
+    const animationFrameId = window.requestAnimationFrame(requestViewportMetrics);
+    const timeoutId = window.setTimeout(requestViewportMetrics, 50);
+
+    document.body.classList.add('dashboard-chart-fullscreen-active');
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.clearTimeout(timeoutId);
+      document.body.classList.remove('dashboard-chart-fullscreen-active');
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [fullscreenPanelId]);
+
+  useEffect(() => {
     const handleClickOutside = (event) => {
       Object.keys(dropdownRefs).forEach(key => {
         if (dropdownRefs[key].current && !dropdownRefs[key].current.contains(event.target)) {
           setOpenDropdowns(prev => ({ ...prev, [key]: false }));
         }
       });
-      
+
       // Close date picker if clicking outside
       if (datePickerRef.current && !datePickerRef.current.contains(event.target)) {
         setDatePickerOpen(false);
@@ -494,7 +824,7 @@ export default function Dashboard() {
     const extractRepo = async () => {
       // First, try to extract repo from parent window URL (since we're in an iframe)
       let repo = null;
-      
+
       try {
         // Access parent window URL
         const parentUrl = window.parent.location.href;
@@ -512,7 +842,7 @@ export default function Dashboard() {
         // If we can't access parent (CORS), fall back to storage
         console.log('[Dashboard] Cannot access parent URL, using storage fallback');
       }
-      
+
       // Fallback to Chrome storage if parent URL extraction failed
       if (!repo && typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -583,7 +913,7 @@ export default function Dashboard() {
   // Check if data exists for the current repo
   const checkExistingData = async (repo) => {
     if (!repo) return;
-    
+
     try {
       const encodedRepo = encodeURIComponent(repo);
       const response = await fetch(`http://127.0.0.1:3000/api/data/check/${encodedRepo}`);
@@ -600,10 +930,22 @@ export default function Dashboard() {
     return { exists: false };
   };
 
+  const syncAvailableFiltersFromData = (dashboardData) => {
+    if (!dashboardData) return;
+
+    const nextFilters = {
+      workflows: dashboardData.workflows?.length ? dashboardData.workflows : ['all'],
+      branches: dashboardData.branches?.length ? dashboardData.branches : ['all'],
+      actors: dashboardData.actors?.length ? dashboardData.actors : ['all']
+    };
+
+    setAvailableFilters(nextFilters);
+  };
+
   // Load existing data from cache
   const loadExistingData = async (repo) => {
     if (!repo) return false;
-    
+
     try {
       const encodedRepo = encodeURIComponent(repo);
       const response = await fetch(`http://127.0.0.1:3000/api/data/load/${encodedRepo}`);
@@ -611,31 +953,32 @@ export default function Dashboard() {
         const result = await response.json();
         if (result.runs && result.runs.length > 0) {
           console.log(`[Dashboard] Loaded ${result.runs.length} runs from API`);
-          
+
           // Store runs in Chrome storage - this triggers the storage listener in websocket.js
-          if (typeof chrome !== 'undefined' && chrome.storage) {
-            await new Promise((resolve) => {
-              chrome.storage.local.set({ 
-                wsRuns: result.runs,
-                wsStatus: {
-                  isStreaming: false,
-                  isComplete: true,
-                  repo: repo,
-                  totalRuns: result.runs.length
-                }
-              }, () => {
-                // Wait a bit for the storage listener to update _runsByRepo
-                setTimeout(resolve, 200);
-              });
-            });
-          }
-          
+          // if (typeof chrome !== 'undefined' && chrome.storage) {
+          //   await new Promise((resolve) => {
+          //     chrome.storage.local.set({
+          //       wsRuns: result.runs,
+          //       wsStatus: {
+          //         isStreaming: false,
+          //         isComplete: true,
+          //         repo: repo,
+          //         totalRuns: result.runs.length
+          //       }
+          //     }, () => {
+          //       // Wait a bit for the storage listener to update _runsByRepo
+          //       setTimeout(resolve, 200);
+          //     });
+          //   });
+          // }
+
           // Now process the runs into dashboard format
           // Use convertRunsToDashboard directly (no dependency on _runsByRepo)
           const processedData = processRunsToDashboardFormat(result.runs, repo);
-          
+
           if (processedData) {
             console.log('[Dashboard] Processed data successfully:', processedData.totalRuns, 'runs');
+            syncAvailableFiltersFromData(processedData);
             setData(processedData);
             setDataLoaded(true);
             setCollectionStarted(true);
@@ -661,19 +1004,20 @@ export default function Dashboard() {
       console.log('[Dashboard] processRunsToDashboardFormat: No runs provided');
       return null;
     }
-    
+
     const repoToUse = repo || currentRepo;
     if (!repoToUse) {
       console.error('[Dashboard] processRunsToDashboardFormat: No repo available');
       return null;
     }
-    
+
     console.log(`[Dashboard] Processing ${runs.length} runs for repo: ${repoToUse}`);
-    
+    cacheRunsForRepo(repoToUse, runs);
+
     // Store runs in Chrome storage - this will trigger the storage listener in websocket.js
     // which will populate _runsByRepo for future use
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ 
+      chrome.storage.local.set({
         wsRuns: runs,
         wsStatus: {
           isStreaming: false,
@@ -683,12 +1027,11 @@ export default function Dashboard() {
         }
       });
     }
-    
+
     // Use convertRunsToDashboard directly instead of filterRunsLocally
     // This avoids the dependency on _runsByRepo being populated
-    const startDate = dateFiltersRef.current.start || filters.start;
-    const endDate = dateFiltersRef.current.end || filters.end;
-    
+    const { start: startDate, end: endDate } = getActiveDateRange();
+
     try {
       const dashboardData = convertRunsToDashboard(runs, repoToUse, {
         workflow: ['all'],
@@ -697,13 +1040,13 @@ export default function Dashboard() {
         startDate: startDate,
         endDate: endDate
       });
-      
+
       if (dashboardData) {
         console.log(`[Dashboard] Successfully converted to dashboard format: ${dashboardData.totalRuns} runs`);
       } else {
         console.error('[Dashboard] convertRunsToDashboard returned null');
       }
-      
+
       return dashboardData;
     } catch (err) {
       console.error('[Dashboard] Error in convertRunsToDashboard:', err);
@@ -720,30 +1063,30 @@ export default function Dashboard() {
     setCollectionPaused(false);
     setProgress(prev => preserveStreamingCache
       ? {
-          ...prev,
-          complete: false,
-          isStreaming: true,
-          phase: 'workflow_runs',
-          totalRuns: prev.totalRuns || lastKnownTotalRunsRef.current || 0
-        }
+        ...prev,
+        complete: false,
+        isStreaming: true,
+        phase: 'workflow_runs',
+        totalRuns: prev.totalRuns || lastKnownTotalRunsRef.current || 0
+      }
       : {
-          items: 0,
-          complete: false,
-          isStreaming: true,
-          phase: 'workflow_runs',
-          totalRuns: 0,
-          elapsed_time: null,
-          eta_seconds: null,
-          phase1_elapsed: null,
-          phase2_elapsed: null,
-          phase2_eta: null
-        });
+        items: 0,
+        complete: false,
+        isStreaming: true,
+        phase: 'workflow_runs',
+        totalRuns: 0,
+        elapsed_time: null,
+        eta_seconds: null,
+        phase1_elapsed: null,
+        phase2_elapsed: null,
+        phase2_eta: null
+      });
     setDataLoaded(false);
-    
+
     try {
       // First, try to extract repo from parent window URL (since we're in an iframe)
       let repo = null;
-      
+
       try {
         // Access parent window URL
         const parentUrl = window.parent.location.href;
@@ -759,35 +1102,35 @@ export default function Dashboard() {
         // If we can't access parent (CORS), fall back to storage
         console.log('[Dashboard] Cannot access parent URL, using storage fallback');
       }
-      
+
       // Fallback to Chrome storage if parent URL extraction failed
       if (!repo) {
         repo = await new Promise((resolve) => {
-        if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
-          // Get the active tab and use its per-tab repo key
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            const activeTab = tabs && tabs[0];
-            if (activeTab && typeof activeTab.id === 'number' && chrome.storage) {
-              const key = `currentRepo_${activeTab.id}`;
-              chrome.storage.local.get([key], (result) => {
-                resolve(result[key]);
-              });
-            } else {
-              chrome.storage.local.get(['currentRepo'], (result) => {
-                resolve(result.currentRepo);
-              });
-            }
-          });
-        } else if (typeof chrome !== 'undefined' && chrome.storage) {
-          chrome.storage.local.get(['currentRepo'], (result) => {
-            resolve(result.currentRepo);
-          });
+          if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
+            // Get the active tab and use its per-tab repo key
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+              const activeTab = tabs && tabs[0];
+              if (activeTab && typeof activeTab.id === 'number' && chrome.storage) {
+                const key = `currentRepo_${activeTab.id}`;
+                chrome.storage.local.get([key], (result) => {
+                  resolve(result[key]);
+                });
+              } else {
+                chrome.storage.local.get(['currentRepo'], (result) => {
+                  resolve(result.currentRepo);
+                });
+              }
+            });
+          } else if (typeof chrome !== 'undefined' && chrome.storage) {
+            chrome.storage.local.get(['currentRepo'], (result) => {
+              resolve(result.currentRepo);
+            });
           } else {
             resolve(null);
-        }
-      });
+          }
+        });
       }
-      
+
       if (!repo) {
         throw new Error('Could not determine repository. Please navigate to a GitHub repository page.');
       }
@@ -795,30 +1138,44 @@ export default function Dashboard() {
       setCurrentRepo(repo);
       console.log('[Dashboard] Using repo:', repo);
 
+      const activeDateRange = getActiveDateRange();
+
       // Preserve existing date filters when starting new collection
       // Only initialize defaults if filters haven't been set yet
-      if (!dateFiltersRef.current.start || !dateFiltersRef.current.end) {
-        dateFiltersRef.current = { start: defaultStart, end: defaultEnd };
+      if (!activeDateRange.start || !activeDateRange.end) {
         setFilters(prev => ({ ...prev, start: defaultStart, end: defaultEnd }));
       }
 
-      if (!preserveStreamingCache) {
-        clearWebSocketCache(repo);
+      if (!collectMore && !preserveStreamingCache) {
+        const existing = await checkExistingData(repo);
+        if (existing?.exists) {
+          const loaded = await loadExistingData(repo);
+          if (loaded) {
+            setDataExists(true);
+            setExistingRunsCount(existing.totalRuns || 0);
+            setLastUpdated(existing.lastUpdated);
+            setLoading(false);
+            setDataLoaded(true);
+            setProgress(prev => ({
+              ...prev,
+              items: existing.totalRuns || prev.items || 0,
+              totalRuns: existing.totalRuns || prev.totalRuns || 0,
+              complete: true,
+              isStreaming: false
+            }));
+            return;
+          }
+        }
       }
-      
-      // Get current filter values to use in callback (avoid closure issues)
-      const currentFilters = { ...filters, start: dateFiltersRef.current.start, end: dateFiltersRef.current.end };
-      
+
+      if (!preserveStreamingCache) {
+        await clearWebSocketCache(repo);
+      }
+
       const onProgress = (partialData, isComplete) => {
         // Save filter options
-        if (partialData.workflows && partialData.workflows.length > 1) {
-          setAvailableFilters({
-            workflows: partialData.workflows,
-            branches: partialData.branches || ['all'],
-            actors: partialData.actors || ['all']
-          });
-        }
-        
+        syncAvailableFiltersFromData(partialData);
+
         // Update collection stats if available
         if (partialData.newRuns !== undefined) {
           setProgress(prev => ({
@@ -827,7 +1184,7 @@ export default function Dashboard() {
             existingRuns: partialData.existingRuns
           }));
         }
-        
+
         // Get the latest filter values from ref (including date range)
         const latestFilters = {
           workflow: filters.workflow,
@@ -836,39 +1193,50 @@ export default function Dashboard() {
           start: dateFiltersRef.current.start,
           end: dateFiltersRef.current.end
         };
-        
+
         // Apply local filters using latest filter values (including date range)
         const filteredData = applyLocalFiltersWithFilters(partialData, latestFilters);
-        
+
         // Always set data, even during collection (not just at the end)
         // This ensures data is shown as it's collected
         if (filteredData) {
           setData(filteredData);
           setLoading(false);
         }
-        
-        setProgress(prev => ({ 
+
+        setProgress(prev => ({
           ...prev,
-          items: partialData.totalRuns || 0, 
+          items: partialData.totalRuns || 0,
           complete: isComplete,
           isStreaming: !isComplete
         }));
-        
+
         if (isComplete) {
           setDataLoaded(true);
           // Update data existence status after collection
           checkExistingData(repo);
         }
       };
-      
-      // Don't send date filters - collect ALL runs regardless of date
-      // Date filtering will be done client-side
+
+      // Limit GitHub API collection to the visible date range. The dashboard
+      // still filters client-side, but this avoids scanning the full history.
       const wsFilters = {
-        start: null,  // No date filtering on collection
-        end: null
+        start: activeDateRange.start,
+        end: activeDateRange.end,
+        fetchJobDetails: false,
+        forceRefresh: Boolean(collectMore)
       };
-      
-      await fetchDashboardDataViaWebSocket(repo, wsFilters, onProgress);
+
+      const finalData = await fetchDashboardDataViaWebSocket(repo, wsFilters, onProgress);
+      setLoading(false);
+      setDataLoaded(true);
+      setProgress(prev => ({
+        ...prev,
+        items: prev.items || finalData?.totalRuns || 0,
+        totalRuns: prev.totalRuns || finalData?.totalRuns || 0,
+        complete: true,
+        isStreaming: false
+      }));
     } catch (err) {
       console.error('Error loading dashboard data:', err);
       setError('Error loading data: ' + err.message);
@@ -892,19 +1260,19 @@ export default function Dashboard() {
   // Apply local filters (including date) to collected data
   const applyLocalFilters = (rawData) => {
     if (!rawData) return rawData;
-    
-    // Always apply filters (including date) - filter all collected data client-side
-    // Use dateFiltersRef to get the latest date values (preserved during collection)
+
+    // Always apply filters (including date) to all collected data client-side.
+    const activeDateRange = getActiveDateRange();
     const filterValues = {
       workflow: filters.workflow,
       branch: filters.branch,
       actor: filters.actor,
-      startDate: dateFiltersRef.current.start || filters.start,
-      endDate: dateFiltersRef.current.end || filters.end
+      startDate: activeDateRange.start,
+      endDate: activeDateRange.end
     };
-    
+
     const filtered = filterRunsLocally(filterValues, rawData.repo || currentRepo);
-    
+
     if (filtered) {
       // Keep original filter options
       return {
@@ -914,22 +1282,22 @@ export default function Dashboard() {
         actors: rawData.actors || availableFilters.actors
       };
     }
-    
-      return rawData;
+
+    return rawData;
   };
 
   // Helper function to apply filters with explicit filter values (for callbacks)
   const applyLocalFiltersWithFilters = (rawData, explicitFilters) => {
     if (!rawData) return rawData;
-    
+
     const filtered = filterRunsLocally({
       workflow: explicitFilters.workflow || filters.workflow,
       branch: explicitFilters.branch || filters.branch,
       actor: explicitFilters.actor || filters.actor,
-      startDate: explicitFilters.start || dateFiltersRef.current.start || filters.start,
-      endDate: explicitFilters.end || dateFiltersRef.current.end || filters.end
+      startDate: explicitFilters.start || filters.start,
+      endDate: explicitFilters.end || filters.end
     }, rawData.repo || currentRepo);
-    
+
     if (filtered) {
       return {
         ...filtered,
@@ -938,17 +1306,17 @@ export default function Dashboard() {
         actors: rawData.actors || availableFilters.actors
       };
     }
-    
+
     return rawData;
   };
 
   // Monitor storage changes and trigger data refresh when runs (with jobs) are updated
   useEffect(() => {
     if (typeof chrome === 'undefined' || !chrome.storage) return;
-    
+
     const handleStorageChange = (changes, areaName) => {
       if (areaName !== 'local') return;
-      
+
       // Update progress state when wsStatus changes
       if (changes.wsStatus) {
         const status = changes.wsStatus.newValue || {};
@@ -969,7 +1337,7 @@ export default function Dashboard() {
         if (status.totalRuns) {
           lastKnownTotalRunsRef.current = status.totalRuns;
         }
-        
+
         // Update main progress state (controls the streaming indicator)
         setProgress(prev => {
           // Start real-time counter when streaming starts
@@ -988,17 +1356,17 @@ export default function Dashboard() {
               setLocalElapsed(0);
             }
           }
-          
+
           // Stop counter when complete
           if (status.isComplete && prev.isStreaming) {
             setPhase1StartTime(null);
             setPhase2StartTime(null);
           }
-          
+
           return {
             // Use collectedRuns if explicitly set, otherwise use previous items (don't fall back to totalRuns)
-            items: (status.collectedRuns !== undefined && status.collectedRuns !== null) 
-              ? status.collectedRuns 
+            items: (status.collectedRuns !== undefined && status.collectedRuns !== null)
+              ? status.collectedRuns
               : (prev.items || 0), // Current collected count
             complete: status.isComplete || false,
             isStreaming: status.isStreaming || false,
@@ -1011,7 +1379,7 @@ export default function Dashboard() {
             phase2_eta: status.phase2_eta || prev.phase2_eta || null
           };
         });
-        
+
         // Update job progress for Jobs tab
         if (status.phase === 'jobs' && status.jobsProgress) {
           setJobProgress({
@@ -1024,36 +1392,36 @@ export default function Dashboard() {
           setJobProgress(prev => ({ ...prev, isCollecting: false }));
         }
       }
-      
+
       // When runs are updated, refresh dashboard data
       if (changes.wsRuns && currentRepo) {
         const newRuns = changes.wsRuns.newValue || [];
         const runsWithJobs = newRuns.filter(r => r.jobs && r.jobs.length > 0).length;
         const totalJobs = newRuns.reduce((sum, r) => sum + (r.jobs ? r.jobs.length : 0), 0);
-        
+
         console.log('[Dashboard] wsRuns changed', {
           totalRuns: newRuns.length,
           runsWithJobs,
           totalJobs
         });
-        
+
         // Recalculate dashboard data with updated runs (which now include jobs)
-        // Use dateFiltersRef to get the latest date values
-    const filtered = filterRunsLocally({
-      workflow: filters.workflow,
-      branch: filters.branch,
+        const activeDateRange = getActiveDateRange();
+        const filtered = filterRunsLocally({
+          workflow: filters.workflow,
+          branch: filters.branch,
           actor: filters.actor,
-          startDate: dateFiltersRef.current.start || filters.start,
-          endDate: dateFiltersRef.current.end || filters.end
+          startDate: activeDateRange.start,
+          endDate: activeDateRange.end
         }, currentRepo);
-    
-    if (filtered) {
+
+        if (filtered) {
           console.log('[Dashboard] Filtered data updated', {
             jobStatsCount: filtered.jobStats?.length || 0
           });
-          
+
           setData(prev => ({
-        ...filtered,
+            ...filtered,
             workflows: prev?.workflows || availableFilters.workflows,
             branches: prev?.branches || availableFilters.branches,
             actors: prev?.actors || availableFilters.actors
@@ -1061,9 +1429,9 @@ export default function Dashboard() {
         }
       }
     };
-    
+
     chrome.storage.onChanged.addListener(handleStorageChange);
-    
+
     // Check initial state
     chrome.storage.local.get(['wsStatus'], (result) => {
       const status = result.wsStatus || {};
@@ -1072,8 +1440,8 @@ export default function Dashboard() {
           lastKnownTotalRunsRef.current = status.totalRuns;
         }
         setProgress({
-          items: (status.collectedRuns !== undefined && status.collectedRuns !== null) 
-            ? status.collectedRuns 
+          items: (status.collectedRuns !== undefined && status.collectedRuns !== null)
+            ? status.collectedRuns
             : 0, // Current collected count
           complete: status.isComplete || false,
           isStreaming: status.isStreaming || false,
@@ -1087,14 +1455,14 @@ export default function Dashboard() {
         });
       }
     });
-    
+
     return () => {
       if (typeof chrome !== 'undefined' && chrome.storage) {
         chrome.storage.onChanged.removeListener(handleStorageChange);
       }
     };
   }, [currentRepo, filters, availableFilters]);
-  
+
   // Real-time elapsed time counter (updates every second)
   useEffect(() => {
     if (progress.isStreaming) {
@@ -1118,7 +1486,7 @@ export default function Dashboard() {
         setLocalElapsed(0);
       }
     }
-    
+
     return () => {
       if (elapsedIntervalRef.current) {
         clearInterval(elapsedIntervalRef.current);
@@ -1129,26 +1497,26 @@ export default function Dashboard() {
   // Apply ALL filters (including date) when any filter changes (works during collection too)
   // This ensures real-time filtering as data streams in
   useEffect(() => {
-    const datesChanged = prevDatesRef.current.start !== filters.start || 
-                         prevDatesRef.current.end !== filters.end;
-    
+    const datesChanged = prevDatesRef.current.start !== filters.start ||
+      prevDatesRef.current.end !== filters.end;
+
     // Update ref if dates changed
     if (datesChanged) {
       prevDatesRef.current = { start: filters.start, end: filters.end };
     }
-    
-    // Re-apply all filters if we have a repo (works during collection too)
-    // filterRunsLocally reads from _runsByRepo which contains all runs collected so far
-    // Use dateFiltersRef to get the latest date values (preserved during collection)
+
+    // Re-apply all filters if we have a repo (works during collection too).
+    // filterRunsLocally reads from _runsByRepo which contains all runs collected so far.
+    dateFiltersRef.current = { start: filters.start, end: filters.end };
     if (currentRepo) {
       const filtered = filterRunsLocally({
         workflow: filters.workflow,
         branch: filters.branch,
         actor: filters.actor,
-        startDate: dateFiltersRef.current.start || filters.start,
-        endDate: dateFiltersRef.current.end || filters.end
+        startDate: filters.start,
+        endDate: filters.end
       }, currentRepo);
-      
+
       if (filtered) {
         setData(prev => ({
           ...filtered,
@@ -1179,10 +1547,6 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="collection-start-actions">
-            <ThemeToggle
-              theme={dashboardTheme}
-              onToggle={() => setDashboardTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-            />
             <button className="primary-action primary-action-large" onClick={loadDashboardData} type="button">
               Start Data Collection
             </button>
@@ -1196,7 +1560,7 @@ export default function Dashboard() {
     return (
       <div className={`dashboard ${dashboardTheme} container`}>
         <div style={{ textAlign: 'center', padding: '40px' }}>
-          <div className="spinner" style={{ 
+          <div className="spinner" style={{
             border: '4px solid #f3f3f3',
             borderTop: '4px solid #2196f3',
             borderRadius: '50%',
@@ -1210,7 +1574,7 @@ export default function Dashboard() {
       </div>
     );
   }
-  
+
   if (error) return (
     <div className={`dashboard ${dashboardTheme} container`}>
       <div className="card" style={{
@@ -1244,7 +1608,7 @@ export default function Dashboard() {
         </div>
       );
     }
-    
+
     // This should not be reached if button logic is correct, but as fallback:
     if (!collectionStarted) {
       return (
@@ -1254,8 +1618,8 @@ export default function Dashboard() {
             <p>
               Ready to collect workflow run data for <strong>{currentRepo || 'this repository'}</strong>
             </p>
-            <button 
-              className="primary-action primary-action-large" 
+            <button
+              className="primary-action primary-action-large"
               onClick={() => loadDashboardData(false)}
               type="button"
             >
@@ -1267,15 +1631,15 @@ export default function Dashboard() {
     }
     return null;
   }
-  
+
   if (data.noData) return <div className={`dashboard ${dashboardTheme} container`} style={{ textAlign: 'center', padding: '2rem' }}>
     <h2>No Data Available</h2>
     <p>{data.message}</p>
   </div>;
 
-  const { 
-    runsOverTime = [], 
-    statusBreakdown = [], 
+  const {
+    runsOverTime = [],
+    statusBreakdown = [],
     branchComparison = [],
     workflowStats = [],
     jobStats = [],
@@ -1287,15 +1651,15 @@ export default function Dashboard() {
     failureDurationOverTime = [],
     rawRuns = []
   } = data;
-  
+
   const { workflows, branches, actors } = availableFilters;
-  
+
   const totalStatus = statusBreakdown.reduce((sum, s) => sum + (s.value || 0), 0);
   const statusData = statusBreakdown.map(s => ({
     ...s,
     percent: totalStatus ? Math.round((s.value / totalStatus) * 100) : 0
   }));
-  
+
   // ============================================
   // Event Handlers
   // ============================================
@@ -1351,55 +1715,55 @@ export default function Dashboard() {
     const sorted = [...values].filter(v => v > 0).sort((a, b) => a - b);
     if (sorted.length === 0) return 0;
     const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0 
-      ? (sorted[mid - 1] + sorted[mid]) / 2 
+    return sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
       : sorted[mid];
   };
 
   // Helper function for duration explosion chart
   const getDurationExplosionData = (workflowName) => {
     if (!rawRuns || rawRuns.length === 0) return [];
-    
+
     let filteredRuns = rawRuns;
     if (workflowName !== 'all') {
       filteredRuns = rawRuns.filter(r => r.workflow_name === workflowName);
     }
-    
+
     // Sort runs by created_at to ensure chronological order
     const sortedRuns = [...filteredRuns].sort((a, b) => {
       const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
       const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
       return dateA - dateB;
     });
-    
+
     const windowSize = 10;
     const thresholdMultiplier = 1.5; // Stricter threshold - only significant worsening
-    
+
     // Group by date for display
     const byDate = {};
     const worseningPoints = [];
-    
+
     // Check each point for worsening
     for (let i = windowSize; i < sortedRuns.length - windowSize; i++) {
       const currentRun = sortedRuns[i];
       const currentDate = currentRun.created_at ? currentRun.created_at.split('T')[0] : 'Unknown';
-      
+
       // Get previous 10 runs (before current point)
       const previousRuns = sortedRuns.slice(i - windowSize, i);
       const previousDurations = previousRuns.map(r => r.duration || 0);
       const previousMedian = calculateMedian(previousDurations);
-      
+
       // Get next 10 runs (after current point)
       const nextRuns = sortedRuns.slice(i + 1, i + 1 + windowSize);
       const nextDurations = nextRuns.map(r => r.duration || 0);
       const nextMedian = calculateMedian(nextDurations);
-      
+
       // Check if there's significant worsening
       if (previousMedian > 0 && nextMedian > 0 && nextMedian > previousMedian * thresholdMultiplier) {
         // Calculate severity score (how much worse it got)
         const severityScore = (nextMedian - previousMedian) / previousMedian;
         const dateTimestamp = new Date(currentDate).getTime();
-        
+
         // Store the worsening point with commit info
         const commitSha = currentRun.commit_sha || currentRun.head_sha || null;
         // Extract repo from html_url if currentRepo is not available
@@ -1413,7 +1777,7 @@ export default function Dashboard() {
         const commitUrl = commitSha && repo
           ? `https://github.com/${repo}/commit/${commitSha}`
           : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : currentRun.html_url);
-        
+
         const worseningPoint = {
           date: currentDate,
           dateTimestamp,
@@ -1427,14 +1791,14 @@ export default function Dashboard() {
           created_at: currentRun.created_at,
           run: currentRun
         };
-        
+
         worseningPoints.push(worseningPoint);
       }
-      
+
       // Always add all runs to byDate for the line chart
       if (!byDate[currentDate]) {
-        byDate[currentDate] = { 
-          durations: [], 
+        byDate[currentDate] = {
+          durations: [],
           runs: [],
           worseningPoint: null
         };
@@ -1442,25 +1806,25 @@ export default function Dashboard() {
       byDate[currentDate].durations.push(currentRun.duration || 0);
       byDate[currentDate].runs.push(currentRun);
     }
-    
+
     // Select top 3 worsening points that are spaced apart
     const selectedWorseningPoints = [];
     if (worseningPoints.length > 0) {
       // Sort by severity (highest first)
       const sortedBySeverity = [...worseningPoints].sort((a, b) => b.severityScore - a.severityScore);
-      
+
       // Minimum time distance between points (30 days in milliseconds)
       const minTimeDistance = 30 * 24 * 60 * 60 * 1000;
-      
+
       // Greedily select top points that are far apart
       for (const point of sortedBySeverity) {
         if (selectedWorseningPoints.length >= 3) break;
-        
+
         // Check if this point is far enough from already selected points
-        const isFarEnough = selectedWorseningPoints.every(selected => 
+        const isFarEnough = selectedWorseningPoints.every(selected =>
           Math.abs(point.dateTimestamp - selected.dateTimestamp) >= minTimeDistance
         );
-        
+
         if (isFarEnough) {
           selectedWorseningPoints.push(point);
           // Mark this date in byDate
@@ -1469,7 +1833,7 @@ export default function Dashboard() {
           }
         }
       }
-      
+
       // If we don't have 3 points yet, add the most severe remaining ones
       for (const point of sortedBySeverity) {
         if (selectedWorseningPoints.length >= 3) break;
@@ -1481,16 +1845,16 @@ export default function Dashboard() {
         }
       }
     }
-    
+
     // Calculate overall median for reference line
     const allDurations = sortedRuns.map(r => r.duration || 0).filter(d => d > 0);
     const overallMedian = calculateMedian(allDurations);
-    
+
     return Object.entries(byDate)
       .map(([date, data]) => ({
         date,
-        duration: data.durations.length > 0 
-          ? data.durations.reduce((a, b) => a + b, 0) / data.durations.length 
+        duration: data.durations.length > 0
+          ? data.durations.reduce((a, b) => a + b, 0) / data.durations.length
           : 0,
         median: overallMedian,
         worseningPoint: data.worseningPoint,
@@ -1502,7 +1866,7 @@ export default function Dashboard() {
   // Helper function for failure worsening chart
   const getFailureWorseningData = () => {
     if (!rawRuns || rawRuns.length === 0) return [];
-    
+
     // Group by date
     const byDate = {};
     rawRuns.forEach(run => {
@@ -1512,40 +1876,40 @@ export default function Dashboard() {
       }
       byDate[date].runs.push(run);
     });
-    
+
     // Convert to sorted array of dates
     const sortedDates = Object.keys(byDate).sort((a, b) => new Date(a) - new Date(b));
     const windowSize = 10; // 10 days
     const thresholdMultiplier = 1.5; // Stricter threshold - only significant worsening
     const worseningPoints = [];
-    
+
     // Check each date for worsening
     for (let i = windowSize; i < sortedDates.length - windowSize; i++) {
       const currentDate = sortedDates[i];
       const currentData = byDate[currentDate];
-      
+
       // Get previous 10 days
       const previousDates = sortedDates.slice(i - windowSize, i);
       const previousFailures = previousDates.reduce((sum, date) => {
         const dateData = byDate[date];
         return sum + dateData.runs.filter(r => r.conclusion === 'failure').length;
       }, 0);
-      
+
       // Get next 10 days
       const nextDates = sortedDates.slice(i + 1, i + 1 + windowSize);
       const nextFailures = nextDates.reduce((sum, date) => {
         const dateData = byDate[date];
         return sum + dateData.runs.filter(r => r.conclusion === 'failure').length;
       }, 0);
-      
+
       // Check if there's significant worsening
       if (previousFailures >= 0 && nextFailures > previousFailures * thresholdMultiplier && nextFailures > 0) {
         // Calculate severity score (how much worse it got)
-        const severityScore = previousFailures > 0 
-          ? (nextFailures - previousFailures) / previousFailures 
+        const severityScore = previousFailures > 0
+          ? (nextFailures - previousFailures) / previousFailures
           : nextFailures; // If no previous failures, severity is just the absolute number
         const dateTimestamp = new Date(currentDate).getTime();
-        
+
         // Find the first failure run on this date to get commit info
         const firstFailure = currentData.runs.find(r => r.conclusion === 'failure');
         if (firstFailure) {
@@ -1561,7 +1925,7 @@ export default function Dashboard() {
           const commitUrl = commitSha && repo
             ? `https://github.com/${repo}/commit/${commitSha}`
             : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : firstFailure.html_url);
-          
+
           const worseningPoint = {
             date: currentDate,
             dateTimestamp,
@@ -1573,30 +1937,30 @@ export default function Dashboard() {
             html_url: firstFailure.html_url,
             run: firstFailure
           };
-          
+
           worseningPoints.push(worseningPoint);
         }
       }
     }
-    
+
     // Select top 3 worsening points that are spaced apart
     const selectedWorseningPoints = [];
     if (worseningPoints.length > 0) {
       // Sort by severity (highest first)
       const sortedBySeverity = [...worseningPoints].sort((a, b) => b.severityScore - a.severityScore);
-      
+
       // Minimum time distance between points (30 days in milliseconds)
       const minTimeDistance = 30 * 24 * 60 * 60 * 1000;
-      
+
       // Greedily select top points that are far apart
       for (const point of sortedBySeverity) {
         if (selectedWorseningPoints.length >= 3) break;
-        
+
         // Check if this point is far enough from already selected points
-        const isFarEnough = selectedWorseningPoints.every(selected => 
+        const isFarEnough = selectedWorseningPoints.every(selected =>
           Math.abs(point.dateTimestamp - selected.dateTimestamp) >= minTimeDistance
         );
-        
+
         if (isFarEnough) {
           selectedWorseningPoints.push(point);
           // Mark this date in byDate
@@ -1605,7 +1969,7 @@ export default function Dashboard() {
           }
         }
       }
-      
+
       // If we don't have 3 points yet, add the most severe remaining ones
       for (const point of sortedBySeverity) {
         if (selectedWorseningPoints.length >= 3) break;
@@ -1617,14 +1981,14 @@ export default function Dashboard() {
         }
       }
     }
-    
+
     // Build result array
     return sortedDates.map(date => {
       const data = byDate[date];
       const total = data.runs.length;
       const failures = data.runs.filter(r => r.conclusion === 'failure').length;
       const failureRate = total > 0 ? failures / total : 0;
-      
+
       return {
         date,
         failureRate: failureRate * 100,
@@ -1636,13 +2000,19 @@ export default function Dashboard() {
     });
   };
 
-  const getNextZoomRange = (length, currentZoom = null) => {
-    if (!length || length <= 2) return null;
+  const getPanelMinimumZoomSize = (panelId) => {
+    return panelId === 'timeToFix' ? 1 : 3;
+  };
+
+  const getNextZoomRange = (length, currentZoom = null, panelId = null) => {
+    const minSize = getPanelMinimumZoomSize(panelId);
+
+    if (!length || length <= minSize) return null;
 
     const currentStart = currentZoom?.startIndex ?? 0;
     const currentEnd = currentZoom?.endIndex ?? length - 1;
     const currentSize = currentEnd - currentStart + 1;
-    const nextSize = Math.max(2, Math.ceil(currentSize * 0.6));
+    const nextSize = Math.max(minSize, Math.floor(currentSize * 0.6));
 
     if (nextSize >= currentSize) {
       return { startIndex: currentStart, endIndex: currentEnd };
@@ -1658,25 +2028,106 @@ export default function Dashboard() {
     return items.slice(zoom.startIndex, zoom.endIndex + 1);
   };
 
+  const clamp = (value, min, max) => {
+    return Math.min(Math.max(value, min), max);
+  };
+
+  const wheelZoomPanelData = (event, panelId, totalLength) => {
+    event.stopPropagation();
+
+    const minSize = getPanelMinimumZoomSize(panelId);
+
+    if (!totalLength || totalLength <= minSize) return;
+
+    const element = event.currentTarget;
+    const rect = element.getBoundingClientRect();
+
+    const usesVerticalDataAxis = panelId === 'timeToFix';
+    const mousePosition = usesVerticalDataAxis
+      ? event.clientY - rect.top
+      : event.clientX - rect.left;
+    const mouseExtent = usesVerticalDataAxis ? rect.height : rect.width;
+    const mouseRatio = clamp(mousePosition / mouseExtent, 0, 1);
+
+    const currentZoom = getPanelZoom(panelId);
+
+    const currentStart = currentZoom?.startIndex ?? 0;
+    const currentEnd = currentZoom?.endIndex ?? totalLength - 1;
+    const currentSize = currentEnd - currentStart + 1;
+
+    const isZoomIn = event.deltaY < 0;
+    const zoomFactor = isZoomIn ? 0.75 : 1.35;
+
+    let nextSize = isZoomIn
+      ? Math.floor(currentSize * zoomFactor)
+      : Math.ceil(currentSize * zoomFactor);
+    nextSize = clamp(nextSize, minSize, totalLength);
+
+    if (isZoomIn && nextSize === currentSize && currentSize > minSize) {
+      nextSize = currentSize - 1;
+    }
+
+    if (!isZoomIn && nextSize === currentSize && currentSize < totalLength) {
+      nextSize = currentSize + 1;
+    }
+
+    if (!isZoomIn && nextSize >= totalLength) {
+      setPanelZoom(panelId, null);
+      return;
+    }
+
+    const anchorIndex = currentStart + mouseRatio * (currentSize - 1);
+
+    let nextStart = Math.round(anchorIndex - mouseRatio * (nextSize - 1));
+    nextStart = clamp(nextStart, 0, totalLength - nextSize);
+
+    const nextEnd = nextStart + nextSize - 1;
+
+    setPanelZoom(panelId, {
+      startIndex: nextStart,
+      endIndex: nextEnd
+    });
+  };
+
+  const getChartZoomKey = (name, zoom, totalLength) => {
+    return `${name}-${zoom?.startIndex ?? 0}-${zoom?.endIndex ?? totalLength - 1}`;
+  };
+
   const durationExplosionData = getDurationExplosionData(selectedWorkflowForDuration);
   const failureWorseningData = getFailureWorseningData();
+
   const visibleRunsOverTime = getZoomedData(runsOverTime, dailyRunsZoom);
+  const visibleDurationVariability = getZoomedData(runsOverTime, durationVariabilityZoom);
+  const visibleCumulativeFailure = getZoomedData(failureDurationOverTime, cumulativeFailureZoom);
   const visibleTimeToFix = getZoomedData(timeToFix, timeToFixZoom);
+  const visibleDurationExplosion = getZoomedData(durationExplosionData, durationExplosionZoom);
+  const visibleFailureWorsening = getZoomedData(failureWorseningData, failureWorseningZoom);
+  const displayedBranchStats = branchStatsGrouped;
+  const filteredContributorStats = contributorStats.filter(c => {
+    if (!contributorSearchQuery.trim()) return true;
+    return c.name.toLowerCase().includes(contributorSearchQuery.toLowerCase());
+  });
 
   const getPanelZoom = (panelId) => {
     switch (panelId) {
       case 'dailyRuns':
         return dailyRunsZoom;
+
       case 'durationVariability':
         return durationVariabilityZoom;
+
       case 'cumulativeFailure':
         return cumulativeFailureZoom;
+
       case 'timeToFix':
         return timeToFixZoom;
+
       case 'durationExplosion':
         return durationExplosionZoom;
+
       case 'failureWorsening':
         return failureWorseningZoom;
+
       default:
         return null;
     }
@@ -1687,21 +2138,27 @@ export default function Dashboard() {
       case 'dailyRuns':
         setDailyRunsZoom(zoom);
         break;
+
       case 'durationVariability':
         setDurationVariabilityZoom(zoom);
         break;
+
       case 'cumulativeFailure':
         setCumulativeFailureZoom(zoom);
         break;
+
       case 'timeToFix':
         setTimeToFixZoom(zoom);
         break;
+
       case 'durationExplosion':
         setDurationExplosionZoom(zoom);
         break;
+
       case 'failureWorsening':
         setFailureWorseningZoom(zoom);
         break;
+
       default:
         break;
     }
@@ -1710,29 +2167,46 @@ export default function Dashboard() {
   const getPanelDataLength = (panelId) => {
     switch (panelId) {
       case 'dailyRuns':
+        return runsOverTime.length;
+
       case 'durationVariability':
         return runsOverTime.length;
+
       case 'cumulativeFailure':
         return failureDurationOverTime.length;
+
       case 'timeToFix':
         return timeToFix.length;
+
       case 'durationExplosion':
         return durationExplosionData.length;
+
       case 'failureWorsening':
         return failureWorseningData.length;
+
       default:
         return 0;
     }
   };
 
   const zoomPanelData = (panelId) => {
-    const nextZoom = getNextZoomRange(getPanelDataLength(panelId), getPanelZoom(panelId));
+    const nextZoom = getNextZoomRange(
+      getPanelDataLength(panelId),
+      getPanelZoom(panelId),
+      panelId
+    );
+
     setPanelZoom(panelId, nextZoom);
   };
 
-  const resetPanelZoom = (panelId, afterReset = null) => {
+  const resetPanelZoom = (panelId) => {
     setPanelZoom(panelId, null);
-    if (afterReset) afterReset();
+  };
+
+  const toggleFullscreenPanel = (panelId) => {
+    setFullscreenPanelId(currentPanelId =>
+      currentPanelId === panelId ? null : panelId
+    );
   };
 
   // Custom Box Plot Component
@@ -1740,7 +2214,7 @@ export default function Dashboard() {
     const boxHeight = height * 0.6;
     const boxY = y - boxHeight / 2;
     const whiskerLength = width * 0.3;
-    
+
     return (
       <g>
         {/* Whiskers (min to Q1, Q3 to max) */}
@@ -1748,36 +2222,36 @@ export default function Dashboard() {
         <line x1={x} y1={y} x2={x} y2={y + height / 2} stroke="#fff" strokeWidth={1} />
         <line x1={x - whiskerLength} y1={y - height / 2} x2={x + whiskerLength} y2={y - height / 2} stroke="#fff" strokeWidth={1} />
         <line x1={x - whiskerLength} y1={y + height / 2} x2={x + whiskerLength} y2={y + height / 2} stroke="#fff" strokeWidth={1} />
-        
+
         {/* Box (Q1 to Q3) */}
-        <rect 
-          x={x - width / 2} 
-          y={boxY} 
-          width={width} 
-          height={boxHeight} 
-          fill="#2196f3" 
-          stroke="#fff" 
+        <rect
+          x={x - width / 2}
+          y={boxY}
+          width={width}
+          height={boxHeight}
+          fill="#2196f3"
+          stroke="#fff"
           strokeWidth={1}
           opacity={0.7}
         />
-        
+
         {/* Median line */}
-        <line 
-          x1={x - width / 2} 
-          y1={y} 
-          x2={x + width / 2} 
-          y2={y} 
-          stroke="#ff9800" 
-          strokeWidth={2} 
+        <line
+          x1={x - width / 2}
+          y1={y}
+          x2={x + width / 2}
+          y2={y}
+          stroke="#ff9800"
+          strokeWidth={2}
         />
-        
+
         {/* Mean marker */}
-        <circle 
-          cx={x} 
-          cy={y} 
-          r={3} 
-          fill="#4caf50" 
-          stroke="#fff" 
+        <circle
+          cx={x}
+          cy={y}
+          r={3}
+          fill="#4caf50"
+          stroke="#fff"
           strokeWidth={1}
         />
       </g>
@@ -1789,17 +2263,17 @@ export default function Dashboard() {
     if (!timeToFixData || timeToFixData.length === 0) {
       return { unit: 'seconds', label: 's', divisor: 1, fullLabel: 'seconds' };
     }
-    
+
     // Get representative values (medians and q3s) to decide the unit
     const representativeValues = timeToFixData.flatMap(d => [d.median, d.q3, d.mean].filter(v => v > 0));
     if (representativeValues.length === 0) {
       return { unit: 'seconds', label: 's', divisor: 1, fullLabel: 'seconds' };
     }
-    
+
     // Use median of representative values to determine unit
     const sorted = [...representativeValues].sort((a, b) => a - b);
     const medianValue = sorted[Math.floor(sorted.length / 2)];
-    
+
     if (medianValue >= 86400) { // >= 1 day
       return { unit: 'days', label: 'd', divisor: 86400, fullLabel: 'days' };
     } else if (medianValue >= 3600) { // >= 1 hour
@@ -1809,7 +2283,7 @@ export default function Dashboard() {
     }
     return { unit: 'seconds', label: 's', divisor: 1, fullLabel: 'seconds' };
   };
-  
+
   // Format a value with the given time unit
   const formatWithUnit = (seconds, divisor, label) => {
     if (seconds === 0 || seconds == null) return `0${label}`;
@@ -1818,7 +2292,7 @@ export default function Dashboard() {
     if (value < 10) return `${value.toFixed(1)}${label}`;
     return `${Math.round(value)}${label}`;
   };
-  
+
   // Format time value for tooltip (always show most readable format)
   const formatTimeForTooltip = (seconds) => {
     if (seconds === 0 || seconds == null) return '0s';
@@ -1831,11 +2305,11 @@ export default function Dashboard() {
   // Format time-to-fix data for visualization
   const formatTimeToFixForBoxPlot = (timeToFixData) => {
     if (!timeToFixData || timeToFixData.length === 0) return [];
-    
+
     // Calculate scale for positioning boxes
     const allMax = Math.max(...timeToFixData.map(d => d.max || 0));
     const scale = allMax > 0 ? 1 : 1;
-    
+
     return timeToFixData.map((item, index) => ({
       workflow: item.workflow,
       index: index,
@@ -1850,6 +2324,17 @@ export default function Dashboard() {
       value: item.median || 0
     }));
   };
+
+  const displayedFilteredRuns = data.filteredTotalRuns ?? data.totalRuns ?? 0;
+  const runsUsedForStats = data.runsUsedForStats ?? data.totalRuns ?? 0;
+  const rawRunsInCache = data.originalTotalRuns ?? displayedFilteredRuns;
+  const excludedOutlierRuns = data.excludedDurationOutlierRuns ?? Math.max(0, displayedFilteredRuns - runsUsedForStats);
+  const filteredRunsNote = rawRunsInCache !== displayedFilteredRuns
+    ? `${rawRunsInCache} raw runs cached`
+    : 'Runs after active filters';
+  const filteredRunsDetailNote = excludedOutlierRuns > 0
+    ? `${filteredRunsNote}; ${excludedOutlierRuns} duration outliers excluded from stats`
+    : filteredRunsNote;
 
   return (
     <div className={`dashboard ${dashboardTheme}`}>
@@ -1898,25 +2383,28 @@ export default function Dashboard() {
           </section>
         )}
 
-        <section className="overall-health-section card" aria-label="Overall health check">
-          <div className="overall-health-header">
-            <div>
-              <p className="eyebrow">Overall health check</p>
-              <h3>Workflow health summary</h3>
+        {/* TODO: Re-enable once the Overall health check implementation is ready. */}
+        {SHOW_OVERALL_HEALTH_CHECK && (
+          <section className="overall-health-section card" aria-label="Overall health check">
+            <div className="overall-health-header">
+              <div>
+                <p className="eyebrow">Overall health check</p>
+                <h3>Workflow health summary</h3>
+              </div>
             </div>
-          </div>
-          <div className="overall-health-grid">
-            <div className="overall-health-card overall-health-warning" aria-label="Duration worsening warning placeholder">
-              <h4>Warnings</h4>
+            <div className="overall-health-grid">
+              <div className="overall-health-card overall-health-warning" aria-label="Duration worsening warning placeholder">
+                <h4>Warnings</h4>
+              </div>
+              <div className="overall-health-card overall-health-danger" aria-label="Failure rate warning placeholder">
+                <h4>Failures</h4>
+              </div>
+              <div className="overall-health-card overall-health-info" aria-label="Workflow status summary placeholder">
+                <h4>Overall health</h4>
+              </div>
             </div>
-            <div className="overall-health-card overall-health-danger" aria-label="Failure rate warning placeholder">
-              <h4>Failures</h4>
-            </div>
-            <div className="overall-health-card overall-health-info" aria-label="Workflow status summary placeholder">
-              <h4>Overall health</h4>
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         <header className="dashboard-header">
           <div>
@@ -1932,7 +2420,7 @@ export default function Dashboard() {
                 <span>Last updated: {new Date(lastUpdated).toLocaleDateString()}</span>
               </div>
             )}
-            
+
             {progress.isStreaming && (
               <div className="collection-meta success">
                 {progress.newRuns !== undefined && progress.existingRuns !== undefined && (
@@ -1943,454 +2431,559 @@ export default function Dashboard() {
                 )}
               </div>
             )}
-            <ThemeToggle
-              theme={dashboardTheme}
-              onToggle={() => setDashboardTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-            />
           </div>
         </header>
-        
+
         {/* Filter Panel */}
         <div className="filter-panel card">
           <div className="filter-row">
-            {/* Workflow */}
-            <div className="filter-group">
-              <label>Workflow</label>
-              <div className="dropdown-container" ref={dropdownRefs.workflow}>
-                <button
-                  className="dropdown-toggle"
-                  onClick={() => setOpenDropdowns(prev => ({
-                    workflow: !prev.workflow,
-                    branch: false,
-                    actor: false
-                  }))}
-                >
-                  {filters.workflow.includes('all') ? 'All workflows' : `${filters.workflow.length} selected`}
-                  <span className="dropdown-arrow">▼</span>
-                </button>
-                {openDropdowns.workflow && (
-                  <div className="dropdown-menu">
-                    <label className="dropdown-item">
-                      <input
-                        type="checkbox"
-                        checked={filters.workflow.includes('all')}
-                        onChange={(e) => toggleCheckbox('workflow', 'all', e.target.checked)}
-                      />
-                      <span>All workflows</span>
-                    </label>
-                    {workflows.filter(w => w !== 'all').map(w => (
-                      <label key={w} className="dropdown-item">
-                        <input
-                          type="checkbox"
-                          checked={filters.workflow.includes(w)}
-                          onChange={(e) => toggleCheckbox('workflow', w, e.target.checked)}
-                        />
-                        <span>{w}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+                {/* Workflow */}
+                <div className="filter-group">
+                  <label>Workflow</label>
 
-            {/* Branch */}
-            <div className="filter-group">
-              <label>Branch</label>
-              <div className="dropdown-container" ref={dropdownRefs.branch}>
-                <button
-                  className="dropdown-toggle"
-                  onClick={() => setOpenDropdowns(prev => ({
-                    workflow: false,
-                    branch: !prev.branch,
-                    actor: false
-                  }))}
-                >
-                  {filters.branch.includes('all') ? 'All branches' : `${filters.branch.length} selected`}
-                  <span className="dropdown-arrow">▼</span>
-                </button>
-                {openDropdowns.branch && (
-                  <div className="dropdown-menu">
-                    <label className="dropdown-item">
-                      <input
-                        type="checkbox"
-                        checked={filters.branch.includes('all')}
-                        onChange={(e) => toggleCheckbox('branch', 'all', e.target.checked)}
-                      />
-                      <span>All branches</span>
-                    </label>
-                    {branches.filter(b => b !== 'all').map(b => (
-                      <label key={b} className="dropdown-item">
-                        <input
-                          type="checkbox"
-                          checked={filters.branch.includes(b)}
-                          onChange={(e) => toggleCheckbox('branch', b, e.target.checked)}
-                        />
-                        <span>{b}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+                  <div className="dropdown-container" ref={dropdownRefs.workflow}>
+                    <button
+                      className="dropdown-toggle"
+                      type="button"
+                      aria-expanded={openDropdowns.workflow}
+                      onClick={() => {
+                        setDatePickerOpen(false);
 
-            {/* Actor */}
-            <div className="filter-group">
-              <label>Actor</label>
-              <div className="dropdown-container" ref={dropdownRefs.actor}>
-                <button
-                  className="dropdown-toggle"
-                  onClick={() => setOpenDropdowns(prev => ({
-                    workflow: false,
-                    branch: false,
-                    actor: !prev.actor
-                  }))}
-                >
-                  {filters.actor.includes('all') ? 'All actors' : `${filters.actor.length} selected`}
-                  <span className="dropdown-arrow">▼</span>
-                </button>
-                {openDropdowns.actor && (
-                  <div className="dropdown-menu">
-                    <label className="dropdown-item">
-                      <input
-                        type="checkbox"
-                        checked={filters.actor.includes('all')}
-                        onChange={(e) => toggleCheckbox('actor', 'all', e.target.checked)}
-                      />
-                      <span>All actors</span>
-                    </label>
-                    {actors.filter(a => a !== 'all').map(a => (
-                      <label key={a} className="dropdown-item">
-                        <input
-                          type="checkbox"
-                          checked={filters.actor.includes(a)}
-                          onChange={(e) => toggleCheckbox('actor', a, e.target.checked)}
-                        />
-                        <span>{a}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+                        setOpenDropdowns(prev => ({
+                          workflow: !prev.workflow,
+                          branch: false,
+                          actor: false
+                        }));
+                      }}
+                    >
+                      {filters.workflow.includes('all')
+                        ? 'All workflows'
+                        : `${filters.workflow.length} selected`}
+                      <span className="dropdown-arrow">▼</span>
+                    </button>
 
-            {/* Date Range Picker */}
-            <div className="filter-group date-range-group" ref={datePickerRef}>
-              <label>Date Range</label>
-              <button
-                className="dropdown-toggle"
-                onClick={() => setDatePickerOpen(!datePickerOpen)}
-                type="button"
-              >
-                <span>
-                  {filters.start && filters.end 
-                    ? (() => {
-                        const periodLabel = getDateRangeLabel(filters.start, filters.end);
-                        if (periodLabel) {
-                          return `Period: ${periodLabel}`;
-                        }
-                        return `${new Date(filters.start).toLocaleDateString()} - ${new Date(filters.end).toLocaleDateString()}`;
-                      })()
-                    : 'Select date range...'}
-                </span>
-                <span className="dropdown-arrow">▼</span>
-              </button>
-              
-              {datePickerOpen && (() => {
-                const handleSetDates = (startDate, endDate) => {
-                  const startStr = formatDateForInput(startDate);
-                  const endStr = formatDateForInput(endDate);
-                  // Update both state and ref to preserve dates during collection
-                  dateFiltersRef.current = { start: startStr, end: endStr };
-                  setFilters(prev => ({ ...prev, start: startStr, end: endStr }));
-                };
+                    {openDropdowns.workflow && (
+                      <div className="dropdown-menu">
+                        <label className="dropdown-item">
+                          <input
+                            type="checkbox"
+                            checked={filters.workflow.includes('all')}
+                            onChange={(e) => toggleCheckbox('workflow', 'all', e.target.checked)}
+                          />
+                          <span>All workflows</span>
+                        </label>
 
-                const handleDateClick = (day) => {
-                  const clickedDate = new Date(calendarYear, calendarMonth, day);
-                  const clickedDateStr = formatDateForInput(clickedDate);
-                  
-                  if (selectingStart || !filters.start || clickedDateStr < filters.start) {
-                    handleSetDates(clickedDate, clickedDate);
-                    setSelectingStart(false);
-                  } else {
-                    handleSetDates(parseDateStr(filters.start), clickedDate);
-                    setSelectingStart(true);
-                  }
-                };
-
-                const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                const daysInMonth = getDaysInMonth(calendarYear, calendarMonth);
-                const firstDay = getFirstDayOfMonth(calendarYear, calendarMonth);
-                const today = new Date();
-                const selectedStart = filters.start ? parseDateStr(filters.start) : null;
-                const selectedEnd = filters.end ? parseDateStr(filters.end) : null;
-
-                // Generate calendar grid
-                const calendarDays = [];
-                for (let i = 0; i < firstDay; i++) {
-                  calendarDays.push(null);
-                }
-                for (let day = 1; day <= daysInMonth; day++) {
-                  calendarDays.push(day);
-                }
-
-                return (
-                  <div className="date-picker-popover">
-                    {/* Quick Action Buttons */}
-                    <div style={{ marginBottom: '20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const now = new Date();
-                          const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-                          const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                          handleSetDates(firstDay, lastDay);
-                        }}
-                        style={{
-                          padding: '8px 14px',
-                          background: '#4caf50',
-                          border: 'none',
-                          borderRadius: '6px',
-                          color: '#fff',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: '500',
-                          transition: 'all 0.2s ease'
-                        }}
-                        onMouseOver={(e) => e.target.style.background = '#45a049'}
-                        onMouseOut={(e) => e.target.style.background = '#4caf50'}
-                      >
-                        Current Month
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const now = new Date();
-                          const firstDay = new Date(now.getFullYear(), 0, 1);
-                          const lastDay = new Date(now.getFullYear(), 11, 31);
-                          handleSetDates(firstDay, lastDay);
-                        }}
-                        style={{
-                          padding: '8px 14px',
-                          background: '#2196f3',
-                          border: 'none',
-                          borderRadius: '6px',
-                          color: '#fff',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: '500',
-                          transition: 'all 0.2s ease'
-                        }}
-                        onMouseOver={(e) => e.target.style.background = '#1976d2'}
-                        onMouseOut={(e) => e.target.style.background = '#2196f3'}
-                      >
-                        Current Year
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const farPast = new Date(2000, 0, 1);
-                          const farFuture = new Date(2100, 0, 1);
-                          handleSetDates(farPast, farFuture);
-                        }}
-                        style={{
-                          padding: '8px 14px',
-                          background: '#ff9800',
-                          border: 'none',
-                          borderRadius: '6px',
-                          color: '#fff',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: '500',
-                          transition: 'all 0.2s ease'
-                        }}
-                        onMouseOver={(e) => e.target.style.background = '#f57c00'}
-                        onMouseOut={(e) => e.target.style.background = '#ff9800'}
-                      >
-                        All Time
-                      </button>
-            </div>
-
-                    {/* Calendar Header - Month/Year Navigation */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (calendarMonth === 0) {
-                            setCalendarMonth(11);
-                            setCalendarYear(calendarYear - 1);
-                          } else {
-                            setCalendarMonth(calendarMonth - 1);
-                          }
-                        }}
-                        style={{
-                          background: 'transparent',
-                          border: '1px solid #444',
-                          borderRadius: '6px',
-                          color: '#fff',
-                          cursor: 'pointer',
-                          padding: '6px 12px',
-                          fontSize: '14px',
-                          transition: 'all 0.2s ease'
-                        }}
-                        onMouseOver={(e) => { e.target.style.background = '#2a2a2a'; e.target.style.borderColor = '#666'; }}
-                        onMouseOut={(e) => { e.target.style.background = 'transparent'; e.target.style.borderColor = '#444'; }}
-                      >
-                        ←
-                      </button>
-                      <div style={{ color: '#fff', fontSize: '16px', fontWeight: '600' }}>
-                        {monthNames[calendarMonth]} {calendarYear}
-            </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (calendarMonth === 11) {
-                            setCalendarMonth(0);
-                            setCalendarYear(calendarYear + 1);
-                          } else {
-                            setCalendarMonth(calendarMonth + 1);
-                          }
-                        }}
-                        style={{
-                          background: 'transparent',
-                          border: '1px solid #444',
-                          borderRadius: '6px',
-                          color: '#fff',
-                          cursor: 'pointer',
-                          padding: '6px 12px',
-                          fontSize: '14px',
-                          transition: 'all 0.2s ease'
-                        }}
-                        onMouseOver={(e) => { e.target.style.background = '#2a2a2a'; e.target.style.borderColor = '#666'; }}
-                        onMouseOut={(e) => { e.target.style.background = 'transparent'; e.target.style.borderColor = '#444'; }}
-                      >
-                        →
-                      </button>
-          </div>
-
-                    {/* Calendar Grid */}
-                    <div style={{ marginBottom: '15px' }}>
-                      {/* Day Headers */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginBottom: '8px' }}>
-                        {dayNames.map(day => (
-                          <div key={day} style={{ textAlign: 'center', color: '#888', fontSize: '12px', fontWeight: '600', padding: '8px 0' }}>
-                            {day}
-                          </div>
+                        {workflows.filter(w => w !== 'all').map(w => (
+                          <label key={w} className="dropdown-item">
+                            <input
+                              type="checkbox"
+                              checked={filters.workflow.includes(w)}
+                              onChange={(e) => toggleCheckbox('workflow', w, e.target.checked)}
+                            />
+                            <span>{w}</span>
+                          </label>
                         ))}
                       </div>
-                      {/* Calendar Days */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
-                        {calendarDays.map((day, idx) => {
-                          if (day === null) {
-                            return <div key={`empty-${idx}`} style={{ height: '36px' }}></div>;
-                          }
-                          const cellDate = new Date(calendarYear, calendarMonth, day);
-                          const cellDateStr = formatDateForInput(cellDate);
-                          const isToday = isSameDay(cellDate, today);
-                          const isStart = selectedStart && isSameDay(cellDate, selectedStart);
-                          const isEnd = selectedEnd && isSameDay(cellDate, selectedEnd);
-                          const isInRange = selectedStart && selectedEnd && isDateInRange(cellDate, filters.start, filters.end);
-                          const isSelected = isStart || isEnd;
-
-                          return (
-                            <button
-                              key={day}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDateClick(day);
-                              }}
-                              style={{
-                                height: '36px',
-                                background: isSelected ? '#4caf50' : isInRange ? 'rgba(76, 175, 80, 0.2)' : isToday ? 'rgba(33, 150, 243, 0.2)' : 'transparent',
-                                border: isToday ? '1px solid #2196f3' : isSelected ? '1px solid #4caf50' : '1px solid transparent',
-                                borderRadius: '6px',
-                                color: isSelected ? '#fff' : isToday ? '#2196f3' : '#fff',
-                                cursor: 'pointer',
-                                fontSize: '13px',
-                                fontWeight: isSelected || isToday ? '600' : '400',
-                                transition: 'all 0.2s ease',
-                                position: 'relative'
-                              }}
-                              onMouseOver={(e) => {
-                                if (!isSelected) {
-                                  e.target.style.background = isInRange ? 'rgba(76, 175, 80, 0.3)' : '#2a2a2a';
-                                  e.target.style.borderColor = '#555';
-                                }
-                              }}
-                              onMouseOut={(e) => {
-                                if (!isSelected) {
-                                  e.target.style.background = isInRange ? 'rgba(76, 175, 80, 0.2)' : 'transparent';
-                                  e.target.style.borderColor = isToday ? '#2196f3' : 'transparent';
-                                }
-                              }}
-                            >
-                              {day}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Selected Range Display */}
-                    <div style={{ 
-                      padding: '12px', 
-                      background: '#222', 
-                      borderRadius: '6px', 
-                      marginBottom: '15px',
-                      fontSize: '13px',
-                      color: '#ccc'
-                    }}>
-                      <div><strong>From:</strong> {selectedStart ? formatDateDisplay(filters.start) : 'Not selected'}</div>
-                      <div style={{ marginTop: '4px' }}><strong>To:</strong> {selectedEnd ? formatDateDisplay(filters.end) : 'Not selected'}</div>
-                    </div>
-
-                    {/* Close Button */}
-                    <div style={{ textAlign: 'right' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDatePickerOpen(false);
-                        }}
-                        style={{
-                          padding: '8px 20px',
-                          background: '#333',
-                          border: '1px solid #555',
-                          borderRadius: '6px',
-                          color: '#fff',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                          fontWeight: '500',
-                          transition: 'all 0.2s ease'
-                        }}
-                        onMouseOver={(e) => {
-                          e.target.style.background = '#444';
-                          e.target.style.borderColor = '#666';
-                        }}
-                        onMouseOut={(e) => {
-                          e.target.style.background = '#333';
-                          e.target.style.borderColor = '#555';
-                        }}
-                      >
-                        Done
-                      </button>
-                    </div>
+                    )}
                   </div>
-                );
-              })()}
-            </div>
+                </div>
+
+                {/* Branch */}
+                <div className="filter-group">
+                  <label>Branch</label>
+
+                  <div className="dropdown-container" ref={dropdownRefs.branch}>
+                    <button
+                      className="dropdown-toggle"
+                      type="button"
+                      aria-expanded={openDropdowns.branch}
+                      onClick={() => {
+                        setDatePickerOpen(false);
+
+                        setOpenDropdowns(prev => ({
+                          workflow: false,
+                          branch: !prev.branch,
+                          actor: false
+                        }));
+                      }}
+                    >
+                      {filters.branch.includes('all')
+                        ? 'All branches'
+                        : `${filters.branch.length} selected`}
+                      <span className="dropdown-arrow">▼</span>
+                    </button>
+
+                    {openDropdowns.branch && (
+                      <div className="dropdown-menu">
+                        <label className="dropdown-item">
+                          <input
+                            type="checkbox"
+                            checked={filters.branch.includes('all')}
+                            onChange={(e) => toggleCheckbox('branch', 'all', e.target.checked)}
+                          />
+                          <span>All branches</span>
+                        </label>
+
+                        {branches.filter(b => b !== 'all').map(b => (
+                          <label key={b} className="dropdown-item">
+                            <input
+                              type="checkbox"
+                              checked={filters.branch.includes(b)}
+                              onChange={(e) => toggleCheckbox('branch', b, e.target.checked)}
+                            />
+                            <span>{b}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actor */}
+                <div className="filter-group">
+                  <label>Actor</label>
+
+                  <div className="dropdown-container" ref={dropdownRefs.actor}>
+                    <button
+                      className="dropdown-toggle"
+                      type="button"
+                      aria-expanded={openDropdowns.actor}
+                      onClick={() => {
+                        setDatePickerOpen(false);
+
+                        setOpenDropdowns(prev => ({
+                          workflow: false,
+                          branch: false,
+                          actor: !prev.actor
+                        }));
+                      }}
+                    >
+                      {filters.actor.includes('all')
+                        ? 'All actors'
+                        : `${filters.actor.length} selected`}
+                      <span className="dropdown-arrow">▼</span>
+                    </button>
+
+                    {openDropdowns.actor && (
+                      <div className="dropdown-menu">
+                        <label className="dropdown-item">
+                          <input
+                            type="checkbox"
+                            checked={filters.actor.includes('all')}
+                            onChange={(e) => toggleCheckbox('actor', 'all', e.target.checked)}
+                          />
+                          <span>All actors</span>
+                        </label>
+
+                        {actors.filter(a => a !== 'all').map(a => (
+                          <label key={a} className="dropdown-item">
+                            <input
+                              type="checkbox"
+                              checked={filters.actor.includes(a)}
+                              onChange={(e) => toggleCheckbox('actor', a, e.target.checked)}
+                            />
+                            <span>{a}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Date Range Picker */}
+                <div className="filter-group date-range-group" ref={datePickerRef}>
+                  <label>Date Range</label>
+
+                  <button
+                    className="dropdown-toggle"
+                    type="button"
+                    aria-expanded={datePickerOpen}
+                    onClick={() => {
+                      setOpenDropdowns({
+                        workflow: false,
+                        branch: false,
+                        actor: false
+                      });
+
+                      setDatePickerOpen(prev => !prev);
+                    }}
+                  >
+                    <span>
+                      {filters.start && filters.end
+                        ? (() => {
+                          const periodLabel = getDateRangeLabel(filters.start, filters.end);
+
+                          if (periodLabel) {
+                            return `Period: ${periodLabel}`;
+                          }
+
+                          return `${new Date(filters.start).toLocaleDateString()} - ${new Date(filters.end).toLocaleDateString()}`;
+                        })()
+                        : 'Select date range'}
+                    </span>
+
+                    <span className="dropdown-arrow">▼</span>
+                  </button>
+
+                  {datePickerOpen && (() => {
+                    const handleSetDates = (startDate, endDate) => {
+                      const startStr = formatDateForInput(startDate);
+                      const endStr = formatDateForInput(endDate);
+
+                      dateFiltersRef.current = {
+                        start: startStr,
+                        end: endStr
+                      };
+
+                      setFilters(prev => ({
+                        ...prev,
+                        start: startStr,
+                        end: endStr
+                      }));
+                    };
+
+                    const handleDateClick = (day) => {
+                      const clickedDate = new Date(calendarYear, calendarMonth, day);
+                      const clickedDateStr = formatDateForInput(clickedDate);
+
+                      if (selectingStart || !filters.start || clickedDateStr < filters.start) {
+                        handleSetDates(clickedDate, clickedDate);
+                        setSelectingStart(false);
+                      } else {
+                        handleSetDates(parseDateStr(filters.start), clickedDate);
+                        setSelectingStart(true);
+                      }
+                    };
+
+                    const monthNames = [
+                      'January',
+                      'February',
+                      'March',
+                      'April',
+                      'May',
+                      'June',
+                      'July',
+                      'August',
+                      'September',
+                      'October',
+                      'November',
+                      'December'
+                    ];
+
+                    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                    const daysInMonth = getDaysInMonth(calendarYear, calendarMonth);
+                    const firstDay = getFirstDayOfMonth(calendarYear, calendarMonth);
+                    const today = new Date();
+
+                    const selectedStart = filters.start ? parseDateStr(filters.start) : null;
+                    const selectedEnd = filters.end ? parseDateStr(filters.end) : null;
+
+                    const calendarDays = [
+                      ...Array(firstDay).fill(null),
+                      ...Array.from({ length: daysInMonth }, (_, i) => i + 1)
+                    ];
+
+                    return (
+                      <div
+                        className="date-picker-popover"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Quick Range Buttons */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '8px',
+                            marginBottom: '15px'
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+
+                              const now = new Date();
+                              const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                              const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+                              handleSetDates(firstDayOfMonth, lastDayOfMonth);
+                            }}
+                            style={{
+                              padding: '8px 14px',
+                              background: '#2196f3',
+                              border: 'none',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}
+                          >
+                            Current Month
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+
+                              const now = new Date();
+                              const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
+                              const lastDayOfYear = new Date(now.getFullYear(), 11, 31);
+
+                              handleSetDates(firstDayOfYear, lastDayOfYear);
+                            }}
+                            style={{
+                              padding: '8px 14px',
+                              background: '#2196f3',
+                              border: 'none',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}
+                          >
+                            Current Year
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+
+                              const farPast = new Date(2000, 0, 1);
+                              const farFuture = new Date(2100, 0, 1);
+
+                              handleSetDates(farPast, farFuture);
+                            }}
+                            style={{
+                              padding: '8px 14px',
+                              background: '#ff9800',
+                              border: 'none',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}
+                          >
+                            All Time
+                          </button>
+                        </div>
+
+                        {/* Calendar Header */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '15px'
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+
+                              if (calendarMonth === 0) {
+                                setCalendarMonth(11);
+                                setCalendarYear(calendarYear - 1);
+                              } else {
+                                setCalendarMonth(calendarMonth - 1);
+                              }
+                            }}
+                            style={{
+                              background: 'transparent',
+                              border: '1px solid #444',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              padding: '6px 12px',
+                              fontSize: '14px'
+                            }}
+                          >
+                            ←
+                          </button>
+
+                          <div
+                            style={{
+                              color: '#fff',
+                              fontSize: '16px',
+                              fontWeight: '600'
+                            }}
+                          >
+                            {monthNames[calendarMonth]} {calendarYear}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+
+                              if (calendarMonth === 11) {
+                                setCalendarMonth(0);
+                                setCalendarYear(calendarYear + 1);
+                              } else {
+                                setCalendarMonth(calendarMonth + 1);
+                              }
+                            }}
+                            style={{
+                              background: 'transparent',
+                              border: '1px solid #444',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              padding: '6px 12px',
+                              fontSize: '14px'
+                            }}
+                          >
+                            →
+                          </button>
+                        </div>
+
+                        {/* Calendar Grid */}
+                        <div style={{ marginBottom: '15px' }}>
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(7, 1fr)',
+                              gap: '4px',
+                              marginBottom: '8px'
+                            }}
+                          >
+                            {dayNames.map(day => (
+                              <div
+                                key={day}
+                                style={{
+                                  textAlign: 'center',
+                                  color: '#888',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  padding: '8px 0'
+                                }}
+                              >
+                                {day}
+                              </div>
+                            ))}
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(7, 1fr)',
+                              gap: '4px'
+                            }}
+                          >
+                            {calendarDays.map((day, idx) => {
+                              if (day === null) {
+                                return <div key={`empty-${idx}`} style={{ height: '36px' }} />;
+                              }
+
+                              const cellDate = new Date(calendarYear, calendarMonth, day);
+                              const isToday = isSameDay(cellDate, today);
+                              const isStart = selectedStart && isSameDay(cellDate, selectedStart);
+                              const isEnd = selectedEnd && isSameDay(cellDate, selectedEnd);
+                              const isInRange =
+                                selectedStart &&
+                                selectedEnd &&
+                                isDateInRange(cellDate, filters.start, filters.end);
+
+                              return (
+                                <button
+                                  key={day}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDateClick(day);
+                                  }}
+                                  style={{
+                                    height: '36px',
+                                    border: isToday ? '1px solid #2196f3' : '1px solid transparent',
+                                    borderRadius: '6px',
+                                    color: '#fff',
+                                    cursor: 'pointer',
+                                    fontSize: '13px',
+                                    fontWeight: isStart || isEnd ? '700' : '400',
+                                    background:
+                                      isStart || isEnd
+                                        ? '#2196f3'
+                                        : isInRange
+                                          ? 'rgba(33, 150, 243, 0.25)'
+                                          : 'transparent'
+                                  }}
+                                >
+                                  {day}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Selected Range Display */}
+                        <div
+                          style={{
+                            padding: '12px',
+                            background: '#222',
+                            borderRadius: '6px',
+                            marginBottom: '15px',
+                            fontSize: '13px',
+                            color: '#ccc'
+                          }}
+                        >
+                          <div>
+                            <strong>From:</strong>{' '}
+                            {selectedStart ? formatDateDisplay(filters.start) : 'Not selected'}
+                          </div>
+
+                          <div style={{ marginTop: '4px' }}>
+                            <strong>To:</strong>{' '}
+                            {selectedEnd ? formatDateDisplay(filters.end) : 'Not selected'}
+                          </div>
+                        </div>
+
+                        {/* Close Button */}
+                        <div style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDatePickerOpen(false);
+                            }}
+                            style={{
+                              padding: '8px 20px',
+                              background: '#333',
+                              border: '1px solid #555',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              fontWeight: '500'
+                            }}
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Collect More Data */}
+                {dataExists && !progress.isStreaming && (
+                  <div className="filter-action">
+                    <span>Data</span>
+
+                    <button
+                      onClick={() => loadDashboardData(true)}
+                      className="primary-action"
+                      type="button"
+                    >
+                      Collect More Data
+                    </button>
+                  </div>
+                )}
           </div>
-          {dataExists && !progress.isStreaming && (
-            <div className="filter-action">
-              <span>Data</span>
-              <button
-                onClick={() => loadDashboardData(true)}
-                className="primary-action"
-                type="button"
-              >
-                Collect More Data
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Stats */}
@@ -2398,30 +2991,38 @@ export default function Dashboard() {
           <MetricCard
             tone="info"
             icon="play"
-            title="Total runs"
-            value={data.totalRuns}
-            note={data.originalTotalRuns !== undefined && data.originalTotalRuns !== data.totalRuns ? `Filtered from ${data.originalTotalRuns} raw runs` : 'Runs executed'}
+            title="Filtered runs"
+            value={displayedFilteredRuns}
+            note={filteredRunsDetailNote}
             explanation={{
-                title: 'Total Runs',
-                text: 'The total number of workflow runs collected in the selected date range. This includes all runs regardless of their status (success, failure, cancelled, etc.).'
+              title: 'Filtered Runs',
+              text: 'The number of workflow runs currently included after the active date, workflow, branch, and actor filters are applied. The smaller note shows how many raw runs are available in the local cache before those filters. Extremely long duration outliers are excluded from statistical calculations.'
             }}
           >
             <div className="metric-mini total-runs-visual" aria-hidden="true">
-              <span style={{ width: `${Math.min(100, Math.round(((data.totalRuns || 0) / Math.max(data.originalTotalRuns || data.totalRuns || 1, 1)) * 100))}%` }} />
+              <span style={{ width: `${Math.min(100, Math.round(((displayedFilteredRuns || 0) / Math.max(rawRunsInCache || displayedFilteredRuns || 1, 1)) * 100))}%` }} />
             </div>
           </MetricCard>
           <MetricCard
             tone="success"
             icon="check"
             title="Success rate"
-            value={`${(data.successRate * 100).toFixed(1)}%`}
+            value={(
+              <span className={`success-rate-value success-rate-value-${getSuccessGaugeTone(data.successRate)}`}>
+                {(data.successRate * 100).toFixed(1)}%
+              </span>
+            )}
             note={`${Math.round((data.successRate || 0) * (data.totalRuns || 0))} successful`}
             explanation={{
-                title: 'Success Rate',
-                text: 'The percentage of workflow runs that completed successfully. Calculated as (successful runs / total runs) × 100%. A higher success rate indicates more reliable workflows.'
+              title: 'Success Rate',
+              text: 'The percentage of workflow runs that completed successfully. Calculated as (successful runs / total runs) × 100%. A higher success rate indicates more reliable workflows.'
             }}
           >
-            <div className="success-gauge" role="img" aria-label={`Success rate ${(data.successRate * 100).toFixed(1)} percent`}>
+            <div
+              className={`success-gauge success-gauge-${getSuccessGaugeTone(data.successRate)}`}
+              role="img"
+              aria-label={`Success rate ${(data.successRate * 100).toFixed(1)} percent`}
+            >
               <svg viewBox="0 0 120 70" aria-hidden="true">
                 <path className="gauge-track" d="M18 60 A42 42 0 0 1 102 60" />
                 <path className="gauge-fill" style={{ strokeDashoffset: 108 - (108 * (data.successRate || 0)) }} d="M18 60 A42 42 0 0 1 102 60" />
@@ -2435,8 +3036,8 @@ export default function Dashboard() {
             value={`${data.medianDuration} s`}
             note="Typical run time"
             explanation={{
-                title: 'Median Duration',
-                text: 'The median (middle value) execution time of all workflow runs in seconds. The median is less affected by outliers than the average, providing a more representative measure of typical workflow duration.'
+              title: 'Median Duration',
+              text: 'The median (middle value) execution time of all workflow runs in seconds. The median is less affected by outliers than the average, providing a more representative measure of typical workflow duration.'
             }}
           >
             <svg className="metric-mini duration-sparkline" viewBox="0 0 120 34" role="img" aria-label="Median duration trend">
@@ -2451,8 +3052,8 @@ export default function Dashboard() {
             value={`${data.mad} s`}
             note="Run time variability"
             explanation={{
-                title: 'Median Absolute Deviation (MAD)',
-                text: 'A measure of variability that shows how spread out the workflow durations are. MAD is the median of the absolute deviations from the median duration. Lower values indicate more consistent execution times, while higher values suggest greater variability.'
+              title: 'Median Absolute Deviation (MAD)',
+              text: 'A measure of variability that shows how spread out the workflow durations are. MAD is the median of the absolute deviations from the median duration. Lower values indicate more consistent execution times, while higher values suggest greater variability.'
             }}
           >
             <div className="metric-mini mad-visual" aria-hidden="true">
@@ -2541,9 +3142,14 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
-            
+
             {activeStatsTab === 'workflows' && (
-              <div id="stats-panel-workflows" role="tabpanel" aria-labelledby="stats-tab-workflows" className="table-wrapper">
+              <div
+                id="stats-panel-workflows"
+                role="tabpanel"
+                aria-labelledby="stats-tab-workflows"
+                className={`table-wrapper ${workflowStats.length > 10 ? 'table-wrapper-scroll' : ''}`}
+              >
                 <table className="branch-table">
                   <thead>
                     <tr>
@@ -2571,9 +3177,9 @@ export default function Dashboard() {
                           <td>{w.cancelled}</td>
                           <td>{w.timeout}</td>
                           <td>
-                            <div style={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
                               gap: '8px',
                               minWidth: '150px'
                             }}>
@@ -2596,9 +3202,7 @@ export default function Dashboard() {
                                   height: '100%'
                                 }}></div>
                               </div>
-                              <span style={{ fontSize: '12px', color: '#ccc', minWidth: '45px' }}>
-                                {successRate.toFixed(0)}%/{failureRate.toFixed(0)}%
-                              </span>
+                              <SuccessFailurePercent successRate={successRate} failureRate={failureRate} />
                             </div>
                           </td>
                           <td>{w.medianDuration}s</td>
@@ -2610,129 +3214,132 @@ export default function Dashboard() {
                 </table>
               </div>
             )}
-            
+
             {activeStatsTab === 'jobs' && (() => {
               return (
-                <div id="stats-panel-jobs" role="tabpanel" aria-labelledby="stats-tab-jobs" className="table-wrapper">
-                {/* Show progress while collecting jobs (Phase 2) */}
-                {jobProgress.isCollecting && jobProgress.total_runs > 0 && (
-                  <div style={{
-                    padding: '15px',
-                    marginBottom: jobStats.length > 0 ? '15px' : '0',
-                    background: '#2a2a2a',
-                    borderRadius: '6px',
-                    border: '1px solid #444',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '15px'
-                  }}>
-                    <div className="spinner"></div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ color: '#fff', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
-                        Collecting job data...
-                      </div>
-                      <div style={{ color: '#aaa', fontSize: '12px', marginBottom: '8px' }}>
-                        {jobProgress.runs_processed} / {jobProgress.total_runs} runs processed ({jobProgress.jobs_collected} jobs collected)
-                      </div>
-                      <div style={{
-                        height: '4px',
-                        background: '#333',
-                        borderRadius: '2px',
-                        overflow: 'hidden'
-                      }}>
+                <div
+                  id="stats-panel-jobs"
+                  role="tabpanel"
+                  aria-labelledby="stats-tab-jobs"
+                  className={`table-wrapper ${jobStats.length > 10 ? 'table-wrapper-scroll' : ''}`}
+                >
+                  {/* Show progress while collecting jobs (Phase 2) */}
+                  {jobProgress.isCollecting && jobProgress.total_runs > 0 && (
+                    <div style={{
+                      padding: '15px',
+                      marginBottom: jobStats.length > 0 ? '15px' : '0',
+                      background: '#2a2a2a',
+                      borderRadius: '6px',
+                      border: '1px solid #444',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '15px'
+                    }}>
+                      <div className="spinner"></div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ color: '#fff', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
+                          Collecting job data...
+                        </div>
+                        <div style={{ color: '#aaa', fontSize: '12px', marginBottom: '8px' }}>
+                          {jobProgress.runs_processed} / {jobProgress.total_runs} runs processed ({jobProgress.jobs_collected} jobs collected)
+                        </div>
                         <div style={{
-                          width: `${(jobProgress.runs_processed / jobProgress.total_runs) * 100}%`,
-                          height: '100%',
-                          background: '#4caf50',
-                          transition: 'width 0.3s ease'
-                        }}></div>
+                          height: '4px',
+                          background: '#333',
+                          borderRadius: '2px',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{
+                            width: `${(jobProgress.runs_processed / jobProgress.total_runs) * 100}%`,
+                            height: '100%',
+                            background: '#4caf50',
+                            transition: 'width 0.3s ease'
+                          }}></div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
-                {/* No data message */}
-                {jobStats.length === 0 && !jobProgress.isCollecting && !progress.isStreaming && (
-                  <div style={{
-                    padding: '40px',
-                    textAlign: 'center',
-                    color: '#999'
-                  }}>
-                    No job data available. Start data collection to see job statistics.
-                  </div>
-                )}
-                {jobStats.length > 0 && (
-                  <table className="branch-table">
-                    <thead>
-                      <tr>
-                        <th>Job</th>
-                        <th>Workflow</th>
-                        <th>Total Runs</th>
-                        <th>Failures</th>
-                        <th>Skipped</th>
-                        <th>Cancelled</th>
-                        <th>Timeout</th>
-                        <th>Success/Failure</th>
-                        <th>Median Duration</th>
-                        <th>Total Duration</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {jobStats.map(j => {
-                        const successCount = j.totalRuns - j.failures - j.skipped - j.cancelled - j.timeout;
-                        const successRate = j.totalRuns > 0 ? (successCount / j.totalRuns) * 100 : 0;
-                        const failureRate = j.totalRuns > 0 ? (j.failures / j.totalRuns) * 100 : 0;
-                        return (
-                          <tr key={j.name}>
-                            <td className="branch-name">{j.name}</td>
-                            <td style={{ color: '#bbb', fontSize: '13px' }}>{j.workflowName || 'unknown'}</td>
-                            <td>{j.totalRuns}</td>
-                            <td>{j.failures}</td>
-                            <td>{j.skipped}</td>
-                            <td>{j.cancelled}</td>
-                            <td>{j.timeout}</td>
-                            <td>
-                              <div style={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '8px',
-                                minWidth: '150px'
-                              }}>
+                  )}
+                  {/* No data message */}
+                  {jobStats.length === 0 && !jobProgress.isCollecting && !progress.isStreaming && (
+                    <div style={{
+                      padding: '40px',
+                      textAlign: 'center',
+                      color: '#999'
+                    }}>
+                      No job data available. Start data collection to see job statistics.
+                    </div>
+                  )}
+                  {jobStats.length > 0 && (
+                    <table className="branch-table">
+                      <thead>
+                        <tr>
+                          <th>Job</th>
+                          <th>Workflow</th>
+                          <th>Total Runs</th>
+                          <th>Failures</th>
+                          <th>Skipped</th>
+                          <th>Cancelled</th>
+                          <th>Timeout</th>
+                          <th>Success/Failure</th>
+                          <th>Median Duration</th>
+                          <th>Total Duration</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {jobStats.map(j => {
+                          const successCount = j.totalRuns - j.failures - j.skipped - j.cancelled - j.timeout;
+                          const successRate = j.totalRuns > 0 ? (successCount / j.totalRuns) * 100 : 0;
+                          const failureRate = j.totalRuns > 0 ? (j.failures / j.totalRuns) * 100 : 0;
+                          return (
+                            <tr key={j.name}>
+                              <td className="branch-name">{j.name}</td>
+                              <td style={{ color: '#bbb', fontSize: '13px' }}>{j.workflowName || 'unknown'}</td>
+                              <td>{j.totalRuns}</td>
+                              <td>{j.failures}</td>
+                              <td>{j.skipped}</td>
+                              <td>{j.cancelled}</td>
+                              <td>{j.timeout}</td>
+                              <td>
                                 <div style={{
-                                  flex: 1,
-                                  height: '20px',
-                                  background: '#333',
-                                  borderRadius: '4px',
-                                  overflow: 'hidden',
-                                  display: 'flex'
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  minWidth: '150px'
                                 }}>
                                   <div style={{
-                                    width: `${successRate}%`,
-                                    background: '#4caf50',
-                                    height: '100%'
-                                  }}></div>
-                                  <div style={{
-                                    width: `${failureRate}%`,
-                                    background: '#f44336',
-                                    height: '100%'
-                                  }}></div>
+                                    flex: 1,
+                                    height: '20px',
+                                    background: '#333',
+                                    borderRadius: '4px',
+                                    overflow: 'hidden',
+                                    display: 'flex'
+                                  }}>
+                                    <div style={{
+                                      width: `${successRate}%`,
+                                      background: '#4caf50',
+                                      height: '100%'
+                                    }}></div>
+                                    <div style={{
+                                      width: `${failureRate}%`,
+                                      background: '#f44336',
+                                      height: '100%'
+                                    }}></div>
+                                  </div>
+                                  <SuccessFailurePercent successRate={successRate} failureRate={failureRate} />
                                 </div>
-                                <span style={{ fontSize: '12px', color: '#ccc', minWidth: '45px' }}>
-                                  {successRate.toFixed(0)}%/{failureRate.toFixed(0)}%
-                                </span>
-                              </div>
-                            </td>
-                            <td>{j.medianDuration}s</td>
-                            <td>{j.totalDuration}s</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
+                              </td>
+                              <td>{j.medianDuration}s</td>
+                              <td>{j.totalDuration}s</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               );
             })()}
-            
+
             {activeStatsTab === 'branch' && (
               <div id="stats-panel-branch" role="tabpanel" aria-labelledby="stats-tab-branch">
                 <div className="branch-event-tabs-wrap">
@@ -2760,45 +3367,38 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-            <div className="table-wrapper">
-              <table className="branch-table">
-                <thead>
-                  <tr>
+                <div className={`table-wrapper ${displayedBranchStats.length > 10 ? 'table-wrapper-scroll' : ''}`}>
+                  <table className="branch-table">
+                    <thead>
+                      <tr>
                         <th>Branch Group</th>
                         <th>Total Runs</th>
-                    <th>Failures</th>
+                        <th>Failures</th>
                         <th>Skipped</th>
                         <th>Cancelled</th>
                         <th>Timeout</th>
                         <th>Success/Failure</th>
                         <th>Median Duration</th>
                         <th>Total Duration</th>
-                  </tr>
-                </thead>
-                <tbody>
-                      {(activeBranchEventTab === 'all' 
-                        ? branchStatsGrouped 
-                        : branchStatsGrouped.filter(b => {
-                            // Filter branch stats by event - this would need to be calculated in websocket.js
-                            // For now, show all branch stats
-                            return true;
-                          })
-                      ).map(b => {
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayedBranchStats.map(b => {
                         const successCount = b.totalRuns - b.failures - b.skipped - b.cancelled - b.timeout;
                         const successRate = b.totalRuns > 0 ? (successCount / b.totalRuns) * 100 : 0;
                         const failureRate = b.totalRuns > 0 ? (b.failures / b.totalRuns) * 100 : 0;
                         return (
                           <tr key={b.name}>
                             <td className="branch-name">{b.name}</td>
-                      <td>{b.totalRuns}</td>
+                            <td>{b.totalRuns}</td>
                             <td>{b.failures}</td>
                             <td>{b.skipped}</td>
                             <td>{b.cancelled}</td>
                             <td>{b.timeout}</td>
                             <td>
-                              <div style={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
                                 gap: '8px',
                                 minWidth: '150px'
                               }}>
@@ -2821,24 +3421,27 @@ export default function Dashboard() {
                                     height: '100%'
                                   }}></div>
                                 </div>
-                                <span style={{ fontSize: '12px', color: '#ccc', minWidth: '45px' }}>
-                                  {successRate.toFixed(0)}%/{failureRate.toFixed(0)}%
-                                </span>
+                                <SuccessFailurePercent successRate={successRate} failureRate={failureRate} />
                               </div>
-                      </td>
-                      <td>{b.medianDuration}s</td>
+                            </td>
+                            <td>{b.medianDuration}s</td>
                             <td>{b.totalDuration}s</td>
-                    </tr>
+                          </tr>
                         );
                       })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
-            
+
             {activeStatsTab === 'events' && (
-              <div id="stats-panel-events" role="tabpanel" aria-labelledby="stats-tab-events" className="table-wrapper">
+              <div
+                id="stats-panel-events"
+                role="tabpanel"
+                aria-labelledby="stats-tab-events"
+                className={`table-wrapper ${eventStats.length > 10 ? 'table-wrapper-scroll' : ''}`}
+              >
                 <table className="branch-table">
                   <thead>
                     <tr>
@@ -2867,9 +3470,9 @@ export default function Dashboard() {
                           <td>{e.cancelled}</td>
                           <td>{e.timeout}</td>
                           <td>
-                            <div style={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
                               gap: '8px',
                               minWidth: '150px'
                             }}>
@@ -2892,9 +3495,7 @@ export default function Dashboard() {
                                   height: '100%'
                                 }}></div>
                               </div>
-                              <span style={{ fontSize: '12px', color: '#ccc', minWidth: '45px' }}>
-                                {successRate.toFixed(0)}%/{failureRate.toFixed(0)}%
-                              </span>
+                              <SuccessFailurePercent successRate={successRate} failureRate={failureRate} />
                             </div>
                           </td>
                           <td>{e.medianDuration}s</td>
@@ -2923,12 +3524,14 @@ export default function Dashboard() {
                       border: '1px solid #444',
                       borderRadius: '4px',
                       color: '#fff',
-                      fontSize: '14px'
+                      fontSize: '14px',
+                      boxSizing: 'border-box',
+                      display: 'block'
                     }}
                   />
                 </div>
-                
-                <div className="table-wrapper">
+
+                <div className={`table-wrapper ${filteredContributorStats.length > 10 ? 'table-wrapper-scroll' : ''}`}>
                   <table className="branch-table">
                     <thead>
                       <tr>
@@ -2944,12 +3547,7 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {contributorStats
-                        .filter(c => {
-                          if (!contributorSearchQuery.trim()) return true;
-                          return c.name.toLowerCase().includes(contributorSearchQuery.toLowerCase());
-                        })
-                        .map(c => {
+                      {filteredContributorStats.map(c => {
                           const successRate = c.totalRuns > 0 ? (c.successes / c.totalRuns) * 100 : 0;
                           const failureRate = c.totalRuns > 0 ? (c.failures / c.totalRuns) * 100 : 0;
                           return (
@@ -2961,9 +3559,9 @@ export default function Dashboard() {
                               <td>{c.cancelled}</td>
                               <td>{c.timeout}</td>
                               <td>
-                                <div style={{ 
-                                  display: 'flex', 
-                                  alignItems: 'center', 
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
                                   gap: '8px',
                                   minWidth: '150px'
                                 }}>
@@ -2986,9 +3584,7 @@ export default function Dashboard() {
                                       height: '100%'
                                     }}></div>
                                   </div>
-                                  <span style={{ fontSize: '12px', color: '#ccc', minWidth: '45px' }}>
-                                    {successRate.toFixed(0)}%/{failureRate.toFixed(0)}%
-                                  </span>
+                                  <SuccessFailurePercent successRate={successRate} failureRate={failureRate} />
                                 </div>
                               </td>
                               <td>{c.medianDuration}s</td>
@@ -3004,7 +3600,7 @@ export default function Dashboard() {
           </div>
 
           {/* Daily runs */}
-          <div className="card dashboard-chart-card modern-panel">
+          <ChartCard panelId="dailyRuns" isFullscreen={fullscreenPanelId === 'dailyRuns'}>
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Runs over time</p>
@@ -3019,26 +3615,36 @@ export default function Dashboard() {
               <span className="status-pill success">Daily count</span>
               <PanelControls
                 panelId="dailyRuns"
-                zoomed={!!dailyRunsZoom}
-                onZoom={zoomPanelData}
-                onReset={() => resetPanelZoom('dailyRuns')}
+                isFullscreen={fullscreenPanelId === 'dailyRuns'}
+                onFullscreenToggle={toggleFullscreenPanel}
               />
             </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={visibleRunsOverTime} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis dataKey="date" stroke="#bcd" />
-                <YAxis stroke="#bcd" />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="successes" stackId="a" fill="#4caf50" name="Successes" />
-                <Bar dataKey="failures" stackId="a" fill="#f44336" name="Failures" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+            <div
+              className="chart-wheel-area"
+              onWheelCapture={(event) =>
+                wheelZoomPanelData(event, 'dailyRuns', runsOverTime.length)
+              }
+            >
+              <SafeResponsiveContainer>
+                <BarChart
+                  key={getChartZoomKey('dailyRuns', dailyRunsZoom, runsOverTime.length)}
+                  data={visibleRunsOverTime}
+                  margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                  <XAxis dataKey="date" stroke="#bcd" />
+                  <YAxis stroke="#bcd" />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="successes" stackId="a" fill="#4caf50" name="Successes" />
+                  <Bar dataKey="failures" stackId="a" fill="#f44336" name="Failures" />
+                </BarChart>
+              </SafeResponsiveContainer>
+            </div>
+          </ChartCard>
 
           {/* Duration over time */}
-          <div className="card dashboard-chart-card modern-panel">
+          <ChartCard panelId="durationVariability" isFullscreen={fullscreenPanelId === 'durationVariability'}>
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Duration variability</p>
@@ -3046,53 +3652,73 @@ export default function Dashboard() {
                   Min, median, max
                   <InfoIcon explanation={{
                     title: 'Duration Variability',
-                    text: 'Shows the variability of workflow execution times over time. Displays the minimum (green area), maximum (orange area), and median (blue line) durations. Use the brush at the bottom to zoom into specific time periods. High variability may indicate performance issues or inconsistent resource availability.'
+                    text: 'Shows the variability of workflow execution times over time. Displays the minimum, maximum, and median durations.'
                   }} />
                 </h3>
               </div>
+
               <PanelControls
                 panelId="durationVariability"
-                zoomed={!!durationVariabilityZoom}
-                onZoom={zoomPanelData}
-                onReset={() => resetPanelZoom('durationVariability', () => setDurationVariabilityZoom(null))}
+                isFullscreen={fullscreenPanelId === 'durationVariability'}
+                onFullscreenToggle={toggleFullscreenPanel}
               />
             </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <ComposedChart 
-                data={runsOverTime} 
-                margin={{ top: 10, right: 20, left: 0, bottom: 30 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                <XAxis 
-                  dataKey="date" 
-                  stroke="#bcd"
-                />
-                <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
-                <Tooltip />
-                <Legend />
-                <Area type="monotone" dataKey="maxDuration" fill="#ff980030" stroke="#ff9800" name="Max" />
-                <Area type="monotone" dataKey="minDuration" fill="#4caf5030" stroke="#4caf50" name="Min" />
-                <Line type="monotone" dataKey="medianDuration" stroke="#2196f3" strokeWidth={3} name="Median" />
-                <Brush 
-                  dataKey="date" 
-                  height={30}
-                  stroke="#8884d8"
-                  startIndex={durationVariabilityZoom?.startIndex}
-                  endIndex={durationVariabilityZoom?.endIndex}
-                  onChange={(e) => {
-                    if (e && typeof e.startIndex === 'number' && typeof e.endIndex === 'number') {
-                      setDurationVariabilityZoom({ startIndex: e.startIndex, endIndex: e.endIndex });
-                    } else {
-                      setDurationVariabilityZoom(null);
-                    }
-                  }}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+
+            <div
+              className="chart-wheel-area"
+              onWheelCapture={(event) =>
+                wheelZoomPanelData(event, 'durationVariability', runsOverTime.length)
+              }
+            >
+              <SafeResponsiveContainer>
+                <ComposedChart
+                  key={getChartZoomKey(
+                    'durationVariability',
+                    durationVariabilityZoom,
+                    runsOverTime.length
+                  )}
+                  data={visibleDurationVariability}
+                  margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                  <XAxis dataKey="date" stroke="#bcd" />
+                  <YAxis
+                    stroke="#bcd"
+                    label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }}
+                  />
+                  <Tooltip />
+                  <Legend />
+
+                  <Area
+                    type="monotone"
+                    dataKey="maxDuration"
+                    fill="#ff980030"
+                    stroke="#ff9800"
+                    name="Max"
+                  />
+
+                  <Area
+                    type="monotone"
+                    dataKey="minDuration"
+                    fill="#4caf5030"
+                    stroke="#4caf50"
+                    name="Min"
+                  />
+
+                  <Line
+                    type="monotone"
+                    dataKey="medianDuration"
+                    stroke="#2196f3"
+                    strokeWidth={3}
+                    name="Median"
+                  />
+                </ComposedChart>
+              </SafeResponsiveContainer>
+            </div>
+          </ChartCard>
 
           {/* Cumulative failure duration */}
-          <div className="card dashboard-chart-card modern-panel">
+          <ChartCard panelId="cumulativeFailure" isFullscreen={fullscreenPanelId === 'cumulativeFailure'}>
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Failure duration</p>
@@ -3100,60 +3726,79 @@ export default function Dashboard() {
                   Cumulative failure duration
                   <InfoIcon explanation={{
                     title: 'Cumulative Failure Duration',
-                    text: 'Shows the daily failure duration (red bars) and cumulative failure duration (orange line) over time. The cumulative line helps track the total time lost to failures. Use the brush at the bottom to zoom into specific periods. This metric helps quantify the impact of failures on development velocity.'
+                    text: 'Shows the daily failure duration and cumulative failure duration over time.'
                   }} />
                 </h3>
               </div>
-              <span className="status-pill danger">{`${(data.successRate < 1 ? (100 - data.successRate * 100) : 0).toFixed(1)}% failure rate`}</span>
+
+              <span className="status-pill danger">
+                {`${(data.successRate < 1 ? (100 - data.successRate * 100) : 0).toFixed(1)}% failure rate`}
+              </span>
+
               <PanelControls
                 panelId="cumulativeFailure"
-                zoomed={!!cumulativeFailureZoom}
-                onZoom={zoomPanelData}
-                onReset={() => resetPanelZoom('cumulativeFailure', () => setCumulativeFailureZoom(null))}
+                isFullscreen={fullscreenPanelId === 'cumulativeFailure'}
+                onFullscreenToggle={toggleFullscreenPanel}
               />
             </div>
-            {failureDurationOverTime && failureDurationOverTime.length > 0 && 
-             failureDurationOverTime.some(item => (item.dailyFailureDuration || 0) > 0 || (item.cumulativeFailureDuration || 0) > 0) ? (
-              <ResponsiveContainer width="100%" height={280}>
-                <ComposedChart 
-                  data={failureDurationOverTime} 
-                  margin={{ top: 10, right: 20, left: 0, bottom: 30 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#bcd"
-                  />
-                  <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="dailyFailureDuration" fill="#f44336" name="Daily failure duration" />
-                  <Line type="monotone" dataKey="cumulativeFailureDuration" stroke="#ff9800" strokeWidth={2} name="Cumulative" />
-                  <Brush 
-                    dataKey="date" 
-                    height={30}
-                    stroke="#8884d8"
-                    startIndex={cumulativeFailureZoom?.startIndex}
-                    endIndex={cumulativeFailureZoom?.endIndex}
-                    onChange={(e) => {
-                      if (e && typeof e.startIndex === 'number' && typeof e.endIndex === 'number') {
-                        setCumulativeFailureZoom({ startIndex: e.startIndex, endIndex: e.endIndex });
-                      } else {
-                        setCumulativeFailureZoom(null);
-                      }
-                    }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
+
+            {visibleCumulativeFailure &&
+              visibleCumulativeFailure.length > 0 &&
+              visibleCumulativeFailure.some(
+                item =>
+                  (item.dailyFailureDuration || 0) > 0 ||
+                  (item.cumulativeFailureDuration || 0) > 0
+              ) ? (
+              <div
+                className="chart-wheel-area"
+                onWheelCapture={(event) =>
+                  wheelZoomPanelData(event, 'cumulativeFailure', failureDurationOverTime.length)
+                }
+              >
+                <SafeResponsiveContainer>
+                  <ComposedChart
+                    key={getChartZoomKey(
+                      'cumulativeFailure',
+                      cumulativeFailureZoom,
+                      failureDurationOverTime.length
+                    )}
+                    data={visibleCumulativeFailure}
+                    margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                    <XAxis dataKey="date" stroke="#bcd" />
+                    <YAxis
+                      stroke="#bcd"
+                      label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }}
+                    />
+                    <Tooltip />
+                    <Legend />
+
+                    <Bar
+                      dataKey="dailyFailureDuration"
+                      fill="#f44336"
+                      name="Daily failure duration"
+                    />
+
+                    <Line
+                      type="monotone"
+                      dataKey="cumulativeFailureDuration"
+                      stroke="#ff9800"
+                      strokeWidth={2}
+                      name="Cumulative"
+                    />
+                  </ComposedChart>
+                </SafeResponsiveContainer>
+              </div>
             ) : (
               <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
                 No workflows with failures in the selected period
               </div>
             )}
-          </div>
+          </ChartCard>
 
           {/* Time to Fix Box Plot */}
-          <div className="card dashboard-chart-card modern-panel">
+          <ChartCard panelId="timeToFix" isFullscreen={fullscreenPanelId === 'timeToFix'}>
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Time to fix</p>
@@ -3168,15 +3813,20 @@ export default function Dashboard() {
               <span className="status-pill warning">{`${topFailedWorkflows.length || timeToFix.length} regressions`}</span>
               <PanelControls
                 panelId="timeToFix"
-                zoomed={!!timeToFixZoom}
-                onZoom={zoomPanelData}
-                onReset={() => resetPanelZoom('timeToFix')}
+                isFullscreen={fullscreenPanelId === 'timeToFix'}
+                onFullscreenToggle={toggleFullscreenPanel}
               />
             </div>
             {visibleTimeToFix && visibleTimeToFix.length > 0 ? (
-              <div style={{ width: '100%', height: '320px', position: 'relative', overflow: 'hidden' }}>
+              <div
+                className="chart-wheel-area time-to-fix-chart"
+                style={{ width: '100%', position: 'relative', overflow: 'hidden' }}
+                onWheelCapture={(event) =>
+                  wheelZoomPanelData(event, 'timeToFix', timeToFix.length)
+                }
+              >
                 {tooltipData && (
-                  <div 
+                  <div
                     style={{
                       position: 'fixed',
                       left: tooltipPosition.x + 10,
@@ -3208,45 +3858,45 @@ export default function Dashboard() {
                     const margin = { top: 20, right: 30, bottom: 60, left: 120 };
                     const plotWidth = chartWidth - margin.left - margin.right;
                     const plotHeight = chartHeight - margin.top - margin.bottom;
-                    
+
                     // Get the appropriate time unit based on data
                     const timeUnit = getTimeUnit(visibleTimeToFix);
-                    
+
                     // Handle large values by using 95th percentile or reasonable max
                     const allValues = visibleTimeToFix.flatMap(d => [d.min, d.q1, d.median, d.q3, d.max, d.mean].filter(v => v > 0));
                     const sortedValues = [...allValues].sort((a, b) => a - b);
                     const p95Index = Math.floor(sortedValues.length * 0.95);
                     const reasonableMax = sortedValues.length > 0 ? Math.max(sortedValues[p95Index] || sortedValues[sortedValues.length - 1], Math.max(...visibleTimeToFix.map(d => d.max || 0)) * 0.1) : 1;
-                    
+
                     // Convert reasonableMax to the selected unit for display
                     const reasonableMaxInUnit = reasonableMax / timeUnit.divisor;
-                    
+
                     const xScale = reasonableMax > 0 ? plotWidth / reasonableMax : 1;
                     const boxSpacing = plotHeight / (visibleTimeToFix.length + 1);
                     const boxHeight = Math.min(boxSpacing * 0.6, 40);
-                    
+
                     return (
                       <g transform={`translate(${margin.left}, ${margin.top})`}>
                         {/* Y-axis line */}
-                        <line 
-                          x1={0} 
-                          y1={0} 
-                          x2={0} 
-                          y2={plotHeight} 
-                          stroke="#bcd" 
+                        <line
+                          x1={0}
+                          y1={0}
+                          x2={0}
+                          y2={plotHeight}
+                          stroke="#bcd"
                           strokeWidth={1.5}
                         />
-                        
+
                         {/* X-axis line */}
-                        <line 
-                          x1={0} 
-                          y1={plotHeight} 
-                          x2={plotWidth} 
-                          y2={plotHeight} 
-                          stroke="#bcd" 
+                        <line
+                          x1={0}
+                          y1={plotHeight}
+                          x2={plotWidth}
+                          y2={plotHeight}
+                          stroke="#bcd"
                           strokeWidth={1.5}
                         />
-                        
+
                         {/* Grid lines and X-axis labels */}
                         {[0, 0.25, 0.5, 0.75, 1].map(ratio => {
                           const value = reasonableMax * ratio;
@@ -3254,20 +3904,20 @@ export default function Dashboard() {
                           const displayValue = value / timeUnit.divisor;
                           return (
                             <g key={ratio}>
-                              <line 
-                                x1={xPos} 
-                                y1={0} 
-                                x2={xPos} 
-                                y2={plotHeight} 
-                                stroke="#122" 
-                                strokeDasharray="3 3" 
+                              <line
+                                x1={xPos}
+                                y1={0}
+                                x2={xPos}
+                                y2={plotHeight}
+                                stroke="#122"
+                                strokeDasharray="3 3"
                                 opacity={0.3}
                               />
-                              <text 
-                                x={xPos} 
-                                y={plotHeight + 20} 
-                                fill="#bcd" 
-                                fontSize="11" 
+                              <text
+                                x={xPos}
+                                y={plotHeight + 20}
+                                fill="#bcd"
+                                fontSize="11"
                                 textAnchor="middle"
                               >
                                 {displayValue < 10 ? displayValue.toFixed(1) : Math.round(displayValue)}{timeUnit.label}
@@ -3275,24 +3925,24 @@ export default function Dashboard() {
                             </g>
                           );
                         })}
-                        
+
                         {/* Y-axis labels (workflow names) */}
                         {visibleTimeToFix.map((item, index) => {
                           const yPos = (index + 1) * boxSpacing;
                           return (
-                            <text 
+                            <text
                               key={`y-label-${index}`}
-                              x={-10} 
-                              y={yPos + 5} 
-                              fill="#bcd" 
-                              fontSize="11" 
+                              x={-10}
+                              y={yPos + 5}
+                              fill="#bcd"
+                              fontSize="11"
                               textAnchor="end"
                             >
                               {item.workflow.length > 15 ? item.workflow.substring(0, 12) + '...' : item.workflow}
                             </text>
                           );
                         })}
-                        
+
                         {/* Box plots */}
                         {visibleTimeToFix.map((item, index) => {
                           const yPos = (index + 1) * boxSpacing;
@@ -3304,39 +3954,39 @@ export default function Dashboard() {
                           const maxX = Math.min((item.max || 0), reasonableMax) * xScale;
                           const meanX = Math.min((item.mean || 0), reasonableMax) * xScale;
                           const boxWidth = Math.max(q3X - q1X, 2); // Ensure minimum width
-                          
+
                           // Check if max exceeds reasonableMax (outlier)
                           const hasOutlier = (item.max || 0) > reasonableMax;
-                          
+
                           return (
                             <g key={item.workflow}>
                               {/* Min to Q1 whisker */}
                               <line x1={minX} y1={yPos} x2={q1X} y2={yPos} stroke="#fff" strokeWidth={1.5} />
                               <line x1={minX} y1={yPos - 8} x2={minX} y2={yPos + 8} stroke="#fff" strokeWidth={1.5} />
-                              
+
                               {/* Q1 to Q3 box */}
-                              <rect 
-                                x={q1X} 
-                                y={yPos - boxHeight / 2} 
-                                width={boxWidth} 
-                                height={boxHeight} 
-                                fill="#2196f3" 
-                                stroke="#fff" 
+                              <rect
+                                x={q1X}
+                                y={yPos - boxHeight / 2}
+                                width={boxWidth}
+                                height={boxHeight}
+                                fill="#2196f3"
+                                stroke="#fff"
                                 strokeWidth={1.5}
                                 opacity={0.7}
                                 style={{ cursor: 'pointer' }}
                               />
-                              
+
                               {/* Median line */}
-                              <line 
-                                x1={medianX} 
-                                y1={yPos - boxHeight / 2} 
-                                x2={medianX} 
-                                y2={yPos + boxHeight / 2} 
-                                stroke="#ff9800" 
-                                strokeWidth={2.5} 
+                              <line
+                                x1={medianX}
+                                y1={yPos - boxHeight / 2}
+                                x2={medianX}
+                                y2={yPos + boxHeight / 2}
+                                stroke="#ff9800"
+                                strokeWidth={2.5}
                               />
-                              
+
                               {/* Q3 to Max whisker */}
                               <line x1={q3X} y1={yPos} x2={maxX} y2={yPos} stroke="#fff" strokeWidth={1.5} />
                               <line x1={maxX} y1={yPos - 8} x2={maxX} y2={yPos + 8} stroke="#fff" strokeWidth={1.5} />
@@ -3344,35 +3994,35 @@ export default function Dashboard() {
                                 <>
                                   {/* Outlier indicator */}
                                   <line x1={plotWidth - 5} y1={yPos} x2={plotWidth} y2={yPos} stroke="#ff9800" strokeWidth={2} />
-                                  <text 
-                                    x={plotWidth + 5} 
-                                    y={yPos + 4} 
-                                    fill="#ff9800" 
-                                    fontSize="9" 
+                                  <text
+                                    x={plotWidth + 5}
+                                    y={yPos + 4}
+                                    fill="#ff9800"
+                                    fontSize="9"
                                     textAnchor="start"
                                   >
                                     {formatWithUnit(item.max, timeUnit.divisor, timeUnit.label)}
                                   </text>
                                 </>
                               )}
-                              
+
                               {/* Mean marker */}
-                              <circle 
-                                cx={meanX} 
-                                cy={yPos} 
-                                r={4} 
-                                fill="#4caf50" 
-                                stroke="#fff" 
+                              <circle
+                                cx={meanX}
+                                cy={yPos}
+                                r={4}
+                                fill="#4caf50"
+                                stroke="#fff"
                                 strokeWidth={1.5}
                                 style={{ cursor: 'pointer' }}
                               />
-                              
+
                               {/* Invisible hover area for tooltip */}
-                              <rect 
-                                x={minX - 10} 
-                                y={yPos - boxHeight / 2 - 5} 
-                                width={maxX - minX + 20} 
-                                height={boxHeight + 10} 
+                              <rect
+                                x={minX - 10}
+                                y={yPos - boxHeight / 2 - 5}
+                                width={maxX - minX + 20}
+                                height={boxHeight + 10}
                                 fill="transparent"
                                 style={{ cursor: 'pointer' }}
                                 onMouseEnter={(e) => {
@@ -3390,25 +4040,25 @@ export default function Dashboard() {
                             </g>
                           );
                         })}
-                        
+
                         {/* X-axis label */}
-                        <text 
-                          x={plotWidth / 2} 
-                          y={plotHeight + 45} 
-                          fill="#bcd" 
-                          fontSize="12" 
+                        <text
+                          x={plotWidth / 2}
+                          y={plotHeight + 45}
+                          fill="#bcd"
+                          fontSize="12"
                           textAnchor="middle"
                           fontWeight="bold"
                         >
                           Time to Fix ({timeUnit.fullLabel})
                         </text>
-                        
+
                         {/* Y-axis label */}
-                        <text 
-                          x={-60} 
-                          y={plotHeight / 2} 
-                          fill="#bcd" 
-                          fontSize="12" 
+                        <text
+                          x={-60}
+                          y={plotHeight / 2}
+                          fill="#bcd"
+                          fontSize="12"
                           textAnchor="middle"
                           transform={`rotate(-90, -60, ${plotHeight / 2})`}
                           fontWeight="bold"
@@ -3425,10 +4075,10 @@ export default function Dashboard() {
                 No time-to-fix data available. Time-to-fix is calculated from failure→success sequences.
               </div>
             )}
-          </div>
+          </ChartCard>
 
           {/* Duration Explosion Chart */}
-          <div className="card card-span-2 dashboard-chart-card modern-panel">
+          <ChartCard panelId="durationExplosion" isFullscreen={fullscreenPanelId === 'durationExplosion'}>
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Workflow duration over time</p>
@@ -3441,7 +4091,7 @@ export default function Dashboard() {
                 </h3>
               </div>
               <div className="chart-header-actions">
-                <select 
+                <select
                   className="compact-select"
                   value={selectedWorkflowForDuration}
                   onChange={(e) => setSelectedWorkflowForDuration(e.target.value)}
@@ -3453,25 +4103,32 @@ export default function Dashboard() {
                 </select>
                 <PanelControls
                   panelId="durationExplosion"
-                  zoomed={!!durationExplosionZoom}
-                  onZoom={zoomPanelData}
-                  onReset={() => resetPanelZoom('durationExplosion', () => {
-                    setDurationExplosionBrushKey(prev => prev + 1);
-                    setDurationExplosionZoom(null);
-                  })}
+                  isFullscreen={fullscreenPanelId === 'durationExplosion'}
+                  onFullscreenToggle={toggleFullscreenPanel}
                 />
               </div>
             </div>
             {workflowStats.length > 0 ? (
-              <ResponsiveContainer width="100%" height={320}>
-                <LineChart 
-                  data={durationExplosionData} 
-                  margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
-                >
+              <div
+                className="chart-wheel-area chart-wheel-area-large"
+                onWheelCapture={(event) =>
+                  wheelZoomPanelData(event, 'durationExplosion', durationExplosionData.length)
+                }
+              >
+                <SafeResponsiveContainer>
+                  <LineChart
+                    key={getChartZoomKey(
+                      'durationExplosion',
+                      durationExplosionZoom,
+                      durationExplosionData.length
+                    )}
+                    data={visibleDurationExplosion}
+                    margin={{ top: 10, right: 30, left: 0, bottom: 20 }}
+                  >
                   <CartesianGrid strokeDasharray="3 3" stroke="#122" />
                   <XAxis dataKey="date" stroke="#bcd" angle={-45} textAnchor="end" height={80} />
                   <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
-                  <Tooltip 
+                  <Tooltip
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
                         const data = payload[0].payload;
@@ -3493,13 +4150,13 @@ export default function Dashboard() {
                                     Commit: {data.worseningPoint.commitSha.substring(0, 7)}
                                   </p>
                                 )}
-                                <p style={{ color: '#ff9800', margin: '5px 0 0 0', cursor: 'pointer', fontSize: '11px' }} 
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     if (data.worseningPoint?.commitUrl) {
-                                       window.open(data.worseningPoint.commitUrl, '_blank');
-                                     }
-                                   }}>
+                                <p style={{ color: '#ff9800', margin: '5px 0 0 0', cursor: 'pointer', fontSize: '11px' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (data.worseningPoint?.commitUrl) {
+                                      window.open(data.worseningPoint.commitUrl, '_blank');
+                                    }
+                                  }}>
                                   Click to view commit changes
                                 </p>
                               </div>
@@ -3511,17 +4168,17 @@ export default function Dashboard() {
                     }}
                   />
                   <Legend />
-                  <Line 
-                    type="monotone" 
-                    dataKey="duration" 
-                    stroke="#2196f3" 
-                    strokeWidth={2} 
-                    name="Duration" 
+                  <Line
+                    type="monotone"
+                    dataKey="duration"
+                    stroke="#2196f3"
+                    strokeWidth={2}
+                    name="Duration"
                     dot={(props) => {
                       const { cx, cy, payload } = props;
                       // Show regular dot for all points
                       if (!payload) return null;
-                      
+
                       // If this is a worsening point, show highlighted dot
                       if (payload.worseningPoint) {
                         const handleClick = (e) => {
@@ -3532,7 +4189,7 @@ export default function Dashboard() {
                             window.open(url, '_blank');
                           }
                         };
-                        
+
                         return (
                           <g onClick={handleClick} onMouseDown={handleClick} style={{ cursor: 'pointer' }} pointerEvents="all">
                             {/* Large transparent clickable area */}
@@ -3568,7 +4225,7 @@ export default function Dashboard() {
                           </g>
                         );
                       }
-                      
+
                       // Regular dot for non-worsening points
                       return <circle cx={cx} cy={cy} r={4} fill="#2196f3" />;
                     }}
@@ -3579,32 +4236,22 @@ export default function Dashboard() {
                       strokeWidth: 2
                     }}
                   />
-                  <Brush 
-                    dataKey="date" 
-                    height={30}
-                    stroke="#8884d8"
-                    key={durationExplosionBrushKey}
-                    startIndex={durationExplosionZoom?.startIndex}
-                    endIndex={durationExplosionZoom?.endIndex}
-                    onChange={(e) => {
-                      if (e && typeof e.startIndex === 'number' && typeof e.endIndex === 'number') {
-                        setDurationExplosionZoom({ startIndex: e.startIndex, endIndex: e.endIndex });
-                      } else {
-                        setDurationExplosionZoom(null);
-                      }
-                    }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+                  </LineChart>
+                </SafeResponsiveContainer>
+              </div>
             ) : (
               <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
                 No workflow data available
               </div>
             )}
-          </div>
+          </ChartCard>
 
           {/* Failure Worsening Chart */}
-          <div className="card card-span-2 dashboard-chart-card modern-panel">
+          <ChartCard
+            panelId="failureWorsening"
+            extraClass="failure-worsening-card"
+            isFullscreen={fullscreenPanelId === 'failureWorsening'}
+          >
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Failure rate over time</p>
@@ -3616,157 +4263,238 @@ export default function Dashboard() {
                   }} />
                 </h3>
               </div>
+
               <PanelControls
                 panelId="failureWorsening"
-                zoomed={!!failureWorseningZoom}
-                onZoom={zoomPanelData}
-                onReset={() => resetPanelZoom('failureWorsening', () => setFailureWorseningZoom(null))}
+                isFullscreen={fullscreenPanelId === 'failureWorsening'}
+                onFullscreenToggle={toggleFullscreenPanel}
               />
             </div>
+
             {workflowStats.length > 0 ? (
-              <ResponsiveContainer width="100%" height={320}>
-                <ComposedChart 
-                  data={failureWorseningData} 
-                  margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#bcd" 
-                    angle={-45} 
-                    textAnchor="end" 
-                    height={80}
-                  />
-                  <YAxis stroke="#bcd" label={{ value: 'Failure Rate (%)', angle: -90, position: 'insideLeft' }} />
-                  <Tooltip 
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <div style={{ background: '#222', padding: '10px', border: '1px solid #444', borderRadius: '4px' }}>
-                            <p style={{ color: '#fff', margin: 0 }}>Date: {data.date}</p>
-                            <p style={{ color: '#fff', margin: 0 }}>Failure Rate: {data.failureRate.toFixed(1)}%</p>
-                            <p style={{ color: '#fff', margin: 0 }}>Failures: {data.failures} / {data.total}</p>
-                            {data.worseningPoint && (
-                              <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px solid #444' }}>
-                                <p style={{ color: '#ff5722', margin: 0, fontWeight: 'bold' }}>⚠️ Worsening Detected</p>
-                                <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
-                                  Previous 10 days failures: {data.worseningPoint.previousFailures}
-                                </p>
-                                <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
-                                  Next 10 days failures: {data.worseningPoint.nextFailures}
-                                </p>
-                                {data.worseningPoint.commitSha && (
-                                  <p style={{ color: '#bcd', margin: '3px 0', fontSize: '10px', fontFamily: 'monospace' }}>
-                                    Commit: {data.worseningPoint.commitSha.substring(0, 7)}
+              <div
+                className="chart-body failure-worsening-body chart-wheel-area"
+                onWheelCapture={(event) =>
+                  wheelZoomPanelData(event, 'failureWorsening', failureWorseningData.length)
+                }
+              >
+                <SafeResponsiveContainer>
+                  <ComposedChart
+                    key={getChartZoomKey(
+                      'failureWorsening',
+                      failureWorseningZoom,
+                      failureWorseningData.length
+                    )}
+                    data={visibleFailureWorsening}
+                    margin={{ top: 10, right: 28, left: 42, bottom: 36 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+
+                    <XAxis
+                      dataKey="date"
+                      stroke="#bcd"
+                      angle={-45}
+                      textAnchor="end"
+                      height={92}
+                      tickMargin={12}
+                      minTickGap={18}
+                      interval="preserveStartEnd"
+                      tick={{ fontSize: 12 }}
+                    />
+
+                    <YAxis
+                      stroke="#bcd"
+                      width={82}
+                      domain={[0, 100]}
+                      tickMargin={8}
+                      label={{
+                        value: 'Failure Rate (%)',
+                        angle: -90,
+                        position: 'insideLeft',
+                        offset: -2,
+                        fill: '#bcd'
+                      }}
+                    />
+
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+
+                          return (
+                            <div style={{
+                              background: '#222',
+                              padding: '10px',
+                              border: '1px solid #444',
+                              borderRadius: '4px'
+                            }}>
+                              <p style={{ color: '#fff', margin: 0 }}>Date: {data.date}</p>
+                              <p style={{ color: '#fff', margin: 0 }}>
+                                Failure Rate: {data.failureRate.toFixed(1)}%
+                              </p>
+                              <p style={{ color: '#fff', margin: 0 }}>
+                                Failures: {data.failures} / {data.total}
+                              </p>
+
+                              {data.worseningPoint && (
+                                <div style={{
+                                  marginTop: '5px',
+                                  paddingTop: '5px',
+                                  borderTop: '1px solid #444'
+                                }}>
+                                  <p style={{ color: '#ff5722', margin: 0, fontWeight: 'bold' }}>
+                                    ⚠️ Worsening Detected
                                   </p>
-                                )}
-                                <p style={{ color: '#ff5722', margin: '5px 0 0 0', cursor: 'pointer', fontSize: '11px' }} 
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     if (data.worseningPoint?.commitUrl) {
-                                       window.open(data.worseningPoint.commitUrl, '_blank');
-                                     }
-                                   }}>
-                                  Click to view commit changes
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Legend />
-                  <Area type="monotone" dataKey="failureRate" fill="#f44336" fillOpacity={0.3} stroke="#f44336" name="Failure Rate" />
-                  {/* Line for failure rate with worsening points highlighted */}
-                  <Line
-                    type="monotone"
-                    dataKey="failureRate"
-                    stroke="#f44336"
-                    strokeWidth={2}
-                    dot={(props) => {
-                      const { cx, cy, payload } = props;
-                      if (!payload) return null;
-                      
-                      // If this is a worsening point, show highlighted dot
-                      if (payload.worseningPoint) {
-                        const handleClick = (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const url = payload.worseningPoint?.commitUrl || payload.worseningPoint?.html_url;
-                          if (url) {
-                            window.open(url, '_blank');
-                          }
-                        };
-                        
-                        return (
-                          <g onClick={handleClick} onMouseDown={handleClick} style={{ cursor: 'pointer' }} pointerEvents="all">
-                            {/* Large transparent clickable area */}
-                            <circle
-                              cx={cx}
-                              cy={cy}
-                              r={15}
-                              fill="transparent"
-                              pointerEvents="all"
+
+                                  <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
+                                    Previous 10 days failures: {data.worseningPoint.previousFailures}
+                                  </p>
+
+                                  <p style={{ color: '#fff', margin: '3px 0', fontSize: '11px' }}>
+                                    Next 10 days failures: {data.worseningPoint.nextFailures}
+                                  </p>
+
+                                  {data.worseningPoint.commitSha && (
+                                    <p style={{
+                                      color: '#bcd',
+                                      margin: '3px 0',
+                                      fontSize: '10px',
+                                      fontFamily: 'monospace'
+                                    }}>
+                                      Commit: {data.worseningPoint.commitSha.substring(0, 7)}
+                                    </p>
+                                  )}
+
+                                  <p
+                                    style={{
+                                      color: '#ff5722',
+                                      margin: '5px 0 0 0',
+                                      cursor: 'pointer',
+                                      fontSize: '11px'
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (data.worseningPoint?.commitUrl) {
+                                        window.open(data.worseningPoint.commitUrl, '_blank');
+                                      }
+                                    }}
+                                  >
+                                    Click to view commit changes
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        return null;
+                      }}
+                    />
+
+                    <Legend
+                      verticalAlign="bottom"
+                      height={32}
+                      wrapperStyle={{ paddingTop: 6 }}
+                    />
+
+                    <Area
+                      type="monotone"
+                      dataKey="failureRate"
+                      fill="#f44336"
+                      fillOpacity={0.3}
+                      stroke="#f44336"
+                      name="Failure Rate"
+                    />
+
+                    <Line
+                      type="monotone"
+                      dataKey="failureRate"
+                      stroke="#f44336"
+                      strokeWidth={2}
+                      name="Failure Rate"
+                      legendType="none"
+                      dot={(props) => {
+                        const { cx, cy, payload } = props;
+                        if (!payload) return null;
+
+                        if (payload.worseningPoint) {
+                          const handleClick = (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+
+                            const url =
+                              payload.worseningPoint?.commitUrl ||
+                              payload.worseningPoint?.html_url;
+
+                            if (url) {
+                              window.open(url, '_blank');
+                            }
+                          };
+
+                          return (
+                            <g
+                              onClick={handleClick}
+                              onMouseDown={handleClick}
                               style={{ cursor: 'pointer' }}
-                            />
-                            {/* Outer glow ring */}
-                            <circle
-                              cx={cx}
-                              cy={cy}
-                              r={12}
-                              fill="none"
-                              stroke="#ff5722"
-                              strokeWidth={2}
-                              opacity={0.4}
-                              pointerEvents="none"
-                            />
-                            {/* Highlighted dot */}
-                            <circle
-                              cx={cx}
-                              cy={cy}
-                              r={8}
-                              fill="#ff5722"
-                              stroke="#fff"
-                              strokeWidth={2}
-                              pointerEvents="none"
-                            />
-                          </g>
+                              pointerEvents="all"
+                            >
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={15}
+                                fill="transparent"
+                                pointerEvents="all"
+                                style={{ cursor: 'pointer' }}
+                              />
+
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={12}
+                                fill="none"
+                                stroke="#ff5722"
+                                strokeWidth={2}
+                                opacity={0.4}
+                                pointerEvents="none"
+                              />
+
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={8}
+                                fill="#ff5722"
+                                stroke="#fff"
+                                strokeWidth={2}
+                                pointerEvents="none"
+                              />
+                            </g>
+                          );
+                        }
+
+                        return (
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r={3}
+                            fill="#f44336"
+                            opacity={0.6}
+                          />
                         );
-                      }
-                      
-                      // Regular small dot for non-worsening points
-                      return <circle cx={cx} cy={cy} r={3} fill="#f44336" opacity={0.6} />;
-                    }}
-                  />
-                  <Brush 
-                    dataKey="date" 
-                    height={30}
-                    stroke="#8884d8"
-                    startIndex={failureWorseningZoom?.startIndex}
-                    endIndex={failureWorseningZoom?.endIndex}
-                    onChange={(e) => {
-                      if (e && typeof e.startIndex === 'number' && typeof e.endIndex === 'number') {
-                        setFailureWorseningZoom({ startIndex: e.startIndex, endIndex: e.endIndex });
-                      } else {
-                        setFailureWorseningZoom(null);
-                      }
-                    }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
+                      }}
+                    />
+                  </ComposedChart>
+                </SafeResponsiveContainer>
+              </div>
             ) : (
               <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
                 No workflow data available
               </div>
             )}
-          </div>
+          </ChartCard>
 
         </div>
       </div>
-      
+
       <style>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }

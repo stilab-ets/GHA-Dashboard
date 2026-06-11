@@ -17,7 +17,7 @@ To modify the configuration, edit the `src/config.yaml` file:
 workflow_ids: []                 # Empty = all workflows, or list specific IDs: [12345, 67890]
 
 # Metric collection options
-fetch_job_details: true          # Job and step information
+fetch_job_details: false         # Job and step information (slower; enable only when needed)
 fetch_test_parsing_results: true # Test pass/fail counts from logs
 fetch_commit_details: true       # Code churn and contributor metrics
 fetch_pull_request_details: true # PR-related information

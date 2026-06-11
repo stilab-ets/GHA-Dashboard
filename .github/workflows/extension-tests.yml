@@ -54,7 +54,7 @@ jobs:
       run: |
         cd backend
         python app.py --e2e &
-        
+
         # Wait for the backend to be ready before running tests
         backend_ready=false
         for i in {1..30}; do
@@ -66,7 +66,7 @@ jobs:
           echo "Waiting for backend... ($i/30)"
           sleep 1
         done
-        
+
         if [ "$backend_ready" != "true" ]; then
           echo "Backend failed to start within 30 seconds"
           exit 1

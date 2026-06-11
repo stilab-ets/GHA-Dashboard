@@ -4,15 +4,41 @@ const wsCache = new Map();
 let activeWebSocket = null;
 let currentRepo = null;
 let currentTabId = null; // Tab owning the active WebSocket
+const SOCKET_CLOSING = 2;
+const SOCKET_CLOSED = 3;
+const WS_CONNECT_MAX_ATTEMPTS = 3;
+const WS_CONNECT_RETRY_DELAY_MS = 1000;
+
+function isSocketActive(socket) {
+  return socket && socket.readyState !== SOCKET_CLOSING && socket.readyState !== SOCKET_CLOSED;
+}
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "UPDATE_REPO") {
     const tabId = sender?.tab?.id;
+    const updates = {};
+
     if (typeof tabId === "number") {
       // Store repo name per-tab so multiple GitHub tabs don't overwrite
       // each other's "currentRepo" value.
       const key = `currentRepo_${tabId}`;
-      chrome.storage.local.set({ [key]: request.repo });
+      if (request.repo) {
+        updates[key] = request.repo;
+      }
+      if (request.theme === "light" || request.theme === "dark") {
+        updates[`githubTheme_${tabId}`] = request.theme;
+      }
+    }
+
+    if (request.repo) {
+      updates.currentRepo = request.repo;
+    }
+    if (request.theme === "light" || request.theme === "dark") {
+      updates.githubTheme = request.theme;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      chrome.storage.local.set(updates);
     }
     return true;
   }
@@ -36,11 +62,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
 
+    const forceRefresh = Boolean(filters?.forceRefresh);
+
     // Check cache (only if same dates)
     const cached = wsCache.get(repo);
     // Check cache - if we have complete data for this repo, use it (regardless of date filters)
     // Date filtering is done client-side, so we don't need to check dates here
-    if (cached && cached.isComplete) {
+    if (cached && cached.isComplete && !forceRefresh) {
       sendResponse({
         success: true,
         cached: true,
@@ -48,6 +76,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         isComplete: true,
       });
       return true;
+    }
+
+    // If the same repo is already streaming, keep that socket alive and let
+    // the dashboard re-attach through chrome.storage updates.
+    if (activeWebSocket && currentRepo === repo) {
+      if (isSocketActive(activeWebSocket)) {
+        if (cached) {
+          chrome.storage.local.set({
+            wsRuns: [...(cached.runs || [])],
+            wsStatus: {
+              isStreaming: true,
+              isComplete: false,
+              repo,
+              totalRuns: cached.totalRuns || cached.runs?.length || 0,
+              collectedRuns: cached.runs?.length || 0,
+              phase: cached.phase || "workflow_runs",
+            },
+          });
+        }
+
+        sendResponse({
+          success: true,
+          cached: false,
+          streaming: true,
+          itemCount: cached?.runs?.length || 0,
+        });
+        return true;
+      }
+
+      activeWebSocket = null;
+      currentRepo = null;
+      currentTabId = null;
     }
 
     startWebSocketExtraction(repo, filters, sender.tab?.id);
@@ -99,28 +159,25 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
   }
 });
 
-// Close WebSocket if the owner tab is refreshed
+// Keep the WebSocket alive if the owner tab refreshes. GitHub can trigger a
+// page load while the dashboard iframe is mounted; closing here aborts the
+// first collection, then Retry appears to work only because data was cached.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!activeWebSocket || currentTabId === null) return;
 
   // We only care about the tab that owns the current WebSocket
   if (tabId !== currentTabId) return;
 
-  // When the page starts loading again in that tab (F5 / hard reload),
-  // immediately close the WebSocket so the backend is freed.
   if (changeInfo.status === "loading") {
-    try {
-      activeWebSocket.close();
-    } catch (e) {
-      console.error("[Background] Error closing WebSocket on tab reload:", e);
-    }
-    activeWebSocket = null;
-    currentRepo = null;
-    currentTabId = null;
+    console.log("[Background] Owner tab is loading; keeping active WebSocket alive");
   }
 });
 
 function startWebSocketExtraction(repo, filters = {}, tabId) {
+  if (activeWebSocket && currentRepo === repo && isSocketActive(activeWebSocket)) {
+    return;
+  }
+
   if (activeWebSocket) {
     activeWebSocket.close();
     activeWebSocket = null;
@@ -206,13 +263,14 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         phase1_elapsed: null, // Store Phase 1 elapsed time in memory to avoid race conditions
       });
 
-      // Add delay to allow backend to perform short-circuit check
-      // This prevents premature WebSocket connection attempts when data might already be in DB
-      setTimeout(() => {
+      const connectWebSocket = (attempt = 1) => {
+        let hasOpened = false;
+
         try {
           activeWebSocket = new WebSocket(wsUrl);
 
           activeWebSocket.onopen = () => {
+            hasOpened = true;
             chrome.storage.local.set({
               wsStatus: {
                 isStreaming: true,
@@ -261,6 +319,8 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 }
 
                 cache.pageCount = message.page;
+                cache.totalRuns = message.totalRuns || cache.totalRuns || 0;
+                cache.phase = message.phase || cache.phase || "workflow_runs";
 
                 const runsWithJobs = cache.runs.filter(
                   (r) => r.jobs && r.jobs.length > 0,
@@ -384,9 +444,11 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                     isComplete: true,
                     repo: repo,
                     totalRuns: cache.runs.length,
+                    collectedRuns: cache.runs.length,
                     totalPages: message.totalPages,
                     totalJobs: message.totalJobs || totalJobs,
                     runsWithJobs,
+                    phase: message.phase || "workflow_runs",
                   },
                 });
               } else if (message.type === "error") {
@@ -415,6 +477,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
 
             const cache = wsCache.get(repo);
             const hadData = cache?.runs?.length > 0;
+            const completed = !!cache?.isComplete;
             const runsWithJobs =
               cache?.runs?.filter((r) => r.jobs && r.jobs.length > 0).length ||
               0;
@@ -423,14 +486,21 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
               hadData,
               totalRuns: cache?.runs?.length || 0,
               runsWithJobs,
-              cacheIsComplete: cache?.isComplete,
+              cacheIsComplete: completed,
             });
 
-            if (cache) {
-              cache.isComplete = true;
-            }
+            if (!hadData && !completed) {
+              if (!hasOpened && attempt < WS_CONNECT_MAX_ATTEMPTS && currentRepo === repo) {
+                console.log("[Background] WebSocket closed before opening; retrying", {
+                  repo,
+                  attempt,
+                  nextAttempt: attempt + 1,
+                });
+                activeWebSocket = null;
+                setTimeout(() => connectWebSocket(attempt + 1), WS_CONNECT_RETRY_DELAY_MS * attempt);
+                return;
+              }
 
-            if (!hadData) {
               chrome.storage.local.set({
                 wsStatus: {
                   isStreaming: false,
@@ -441,6 +511,10 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 },
               });
             } else {
+              if (cache) {
+                cache.isComplete = true;
+              }
+
               chrome.storage.local.set({
                 wsStatus: {
                   isStreaming: false,
@@ -488,7 +562,11 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             },
           });
         }
-      }, 500); // 500ms delay for backend short-circuit check
+      };
+
+      // Add delay to allow backend to register the extraction session before
+      // the WebSocket attempts to connect.
+      setTimeout(() => connectWebSocket(), 500);
     } catch (error) {
       console.error("[Background] Failed to create extraction session:", error);
 

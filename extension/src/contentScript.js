@@ -17,6 +17,39 @@
     return null;
   }
 
+  const detectGitHubTheme = () => {
+    const mode = document.documentElement.getAttribute('data-color-mode');
+    if (mode === 'light' || mode === 'dark') return mode;
+
+    const colorScheme = getComputedStyle(document.documentElement).colorScheme;
+    if (/\bdark\b/i.test(colorScheme)) return 'dark';
+    if (/\blight\b/i.test(colorScheme)) return 'light';
+
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+      ? 'light'
+      : 'dark';
+  };
+
+  const reloadAfterExtensionContextInvalidated = () => {
+    console.info("[GHA Dashboard] Extension was reloaded; refreshing GitHub page to restore dashboard context.");
+    window.setTimeout(() => window.location.reload(), 50);
+  };
+
+  const syncGitHubContext = () => {
+    if (location.hostname !== "github.com") return;
+
+    const repo = extractRepoFromURL(location.href);
+    const theme = detectGitHubTheme();
+
+    if (repo && chrome.runtime) {
+      try {
+        chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo, theme });
+      } catch (e) {
+        reloadAfterExtensionContextInvalidated();
+      }
+    }
+  };
+
   /* ---------------------------------------------------------
    * FIX 2: Detect repo at first load
    * --------------------------------------------------------- */
@@ -26,14 +59,7 @@
     const repo = extractRepoFromURL(location.href);
     console.log(" [ContentScript] Detected repo:", repo);
 
-    if (repo && chrome.runtime) {
-      try {
-        chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo });
-      } catch (e) {
-        console.error("[GHA Dashboard] Extension context invalidated:", e);
-        window.location.reload();
-      }
-    }
+    if (repo) syncGitHubContext();
   })();
 
   /* ---------------------------------------------------------
@@ -44,6 +70,23 @@
   let originalContent = null;
   let previousUrl = null;
   let isDashboardActive = false;
+
+  const ensureDashboardHostStyles = () => {
+    if (document.getElementById('gha-dashboard-host-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'gha-dashboard-host-styles';
+    style.textContent = `
+      body.gha-dashboard-active #gha-dashboard-container {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: visible !important;
+      }
+    `;
+    document.head.appendChild(style);
+  };
 
   /* ---------------------------------------------------------
    * Helper to check repo page
@@ -225,6 +268,8 @@
   const showDashboard = () => {
     previousUrl = window.location.pathname;
     isDashboardActive = true;
+    ensureDashboardHostStyles();
+    document.body.classList.add('gha-dashboard-active');
     
     // Deselect all other nav items with multiple approaches
     const navContainer = document.querySelector('nav[aria-label="Repository"]');
@@ -249,6 +294,7 @@
   // Hide dashboard and restore original content
   const hideDashboard = () => {
     isDashboardActive = false;
+    document.body.classList.remove('gha-dashboard-active');
     
     // Clean up interval timer if it exists
     if (dashboardContainer) {
@@ -314,10 +360,11 @@
       width: 100%;
       max-width: 100%;
       min-width: 0;
+      min-height: 900px;
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-      overflow: hidden;
+      overflow: visible;
     `;
 
     // Create iframe with seamless integration
@@ -327,7 +374,8 @@
       width: 100%;
       max-width: 100%;
       min-width: 0;
-      height: 1000px;
+      height: 900px;
+      min-height: 900px;
       border: none;
       display: block;
       margin: 0;
@@ -336,21 +384,42 @@
       overflow: hidden;
     `;
     iframe.setAttribute('scrolling', 'no');
+
+    const setDashboardFrameHeight = (height) => {
+      const parsedHeight = Number(height);
+      if (!Number.isFinite(parsedHeight) || parsedHeight <= 0) return;
+
+      const nextHeight = Math.ceil(Math.max(360, Math.min(parsedHeight + 8, 50000)));
+      iframe.style.height = `${nextHeight}px`;
+      iframe.style.minHeight = `${nextHeight}px`;
+      container.style.height = `${nextHeight}px`;
+      container.style.minHeight = `${nextHeight}px`;
+    };
+
+    const handleDashboardMessage = (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      if (event.data?.type === 'GHA_DASHBOARD_HEIGHT') {
+        setDashboardFrameHeight(event.data.height);
+      }
+    };
+
+    window.addEventListener('message', handleDashboardMessage);
+    iframe._ghaResizeCleanup = () => {
+      window.removeEventListener('message', handleDashboardMessage);
+    };
     
     let dashboardUrl;
     try {
       dashboardUrl = chrome.runtime.getURL('src/dashboard/dashboard.html');
     } catch (e) {
-      console.error("[GHA Dashboard] Extension context invalidated:", e);
-      // Force a hard refresh like F5
-      window.location.reload();
+      reloadAfterExtensionContextInvalidated();
       return;
     }
-    iframe.src = dashboardUrl;
+    iframe.src = `${dashboardUrl}?theme=${encodeURIComponent(detectGitHubTheme())}`;
 
     // Dynamically resize iframe to fit content and remove all scrollbars
     iframe.onload = () => {
-      if (!iframe.parentNode || !dashboardContainer || !dashboardContainer.parentNode) {
+      if (!iframe.parentNode || !container.parentNode) {
         return;
       }
       
@@ -368,30 +437,124 @@
           html, body, #root {
             overflow: visible !important;
             height: auto !important;
+            min-height: 0 !important;
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
           }
+          .dashboard,
+          .dashboard .container,
+          .dashboard-grid,
+          .dashboard-chart-card,
+          .chart-wheel-area,
+          .chart-body {
+            min-width: 0 !important;
+          }
+          .chart-wheel-area {
+            min-height: 280px !important;
+          }
+          .chart-wheel-area-large,
+          .time-to-fix-chart,
+          .failure-worsening-body {
+            min-height: 320px !important;
+          }
         `;
         iframeDoc.head.appendChild(style);
+
+        const getMinimumDashboardHeight = () => {
+          const iframeRect = iframe.getBoundingClientRect();
+          const viewportHeight = window.innerHeight || 900;
+          const remainingViewport = viewportHeight - Math.max(0, iframeRect.top);
+          return Math.max(360, Math.min(720, remainingViewport + 80));
+        };
         
+        const updateDashboardViewportMetrics = () => {
+          try {
+            const iframeRect = iframe.getBoundingClientRect();
+            const docEl = iframeDoc.documentElement;
+            const visibleTop = Math.max(0, -iframeRect.top);
+            const visibleBottom = Math.min(iframeRect.height, window.innerHeight - iframeRect.top);
+            const visibleHeight = Math.max(360, visibleBottom - visibleTop);
+            const popupTop = visibleTop + visibleHeight / 2;
+
+            docEl.style.setProperty('--gha-visible-top', `${visibleTop}px`);
+            docEl.style.setProperty('--gha-visible-height', `${visibleHeight}px`);
+            docEl.style.setProperty('--gha-popup-top', `${popupTop}px`);
+          } catch (e) {
+            // Silent fail - the iframe can be removed during GitHub navigation
+          }
+        };
+
+        const handleViewportMetricsRequest = (event) => {
+          if (event.source === iframeWin && event.data?.type === 'GHA_DASHBOARD_VIEWPORT_METRICS_REQUEST') {
+            updateDashboardViewportMetrics();
+          }
+        };
+
+        const postThemeToDashboard = () => {
+          try {
+            iframeWin.postMessage({
+              type: 'GHA_DASHBOARD_THEME',
+              theme: detectGitHubTheme()
+            }, '*');
+          } catch (e) {
+            // The iframe may be unloading during GitHub navigation.
+          }
+        };
+
         // Function to resize iframe based on content
         const resizeIframe = () => {
-          if (!iframe.parentNode || !dashboardContainer || !dashboardContainer.parentNode) {
+          if (!iframe.parentNode || !container.parentNode) {
             return;
           }
           
           try {
             const root = iframeDoc.getElementById('root');
             if (!root) return;
+            updateDashboardViewportMetrics();
 
+            const dashboard = root.querySelector('.dashboard') || root;
+            const rootRect = root.getBoundingClientRect();
+            const dashboardRect = dashboard.getBoundingClientRect();
+            const dashboardStyles = iframeWin.getComputedStyle(dashboard);
+            const dashboardPaddingBottom = parseFloat(dashboardStyles.paddingBottom) || 0;
+            const measurementSelectors = [
+              ':scope > *',
+              ':scope .container > *',
+              ':scope .collection-start',
+              ':scope .collection-banner',
+              ':scope .overall-health-section',
+              ':scope .dashboard-header',
+              ':scope .filter-panel',
+              ':scope .stats-row',
+              ':scope .dashboard-grid',
+              ':scope .dashboard-grid > *',
+              ':scope .stats-panel',
+              ':scope .table-wrapper'
+            ];
+            const measuredElements = Array.from(new Set(
+              measurementSelectors.flatMap((selector) => Array.from(dashboard.querySelectorAll(selector)))
+            )).filter((element) => {
+              const style = iframeWin.getComputedStyle(element);
+              return style.display !== 'none' &&
+                style.visibility !== 'hidden' &&
+                !element.closest('.dashboard-chart-popup-layer') &&
+                !element.classList.contains('dashboard-chart-popup');
+            });
+            const contentBottom = measuredElements.reduce((bottom, element) => {
+              const elementRect = element.getBoundingClientRect();
+              const elementStyles = iframeWin.getComputedStyle(element);
+              const marginBottom = parseFloat(elementStyles.marginBottom) || 0;
+              return Math.max(bottom, elementRect.bottom + marginBottom);
+            }, dashboardRect.bottom);
             const height = Math.max(
-              iframeDoc.body.scrollHeight,
-              iframeDoc.documentElement.scrollHeight,
-              root.scrollHeight
+              getMinimumDashboardHeight(),
+              contentBottom - rootRect.top + dashboardPaddingBottom
             );
+            const nextHeight = Math.ceil(height);
             
-            iframe.style.height = (height + 50) + 'px';
+            setDashboardFrameHeight(nextHeight);
+            updateDashboardViewportMetrics();
           } catch (e) {
             // Silent fail - element likely removed
           }
@@ -399,6 +562,7 @@
         
         // Initial resize after short delay for React to render
         setTimeout(resizeIframe, 500);
+        setTimeout(postThemeToDashboard, 100);
         
         // Watch for content changes
         const observer = new MutationObserver(resizeIframe);
@@ -420,6 +584,11 @@
         
         // Resize on window resize
         window.addEventListener('resize', resizeIframe);
+        window.addEventListener('resize', updateDashboardViewportMetrics);
+        window.addEventListener('scroll', updateDashboardViewportMetrics, { passive: true, capture: true });
+        document.addEventListener('scroll', updateDashboardViewportMetrics, { passive: true, capture: true });
+        window.addEventListener('message', handleViewportMetricsRequest);
+        window.addEventListener('focus', postThemeToDashboard);
         
         // Periodic check
         const intervalId = setInterval(resizeIframe, 500);
@@ -431,20 +600,25 @@
             resizeObserver.disconnect();
           }
           window.removeEventListener('resize', resizeIframe);
+          window.removeEventListener('resize', updateDashboardViewportMetrics);
+          window.removeEventListener('scroll', updateDashboardViewportMetrics, true);
+          document.removeEventListener('scroll', updateDashboardViewportMetrics, true);
+          window.removeEventListener('message', handleViewportMetricsRequest);
+          window.removeEventListener('focus', postThemeToDashboard);
+          window.removeEventListener('message', handleDashboardMessage);
         };
         
       } catch (e) {
         // Silent fail - likely CORS or element removed
-        iframe.style.height = '3000px';
+        setDashboardFrameHeight(Math.max(1200, window.innerHeight || 1000));
       }
     };
 
+    dashboardContainer = container;
     container.appendChild(iframe);
     
     // Insert the dashboard right after the original content
     mainContent.parentNode.insertBefore(container, mainContent.nextSibling);
-    
-    dashboardContainer = container;
 
     console.log('[GHA Dashboard] Dashboard container created');
   };
@@ -477,6 +651,7 @@
           dashboardContainer.parentNode.removeChild(dashboardContainer);
           dashboardContainer = null;
         }
+        document.body.classList.remove('gha-dashboard-active');
         if (originalContent && originalContent.parentNode) {
           originalContent.style.display = '';
           originalContent = null;
@@ -485,6 +660,7 @@
         injectRetryCount = 0; // Reset retry count on navigation
         
         if (isGitHubRepoPage()) {
+          syncGitHubContext();
           // Re-setup observer for navigation bar
           observeForNavigationBar();
           // Try injecting immediately
@@ -506,4 +682,36 @@
   }
 
   observeNavigation();
+
+  const themeObserver = new MutationObserver(() => {
+    syncGitHubContext();
+    const iframe = document.getElementById('gha-dashboard-iframe');
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.postMessage({
+        type: 'GHA_DASHBOARD_THEME',
+        theme: detectGitHubTheme()
+      }, '*');
+    }
+  });
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-color-mode', 'data-light-theme', 'data-dark-theme', 'class', 'style']
+  });
+
+  if (window.matchMedia) {
+    const themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const syncSystemTheme = () => {
+      syncGitHubContext();
+      const iframe = document.getElementById('gha-dashboard-iframe');
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({
+          type: 'GHA_DASHBOARD_THEME',
+          theme: detectGitHubTheme()
+        }, '*');
+      }
+    };
+    if (themeMediaQuery.addEventListener) {
+      themeMediaQuery.addEventListener('change', syncSystemTheme);
+    }
+  }
 })();
