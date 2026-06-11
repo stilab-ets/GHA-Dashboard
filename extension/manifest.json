@@ -3,16 +3,17 @@
   "version": "0.1.0",
   "description": "Dashboard for monitoring GitHub Actions workflows metrics.",
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuZzaKtGfgGx+ED8yZkIIT/XXH5r19+Kof9MoTCVEH2WdqCnY/a9MaOFIDT7qyveqHlliC9qmG2TzGNsjR3nx4ZNo19OF7eILP4pUqgBHEU2q3uP8kLkG97Pv6IkxeihT5gAX8X+nX9z4xcsNe0hJL2iij6gC92Eg61gwFz75zf7vMLZRV/qlUEs+j9wh7R9LpuPXYOaxaEOOY4nWw2s++mGfaBYupoBP2yD2evLPG4/VavCq5Y17lMO4ifCgNEYGOVtVr/mKpRyDE7h7IVx9NjzJqWn+l85EbIq/f+l0kwSIduvBEk0OhK9/Msaf+sOV3sIdKPmasIoxAbmgdtQCqwIDAQAB",
 
-  "permissions": ["storage", "tabs", "scripting"],
-  "host_permissions": ["https://github.com/*"],
+  "permissions": ["storage", "tabs", "scripting", "identity"],
+  "host_permissions": ["https://github.com/*", "https://api.github.com/*"],
 
   "background": {
     "service_worker": "src/background.js"
   },
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:3000 ws://localhost:3000"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:3000 ws://127.0.0.1:3000"
   },
 
   "content_scripts": [

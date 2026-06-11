@@ -104,7 +104,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         except Exception as e:
             print(f"[WebSocket] Warning: Could not set up performance logger: {e}")
     
-    if not token:
+    if not token and os.getenv("ALLOW_ENV_GITHUB_TOKEN_FALLBACK") == "1":
         token = os.getenv("GITHUB_TOKEN")
     
     if not token:

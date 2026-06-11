@@ -50,6 +50,20 @@
   line-height: 1.25;
 }
 
+.option-title {
+  margin-bottom: 6px;
+  color: #24292e;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.option-separator {
+  margin: 14px 0;
+  border: 0;
+  border-top: 2px solid #d0d7de;
+}
+
 .input-group {
   display: flex;
   gap: 8px;
@@ -107,6 +121,14 @@
 .btn-primary:active {
   background-color: #0256cc;
   border-color: #0256cc;
+}
+
+.authenticated-section {
+  margin-top: 8px;
+}
+
+.hidden {
+  display: none;
 }
 
 /* Status Message */
