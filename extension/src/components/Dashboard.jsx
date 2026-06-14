@@ -93,25 +93,36 @@ function PanelControls({ panelId, isFullscreen, onFullscreenToggle }) {
   );
 }
 
-function ChartCard({ panelId, extraClass = '', isFullscreen, children }) {
+function ChartCard({ panelId, extraClass = '', isFullscreen, onRequestClose, children }) {
   const className = [
     'card dashboard-chart-card modern-panel',
     extraClass
   ].filter(Boolean).join(' ');
 
   const portalTarget = typeof document !== 'undefined'
-    ? document.querySelector('.dashboard') || document.body
+    ? document.body
     : null;
+  const dashboardTheme = typeof document !== 'undefined' && document.querySelector('.dashboard.light')
+    ? 'light'
+    : 'dark';
 
   const popup = isFullscreen && portalTarget
     ? createPortal(
       <div
-        className="dashboard-chart-popup-layer"
+        className={`dashboard-chart-popup-layer ${dashboardTheme}`}
         role="dialog"
-        aria-modal="false"
+        aria-modal="true"
         aria-label={`${panelId} chart popup`}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            onRequestClose?.();
+          }
+        }}
       >
-        <div className={`${className} dashboard-chart-popup`}>
+        <div
+          className={`${className} dashboard-chart-popup`}
+          onClick={(event) => event.stopPropagation()}
+        >
           {children}
         </div>
       </div>,
@@ -2209,6 +2220,10 @@ export default function Dashboard() {
     );
   };
 
+  const closeFullscreenPanel = () => {
+    setFullscreenPanelId(null);
+  };
+
   // Custom Box Plot Component
   const BoxPlot = ({ data, x, y, width, height, min, q1, median, q3, max, mean }) => {
     const boxHeight = height * 0.6;
@@ -3600,7 +3615,11 @@ export default function Dashboard() {
           </div>
 
           {/* Daily runs */}
-          <ChartCard panelId="dailyRuns" isFullscreen={fullscreenPanelId === 'dailyRuns'}>
+          <ChartCard
+            panelId="dailyRuns"
+            isFullscreen={fullscreenPanelId === 'dailyRuns'}
+            onRequestClose={closeFullscreenPanel}
+          >
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Runs over time</p>
@@ -3644,7 +3663,11 @@ export default function Dashboard() {
           </ChartCard>
 
           {/* Duration over time */}
-          <ChartCard panelId="durationVariability" isFullscreen={fullscreenPanelId === 'durationVariability'}>
+          <ChartCard
+            panelId="durationVariability"
+            isFullscreen={fullscreenPanelId === 'durationVariability'}
+            onRequestClose={closeFullscreenPanel}
+          >
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Duration variability</p>
@@ -3718,7 +3741,11 @@ export default function Dashboard() {
           </ChartCard>
 
           {/* Cumulative failure duration */}
-          <ChartCard panelId="cumulativeFailure" isFullscreen={fullscreenPanelId === 'cumulativeFailure'}>
+          <ChartCard
+            panelId="cumulativeFailure"
+            isFullscreen={fullscreenPanelId === 'cumulativeFailure'}
+            onRequestClose={closeFullscreenPanel}
+          >
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Failure duration</p>
@@ -3798,7 +3825,11 @@ export default function Dashboard() {
           </ChartCard>
 
           {/* Time to Fix Box Plot */}
-          <ChartCard panelId="timeToFix" isFullscreen={fullscreenPanelId === 'timeToFix'}>
+          <ChartCard
+            panelId="timeToFix"
+            isFullscreen={fullscreenPanelId === 'timeToFix'}
+            onRequestClose={closeFullscreenPanel}
+          >
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Time to fix</p>
@@ -4078,7 +4109,11 @@ export default function Dashboard() {
           </ChartCard>
 
           {/* Duration Explosion Chart */}
-          <ChartCard panelId="durationExplosion" isFullscreen={fullscreenPanelId === 'durationExplosion'}>
+          <ChartCard
+            panelId="durationExplosion"
+            isFullscreen={fullscreenPanelId === 'durationExplosion'}
+            onRequestClose={closeFullscreenPanel}
+          >
             <div className="chart-card-header">
               <div>
                 <p className="eyebrow">Workflow duration over time</p>
@@ -4251,6 +4286,7 @@ export default function Dashboard() {
             panelId="failureWorsening"
             extraClass="failure-worsening-card"
             isFullscreen={fullscreenPanelId === 'failureWorsening'}
+            onRequestClose={closeFullscreenPanel}
           >
             <div className="chart-card-header">
               <div>

@@ -475,11 +475,20 @@
             const visibleTop = Math.max(0, -iframeRect.top);
             const visibleBottom = Math.min(iframeRect.height, window.innerHeight - iframeRect.top);
             const visibleHeight = Math.max(360, visibleBottom - visibleTop);
-            const popupTop = visibleTop + visibleHeight / 2;
+            const desiredPopupTop = (window.innerHeight / 2) - iframeRect.top;
+            const popupHeight = Math.min(560, Math.max(240, visibleHeight - 48));
+            const popupHalfHeight = popupHeight / 2;
+            const minPopupTop = visibleTop + popupHalfHeight + 24;
+            const maxPopupTop = visibleBottom - popupHalfHeight - 24;
+            const centeredVisibleTop = visibleTop + visibleHeight / 2;
+            const popupTop = minPopupTop <= maxPopupTop
+              ? Math.min(Math.max(desiredPopupTop, minPopupTop), maxPopupTop)
+              : centeredVisibleTop;
 
             docEl.style.setProperty('--gha-visible-top', `${visibleTop}px`);
             docEl.style.setProperty('--gha-visible-height', `${visibleHeight}px`);
             docEl.style.setProperty('--gha-popup-top', `${popupTop}px`);
+            docEl.style.setProperty('--gha-popup-center-visible-y', `${popupTop - visibleTop}px`);
           } catch (e) {
             // Silent fail - the iframe can be removed during GitHub navigation
           }
