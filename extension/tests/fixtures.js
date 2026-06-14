@@ -4,7 +4,7 @@ const os = require('os');
 const fs = require('fs');
 
 exports.test = base.extend({
-  context: async ({}, use) => {
+  context: [async ({}, use) => {
     const pathToExtension = path.resolve(__dirname, '..', 'build');
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-'));
@@ -17,9 +17,18 @@ exports.test = base.extend({
       ]
     });
 
-    await use(context);
-    await context.close();
-  },
+    try {
+      await use(context);
+    } finally {
+      await Promise.all(
+        context.pages().map(page =>
+          page.close({ runBeforeUnload: false }).catch(() => {})
+        )
+      );
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  }, { timeout: 60000 }],
 
   extensionId: async ({ context }, use) => {
     let worker;
