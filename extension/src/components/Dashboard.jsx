@@ -885,28 +885,18 @@ export default function Dashboard() {
     extractRepo();
   }, []);
 
-  // Check for existing data when repo changes and auto-load it
+  // Check for existing data when repo changes (but don't auto-load it)
   useEffect(() => {
     if (currentRepo && !collectionStarted && !data) {
       setCheckingData(true);
       checkExistingData(currentRepo).then((result) => {
         setCheckingData(false);
         if (result && result.exists) {
-          // Auto-load existing data immediately
-          console.log('[Dashboard] Found existing data, auto-loading...');
-          loadExistingData(currentRepo).then((loaded) => {
-            if (loaded) {
-              console.log('[Dashboard] Existing data loaded successfully');
-              // Update data existence status
-              setDataExists(true);
-              setExistingRunsCount(result.totalRuns || 0);
-              setLastUpdated(result.lastUpdated);
-            } else {
-              console.error('[Dashboard] Failed to load existing data');
-            }
-          }).catch((err) => {
-            console.error('[Dashboard] Error in loadExistingData:', err);
-          });
+          // Just update the status that data exists, don't auto-load
+          console.log('[Dashboard] Found existing data (not auto-loading, user must click button)');
+          setDataExists(true);
+          setExistingRunsCount(result.totalRuns || 0);
+          setLastUpdated(result.lastUpdated);
         } else {
           setDataExists(false);
         }
@@ -1553,13 +1543,20 @@ export default function Dashboard() {
             <p>
               Ready to collect workflow run data for <strong>{currentRepo || 'this repository'}</strong>
             </p>
+            {dataExists && (
+              <p className="collection-start-note" style={{ color: '#4caf50', fontSize: '0.95em' }}>
+                ✓ Found {existingRunsCount} workflow runs cached locally (last updated: {lastUpdated ? new Date(lastUpdated).toLocaleDateString() : 'unknown'})
+              </p>
+            )}
             <p className="collection-start-note">
-              Collect all available workflow runs first, then use workflow, branch, actor, and date filters on the dashboard.
+              {dataExists 
+                ? 'Click the button below to load existing data or collect new runs.'
+                : 'Collect all available workflow runs first, then use workflow, branch, actor, and date filters on the dashboard.'}
             </p>
           </div>
           <div className="collection-start-actions">
             <button className="primary-action primary-action-large" onClick={loadDashboardData} type="button">
-              Start Data Collection
+              {dataExists ? 'Load Data' : 'Start Data Collection'}
             </button>
           </div>
         </section>

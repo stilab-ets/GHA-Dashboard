@@ -152,3 +152,7 @@ dist
 extension.pem
 public.pem
 public.der
+
+### Backend Data Storage ###
+# JSON files from extracted workflow data
+backend/data/storage/
