@@ -4,6 +4,7 @@ const wsCache = new Map();
 let activeWebSocket = null;
 let currentRepo = null;
 let currentTabId = null; // Tab owning the active WebSocket
+let cancelRequestedForRepo = null;
 const SOCKET_CLOSING = 2;
 const SOCKET_CLOSED = 3;
 const WS_CONNECT_MAX_ATTEMPTS = 3;
@@ -138,6 +139,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       wsCache.clear();
     }
     chrome.storage.local.remove(["wsRuns", "wsStatus"]);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (request.action === "cancelWebSocketExtraction") {
+    const { repo } = request;
+
+    if (repo && currentRepo && repo !== currentRepo) {
+      sendResponse({
+        success: false,
+        error: `No active collection for ${repo}`,
+      });
+      return true;
+    }
+
+    const repoToCancel = currentRepo || repo;
+    const cache = repoToCancel ? wsCache.get(repoToCancel) : null;
+    cancelRequestedForRepo = repoToCancel;
+
+    if (activeWebSocket) {
+      try {
+        activeWebSocket.close(1000, "Collection cancelled by user");
+      } catch (e) {
+        console.error("[Background] Error cancelling WebSocket:", e);
+      }
+    }
+
+    if (repoToCancel) {
+      chrome.storage.local.set({
+        wsRuns: [...(cache?.runs || [])],
+        wsStatus: {
+          isStreaming: false,
+          isComplete: false,
+          isCancelled: true,
+          repo: repoToCancel,
+          totalRuns: cache?.totalRuns || cache?.runs?.length || 0,
+          collectedRuns: cache?.runs?.length || 0,
+          phase: cache?.phase || "workflow_runs",
+        },
+      });
+    }
+
+    activeWebSocket = null;
+    currentRepo = null;
+    currentTabId = null;
+
     sendResponse({ success: true });
     return true;
   }
@@ -476,6 +523,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             });
 
             const cache = wsCache.get(repo);
+            const wasCancelled = cancelRequestedForRepo === repo;
             const hadData = cache?.runs?.length > 0;
             const completed = !!cache?.isComplete;
             const runsWithJobs =
@@ -489,7 +537,21 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
               cacheIsComplete: completed,
             });
 
-            if (!hadData && !completed) {
+            if (wasCancelled) {
+              chrome.storage.local.set({
+                wsRuns: [...(cache?.runs || [])],
+                wsStatus: {
+                  isStreaming: false,
+                  isComplete: false,
+                  isCancelled: true,
+                  repo: repo,
+                  totalRuns: cache?.totalRuns || cache?.runs?.length || 0,
+                  collectedRuns: cache?.runs?.length || 0,
+                  totalPages: cache?.pageCount || 0,
+                  phase: cache?.phase || "workflow_runs",
+                },
+              });
+            } else if (!hadData && !completed) {
               if (!hasOpened && attempt < WS_CONNECT_MAX_ATTEMPTS && currentRepo === repo) {
                 console.log("[Background] WebSocket closed before opening; retrying", {
                   repo,
@@ -529,7 +591,13 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             activeWebSocket = null;
             // When the socket closes for any reason, clear ownership so
             // new repositories can start streaming.
+            if (currentRepo === repo) {
+              currentRepo = null;
+            }
             currentTabId = null;
+            if (wasCancelled) {
+              cancelRequestedForRepo = null;
+            }
           };
 
           activeWebSocket.onerror = (error) => {
