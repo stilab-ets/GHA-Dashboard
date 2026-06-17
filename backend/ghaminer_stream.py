@@ -62,7 +62,7 @@ def load_config(config_file: str = None) -> dict:
         print(f"[GHAminer] Failed to load config: {e}")
         return {
             'workflow_ids': [],
-            'fetch_job_details': True,
+            'fetch_job_details': False,
             'fetch_test_parsing_results': False,
             'fetch_commit_details': False,
             'fetch_pull_request_details': False,
@@ -166,13 +166,39 @@ def convert_ghaminer_run_to_dashboard(run_data: dict, repo: str) -> dict:
     }
 
 
-def get_total_workflow_runs_count(repo: str, token: str) -> int:
+def _normalize_date_filter(value: Any) -> Optional[str]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)[:10]
+
+
+def _github_created_filter(config: dict) -> Optional[str]:
+    start_date = _normalize_date_filter(config.get("start_date") or config.get("startDate"))
+    end_date = _normalize_date_filter(config.get("end_date") or config.get("endDate"))
+
+    if start_date and end_date:
+        return f"{start_date}..{end_date}"
+    if start_date:
+        return f">={start_date}"
+    if end_date:
+        return f"<={end_date}"
+    return None
+
+
+def get_total_workflow_runs_count(repo: str, token: str, created_filter: str = None) -> int:
     """
     Get the total count of workflow runs for a repository using GitHub API.
     Returns total_count from the /repos/{owner}/{repo}/actions/runs endpoint.
     """
     try:
-        api_url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=1"
+        api_url = f"https://api.github.com/repos/{repo}/actions/runs"
+        params = {"per_page": 1}
+        if created_filter:
+            params["created"] = created_filter
         headers = {
             'Authorization': f'token {token}',
             'Accept': 'application/vnd.github+json',
@@ -182,13 +208,14 @@ def get_total_workflow_runs_count(repo: str, token: str) -> int:
         
         # Log API call duration
         start_time = time.time()
-        resp = req_module.get(api_url, headers=headers)
+        resp = req_module.get(api_url, headers=headers, params=params, timeout=30)
         duration = time.time() - start_time
+        request_url = getattr(resp, "url", api_url)
         
         if PERFORMANCE_LOGGING:
             try:
                 perf_logger = get_performance_logger()
-                perf_logger.info(f"API_CALL - WORKFLOW_RUNS_COUNT_API - URL: {api_url} - Duration: {duration:.3f}s - Status: {resp.status_code}")
+                perf_logger.info(f"API_CALL - WORKFLOW_RUNS_COUNT_API - URL: {request_url} - Duration: {duration:.3f}s - Status: {resp.status_code}")
             except:
                 pass
         
@@ -215,6 +242,9 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
     
     phase1_start_time = time.time()
     print(f"[GHAminer Stream] Phase 1: Starting workflow runs collection for {repo}")
+    created_filter = _github_created_filter(config)
+    if created_filter:
+        print(f"[GHAminer Stream] GitHub created date filter: {created_filter}")
     
     if PERFORMANCE_LOGGING:
         try:
@@ -231,29 +261,33 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
         try:
             persistence = DataPersistence()
             data_manager = DataManager(repo, persistence)
-            # Load ALL existing runs at the start
+            # Load the persistence cache for skip checks, but count only runs
+            # touched by this collection in existing_runs_count.
             all_existing_runs = persistence.get_all_runs(repo)
-            existing_runs_count = len(all_existing_runs)
-            print(f"[GHAminer Stream] Data persistence enabled - found {existing_runs_count} existing runs in cache")
+            print(f"[GHAminer Stream] Data persistence enabled - found {len(all_existing_runs)} existing runs in cache")
         except Exception as e:
             print(f"[GHAminer Stream] Warning: Failed to initialize data persistence: {e}")
     
     # Get total count upfront
-    total_count = get_total_workflow_runs_count(repo, token)
+    total_count = get_total_workflow_runs_count(repo, token, created_filter)
     
     # Get workflow IDs (filtered by config if specified)
     specific_workflow_ids = config.get("workflow_ids", [])
-    workflow_ids = get_workflow_ids(repo, token, specific_workflow_ids)
+    use_repository_runs_endpoint = not specific_workflow_ids
+    workflow_ids = [None] if use_repository_runs_endpoint else get_workflow_ids(repo, token, specific_workflow_ids)
     
-    print(f"[GHAminer Stream] Found {len(workflow_ids)} workflows to process")
+    if use_repository_runs_endpoint:
+        print("[GHAminer Stream] Using repository workflow runs endpoint for fast collection")
+    else:
+        print(f"[GHAminer Stream] Found {len(workflow_ids)} workflows to process")
     
     total_runs = 0
     new_runs_collected = 0
     all_runs = []  # Store all runs for Phase 2 (existing + new)
     runs_to_save = []  # Batch runs for saving
     
-    # Load all existing runs into all_runs at the start
-    if data_manager and persistence:
+    # Phase 2 needs every existing run; skip this in fast workflow-runs mode.
+    if data_manager and persistence and config.get("fetch_job_details", False):
         all_existing_runs_dict = persistence.get_all_runs(repo)
         for run_id, run_data in all_existing_runs_dict.items():
             all_runs.append(run_data)
@@ -271,7 +305,13 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
         
         while True:
             # Fetch workflow runs page
-            api_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_id}/runs?page={page}&per_page=100"
+            if use_repository_runs_endpoint:
+                api_url = f"https://api.github.com/repos/{repo}/actions/runs"
+            else:
+                api_url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_id}/runs"
+            params = {"page": page, "per_page": 100}
+            if created_filter:
+                params["created"] = created_filter
 
             # Use requests directly to get Link header for pagination
             headers = {'Authorization': f'token {token}'}
@@ -279,15 +319,16 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
 
             # Measure API call duration
             start_time = time.time()
-            resp = req_module.get(api_url, headers=headers)
+            resp = req_module.get(api_url, headers=headers, params=params, timeout=30)
             duration = time.time() - start_time
+            request_url = getattr(resp, "url", api_url)
 
             if resp.status_code != 200:
                 if PERFORMANCE_LOGGING:
                     try:
                         perf_logger = get_performance_logger()
                         perf_logger.info(
-                            f"API_CALL - WORKFLOW_RUNS_API - URL: {api_url} - Duration: {duration:.3f}s "
+                            f"API_CALL - WORKFLOW_RUNS_API - URL: {request_url} - Duration: {duration:.3f}s "
                             f"- Status: {resp.status_code} - Page: {page} - Runs: 0"
                         )
                     except Exception:
@@ -302,7 +343,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     try:
                         perf_logger = get_performance_logger()
                         perf_logger.info(
-                            f"API_CALL - WORKFLOW_RUNS_API - URL: {api_url} - Duration: {duration:.3f}s "
+                            f"API_CALL - WORKFLOW_RUNS_API - URL: {request_url} - Duration: {duration:.3f}s "
                             f"- Status: {resp.status_code} - Page: {page} - Runs: 0"
                         )
                     except Exception:
@@ -316,7 +357,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     try:
                         perf_logger = get_performance_logger()
                         perf_logger.info(
-                            f"API_CALL - WORKFLOW_RUNS_API - URL: {api_url} - Duration: {duration:.3f}s "
+                            f"API_CALL - WORKFLOW_RUNS_API - URL: {request_url} - Duration: {duration:.3f}s "
                             f"- Status: {resp.status_code} - Page: {page} - Runs: 0"
                         )
                     except Exception:
@@ -328,14 +369,14 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                 try:
                     perf_logger = get_performance_logger()
                     perf_logger.info(
-                        f"API_CALL - WORKFLOW_RUNS_API - URL: {api_url} - Duration: {duration:.3f}s "
+                        f"API_CALL - WORKFLOW_RUNS_API - URL: {request_url} - Duration: {duration:.3f}s "
                         f"- Status: {resp.status_code} - Page: {page} - Runs: {runs_count}"
                     )
                 except Exception:
                     pass
             
             # Check if we should skip this page (using data manager)
-            if data_manager and skip_next_pages == 0:
+            if not use_repository_runs_endpoint and data_manager and skip_next_pages == 0:
                 # Convert workflow_runs to dashboard format for date checking
                 page_runs_for_check = []
                 for run in workflow_runs:
@@ -360,7 +401,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     # Skip to next page
                     page += 1
                     continue
-            elif skip_next_pages > 0:
+            elif not use_repository_runs_endpoint and skip_next_pages > 0:
                 # We're skipping pages - check if this page has any existing runs
                 has_existing = False
                 existing_count = 0
@@ -406,7 +447,8 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                 page += 1
                 continue
             
-            print(f"[GHAminer Stream] Processing page {page} of workflow {workflow_id}: {len(workflow_runs)} runs")
+            workflow_label = "repository" if use_repository_runs_endpoint else f"workflow {workflow_id}"
+            print(f"[GHAminer Stream] Processing page {page} of {workflow_label}: {len(workflow_runs)} runs")
             
             # Process each run (WITHOUT fetching job details)
             for run in workflow_runs:
@@ -419,12 +461,16 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     existing_run = data_manager.get_existing_run(str(run_id))
                     if existing_run:
                         all_runs.append(existing_run)
+                        existing_runs_count += 1
+                        total_runs = len(all_runs)
+                        display_total = actual_total if actual_total else total_runs
+                        yield (existing_run, total_runs, display_total, all_runs, new_runs_collected, existing_runs_count)
                     continue
                 
                 # Build basic run info (NO JOB DETAILS)
                 run_data = {
                     'id_build': run_id,
-                    'workflow_id': workflow_id,
+                    'workflow_id': run.get('workflow_id') or workflow_id,
                     'workflow_name': run.get('name', 'Unknown Workflow'),
                     'name': run.get('name', 'Unknown Workflow'),
                     'status': run.get('status', 'completed'),
@@ -489,7 +535,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     print(f"[GHAminer Stream] Warning: Failed to save final runs batch: {e}")
             
             # Update workflow date range for skip logic
-            if data_manager and workflow_runs:
+            if not use_repository_runs_endpoint and data_manager and workflow_runs:
                 dates = [r.get('created_at') for r in workflow_runs if r.get('created_at')]
                 if dates:
                     earliest = min(dates)
@@ -535,7 +581,7 @@ def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, An
     if config is None:
         config = load_config()
     
-    if not config.get("fetch_job_details", True):
+    if not config.get("fetch_job_details", False):
         print(f"[GHAminer Stream] Phase 2: Skipped (fetch_job_details=False)")
         return
     
@@ -689,7 +735,7 @@ def stream_ghaminer_data(repo: str, token: str, config: dict = None) -> Generato
                 print(f"[GHAminer Stream] Warning: Failed to load existing runs: {e}")
     
     # Phase 2: Collect job details (if enabled and we have runs)
-    if config and config.get("fetch_job_details", True) and all_runs_list:
+    if config and config.get("fetch_job_details", False) and all_runs_list:
         for updated_run, current_count, total_runs in stream_job_details_phase2(repo, token, all_runs_list, config):
             yield updated_run
 

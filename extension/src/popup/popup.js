@@ -68,13 +68,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const statusSpan = document.getElementById("token-status");
     const redirectUri = chrome.identity.getRedirectURL();
     const state = crypto.randomUUID();
+
+    if (!CLIENT_ID) {
+      statusSpan.textContent = "GitHub OAuth client ID is missing in extension config";
+      statusSpan.className = "status-message error";
+      return;
+    }
+
     chrome.storage.session.set({ oauthState: state });
 
     const url =
       `https://github.com/login/oauth/authorize` +
       `?client_id=${CLIENT_ID}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&scope=${encodeURIComponent("repo workflow read:user")}` + 
+      `&scope=${encodeURIComponent("repo workflow read:user")}` +
       `&state=${encodeURIComponent(state)}`;
 
     chrome.identity.launchWebAuthFlow(
@@ -123,14 +130,19 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: {
                   "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ code }),
+                body: JSON.stringify({ code, redirectUri }),
               });
 
-              if (!response.ok) {
-                throw new Error("Backend error: " + response.status);
+              let authResult = null;
+              try {
+                authResult = await response.json();
+              } catch (_) {
+                authResult = null;
               }
 
-              const authResult = await response.json();
+              if (!response.ok) {
+                throw new Error(authResult?.error || `Backend error: ${response.status}`);
+              }
 
               if (!authResult.token) {
                 statusSpan.textContent = "No token received from backend";

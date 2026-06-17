@@ -34,6 +34,15 @@ pip install -r requirements.txt
 
 ### Step 4: Run the backend server
 
+If you want to use GitHub OAuth, create `backend/.env` from `backend/.env.example` and set:
+
+```bash
+GITHUB_CLIENT_ID=your_oauth_app_client_id
+GITHUB_CLIENT_SECRET=your_oauth_app_client_secret
+```
+
+The `GITHUB_CLIENT_ID` must match the `GITHUB_CLIENT_ID` in `extension/src/config.js`. Restart the backend after changing these values. If you do not configure OAuth, you can still paste a personal access token in the extension popup.
+
 ```bash
 python app.py
 ```

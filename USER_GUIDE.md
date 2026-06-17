@@ -21,7 +21,7 @@ This guide explains how to install, run, and use the dashboard.
 ###  Configure your Token
 - Open the Chrome extension popup.
 - #### 2 Ways to Authenticate
-  - Option #1 (recommended): Login using GitHub OAuth to generate the token
+  - Option #1 (recommended): Login using GitHub OAuth to generate the token. OAuth requires `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `backend/.env`, then a backend restart.
   - Option #2: Paste your GitHub Personal Access Token (PAT) in the “Token” field.
 - Save your changes.
 Once configured, the extension automatically uses your token to fetch GitHub Actions data.
@@ -167,7 +167,7 @@ docker compose up --build
 
 - @jaykay9999
 -----
-- Authors : Cassandre Ashley Javel, Alexander Pan, Maksym Pravdin, Vincent Renaud, Danny Alexander Villeda 
+- Authors : Cassandre Ashley Javel, Alexander Pan, Maksym Pravdin, Vincent Renaud, Danny Alexander Villeda
 - Project : PFE009 Development of a dashboard for monitoring workflows with GitHub Actions – Final Year Project (ÉTS)
 - Year : 2026
 -----

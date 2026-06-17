@@ -48,6 +48,8 @@ class AggregationFilters:
     author: str | None = None
     branch: str | None = None
     workflowName: str | None = None
+    fetchJobDetails: bool = False
+    forceRefresh: bool = False
 
 
 def json_default(o: Any):
@@ -58,6 +60,19 @@ def json_default(o: Any):
         return o.isoformat()
     else:
         return str(o)
+
+
+def _run_date_in_filter(run: dict, filters: AggregationFilters) -> bool:
+    created_at = run.get("created_at") or run.get("createdAt")
+    if not created_at:
+        return True
+
+    try:
+        run_date = datetime.fromisoformat(str(created_at).replace("Z", "+00:00")).date()
+    except ValueError:
+        return True
+
+    return filters.startDate <= run_date <= filters.endDate
 
 
 def _send_keepalive_periodic(ws: Any, stop_flag: list):
@@ -134,9 +149,15 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
     try:
         # Load GHAminer config
         config = load_config()
-        print(f"[WebSocket] GHAminer config loaded: fetch_job_details={config.get('fetch_job_details', True)}")
+        config["fetch_job_details"] = bool(getattr(filters, "fetchJobDetails", False))
+        if filters.startDate != date(2000, 1, 1):
+            config["start_date"] = filters.startDate.isoformat()
+        if filters.endDate != date(2100, 1, 1):
+            config["end_date"] = filters.endDate.isoformat()
+        print(f"[WebSocket] GHAminer config loaded: fetch_job_details={config.get('fetch_job_details', False)}")
         
         all_runs_list = []
+        existing_runs_by_id = {}
         new_runs_count = 0
         existing_runs_count = 0
         
@@ -147,9 +168,64 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             persistence = DataPersistence()
             existing_runs_dict = persistence.get_all_runs(repo)
             if existing_runs_dict:
-                existing_runs_list = list(existing_runs_dict.values())
+                existing_runs_list = [
+                    run for run in existing_runs_dict.values()
+                    if _run_date_in_filter(run, filters)
+                ]
                 existing_runs_count = len(existing_runs_list)
+                existing_runs_by_id = {
+                    str(run.get("id")): run
+                    for run in existing_runs_list
+                    if run.get("id") is not None
+                }
+                all_runs_list = list(existing_runs_by_id.values())
                 print(f"[WebSocket] Found {existing_runs_count} existing runs in cache")
+
+                if existing_runs_list and not getattr(filters, "forceRefresh", False):
+                    print("[WebSocket] Serving cached runs without GitHub refresh")
+                    batch_size = 100
+                    for i in range(0, len(existing_runs_list), batch_size):
+                        cached_batch = existing_runs_list[i:i + batch_size]
+                        ws.send(json.dumps({
+                            "type": "runs",
+                            "data": cached_batch,
+                            "page": (i // batch_size) + 1,
+                            "hasMore": i + batch_size < len(existing_runs_list),
+                            "phase": "workflow_runs",
+                            "totalRuns": len(existing_runs_list),
+                            "newRuns": 0,
+                            "existingRuns": len(existing_runs_list),
+                            "elapsed_time": 0,
+                            "eta_seconds": None
+                        }, default=json_default))
+
+                    ws.send(json.dumps({
+                        "type": "complete",
+                        "phase": "workflow_runs",
+                        "totalRuns": len(existing_runs_list),
+                        "newRuns": 0,
+                        "existingRuns": len(existing_runs_list),
+                        "totalJobs": 0,
+                        "elapsed_time": 0
+                    }, default=json_default))
+                    return
+                elif existing_runs_list:
+                    print("[WebSocket] Seeding frontend with cached runs before GitHub refresh")
+                    batch_size = 100
+                    for i in range(0, len(existing_runs_list), batch_size):
+                        cached_batch = existing_runs_list[i:i + batch_size]
+                        ws.send(json.dumps({
+                            "type": "runs",
+                            "data": cached_batch,
+                            "page": (i // batch_size) + 1,
+                            "hasMore": True,
+                            "phase": "workflow_runs",
+                            "totalRuns": len(existing_runs_list),
+                            "newRuns": 0,
+                            "existingRuns": len(existing_runs_list),
+                            "elapsed_time": 0,
+                            "eta_seconds": None
+                        }, default=json_default))
         except Exception as e:
             print(f"[WebSocket] Could not check existing data: {e}")
         
@@ -159,17 +235,21 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         print(f"[WebSocket] Starting Phase 1: Workflow runs collection")
         phase1_start_time = time.time()
         phase1_batch_size = 100  # GitHub API returns 100 per page
-        total_runs = 0
+        total_runs = len(all_runs_list)
         batch = []
         last_keepalive = 0
-        estimated_total = 0
+        estimated_total = total_runs
         
         for dashboard_run, current_count, estimated, all_runs, new_count, existing_count in stream_workflow_runs_phase1(repo, token, config):
-            all_runs_list = all_runs  # Keep updating
-            total_runs = current_count
-            estimated_total = estimated
+            run_id = dashboard_run.get("id")
+            if run_id is not None:
+                existing_runs_by_id[str(run_id)] = dashboard_run
+
+            all_runs_list = list(existing_runs_by_id.values()) if existing_runs_by_id else all_runs
+            total_runs = len(all_runs_list) if existing_runs_by_id else current_count
+            estimated_total = max(estimated or 0, total_runs)
             new_runs_count = new_count
-            existing_runs_count = existing_count
+            existing_runs_count = max(existing_count, len(all_runs_list) - new_runs_count)
             batch.append(dashboard_run)
             
             # Calculate elapsed time and ETA for Phase 1
@@ -236,14 +316,15 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             "existingRuns": existing_runs_count,
             "elapsed_time": phase1_elapsed
         }
-        ws.send(json.dumps(phase1_complete_msg, default=json_default))
+        if config.get("fetch_job_details", False):
+            ws.send(json.dumps(phase1_complete_msg, default=json_default))
         print(f"[WebSocket] Phase 1 complete: {total_runs} total runs ({new_runs_count} new, {existing_runs_count} existing) in {phase1_elapsed:.2f} seconds")
         
         # ========================================
         # PHASE 2: Collect job details (if enabled)
         # Always run Phase 2 if we have runs (even if Phase 1 collected 0 new runs)
         # ========================================
-        if config.get("fetch_job_details", True):
+        if config.get("fetch_job_details", False):
             # Ensure we have runs for Phase 2
             if not all_runs_list:
                 # Try to load existing runs from persistence
@@ -368,7 +449,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         # Send final completion message
         complete_msg = {
             "type": "complete",
-            "phase": "jobs" if config.get('fetch_job_details', True) else "workflow_runs",
+            "phase": "jobs" if config.get('fetch_job_details', False) else "workflow_runs",
             "totalRuns": total_runs,
             "newRuns": new_runs_count,
             "existingRuns": existing_runs_count,

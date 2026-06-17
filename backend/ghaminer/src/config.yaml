@@ -47,7 +47,7 @@ workflow_ids: []
 #   - job_details        : JSON structure with job/step names, times, and results
 #   - tests_ran          : Boolean indicating if tests were executed (based on job/step names)
 #
-fetch_job_details: true
+fetch_job_details: false
 
 
 # ----------------------------------------------------------------------------

@@ -36,7 +36,7 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
         if (_progressCallbacks.has(repo)) {
           const cb = _progressCallbacks.get(repo);
           const dashboardData = convertRunsToDashboard(newRuns, repo, null);
-          cb(dashboardData, false);
+          cb(dashboardData, Boolean(status.isComplete));
         }
       });
     }
@@ -123,6 +123,11 @@ export function filterRunsLocally(filters, repoOverride = null) {
   }
 
   return convertRunsToDashboard(runs, repo, filters);
+}
+
+export function cacheRunsForRepo(repo, runs) {
+  if (!repo || !Array.isArray(runs)) return;
+  _runsByRepo.set(repo, runs);
 }
 
 // ============================================
@@ -653,6 +658,9 @@ export function convertRunsToDashboard(runs, repo, filters) {
       repo,
       totalRuns: 0,
       originalTotalRuns: 0,
+      filteredTotalRuns: 0,
+      runsUsedForStats: 0,
+      excludedDurationOutlierRuns: 0,
       successRate: 0,
       medianDuration: 0,
       mad: 0,
@@ -685,7 +693,7 @@ export function convertRunsToDashboard(runs, repo, filters) {
   // Apply filters if provided (workflow, branch, actor, and date)
   let filteredRuns = runs;
   
-  // Store original total runs count (before any filtering) for the "Total runs" KPI
+  // Store original total runs count before client-side filters.
   const originalTotalRuns = runs.length;
   
   if (filters) {
@@ -715,13 +723,16 @@ export function convertRunsToDashboard(runs, repo, filters) {
     }
   }
 
-  // Filter out runs with duration > 30 million seconds (347 days) for charts/stats
-  // But keep them in the original total count for the "Total runs" KPI
+  const filteredTotalRuns = filteredRuns.length;
+
+  // Filter out runs with duration > 30 million seconds (347 days) for charts/stats.
+  // Keep the raw and filtered counts separate so the KPI can explain both numbers.
   const MAX_DURATION_SECONDS = 30000000;
   const runsForStats = filteredRuns.filter(run => {
     const duration = run.duration || 0;
     return duration <= MAX_DURATION_SECONDS;
   });
+  const excludedDurationOutlierRuns = filteredTotalRuns - runsForStats.length;
 
   // Calculate statistics using helper functions (using filtered runs without long durations)
   const { totalRuns, successRuns, failureRuns, cancelledRuns, successRate } = calculateRunStats(runsForStats);
@@ -777,7 +788,10 @@ export function convertRunsToDashboard(runs, repo, filters) {
   return {
     repo,
     totalRuns, // Filtered count (without long-duration runs) for stats
-    originalTotalRuns: originalTotalRuns, // Original total count including long-duration runs for "Total runs" KPI
+    originalTotalRuns,
+    filteredTotalRuns,
+    runsUsedForStats: totalRuns,
+    excludedDurationOutlierRuns,
     successRate,
     failureRate: totalRuns > 0 ? failureRuns / totalRuns : 0,
     avgDuration,
@@ -820,7 +834,12 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
     chrome.runtime.sendMessage({
       action: 'startWebSocketExtraction',
       repo: repo,
-      filters: { start: filters.start, end: filters.end } // Seulement dates
+      filters: {
+        start: filters.start,
+        end: filters.end,
+        fetchJobDetails: Boolean(filters.fetchJobDetails),
+        forceRefresh: Boolean(filters.forceRefresh)
+      }
     }, (response) => {
       if (chrome.runtime.lastError) {
         console.error('[WebSocket] Error:', chrome.runtime.lastError);
@@ -836,6 +855,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
       }
 
       if (response?.cached) {
+        cacheRunsForRepo(repo, response.data);
         const dashboardData = convertRunsToDashboard(response.data, repo, filters);
         if (onProgressCallback) {
           onProgressCallback(dashboardData, true);
@@ -893,14 +913,19 @@ export function getWebSocketCacheStatus(repo) {
 }
 
 export function clearWebSocketCache(repo = null) {
-  chrome.runtime.sendMessage({
-    action: 'clearWebSocketCache',
-    repo: repo
+  const runtimeClear = new Promise((resolve) => {
+    chrome.runtime.sendMessage({
+      action: 'clearWebSocketCache',
+      repo: repo
+    }, () => resolve());
   });
-  chrome.storage.local.remove(['wsRuns', 'wsStatus']);
+  const storageClear = new Promise((resolve) => {
+    chrome.storage.local.remove(['wsRuns', 'wsStatus'], () => resolve());
+  });
   if (repo) {
     _runsByRepo.delete(repo);
   } else {
     _runsByRepo.clear();
   }
+  return Promise.all([runtimeClear, storageClear]);
 }

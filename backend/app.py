@@ -30,8 +30,11 @@ args = parser.parse_args()
 
 E2E_MODE = args.e2e
 
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Initialize Flask app
 load_dotenv()
+load_dotenv(os.path.join(BACKEND_DIR, ".env"), override=True)
 app = Flask(__name__)
 sock = Sock(app)
 
@@ -86,6 +89,18 @@ def _first_filter_value(value):
     return value
 
 
+def _bool_filter_value(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return value != 0
+    return default
+
+
 def _build_aggregation_filters(filters_payload):
     filters = AggregationFilters()
 
@@ -116,6 +131,18 @@ def _build_aggregation_filters(filters_payload):
     if workflow_name:
         filters.workflowName = cast(str, workflow_name)
 
+    fetch_job_details = filters_payload.get("fetchJobDetails")
+    if fetch_job_details is None:
+        fetch_job_details = filters_payload.get("includeJobs")
+    if fetch_job_details is None:
+        fetch_job_details = filters_payload.get("fetch_job_details")
+    filters.fetchJobDetails = _bool_filter_value(fetch_job_details, default=False)
+
+    force_refresh = filters_payload.get("forceRefresh")
+    if force_refresh is None:
+        force_refresh = filters_payload.get("force_refresh")
+    filters.forceRefresh = _bool_filter_value(force_refresh, default=False)
+
     return filters
 
 # ============================================
@@ -128,8 +155,8 @@ def health():
         "service": "GHA Dashboard Backend (GHAminer)",
         "ghaminer_configured": os.path.exists(os.path.join(os.path.dirname(__file__), 'ghaminer', 'src', 'config.yaml'))
     }, 200
-    
-    
+
+
 # ============================================
 # Authentication Endpoint
 # ============================================
@@ -143,44 +170,111 @@ def github_auth():
             "username": os.getenv("TEST_GITHUB_USERNAME")
         })
 
-    data = request.get_json()
-    code = data["code"]
+    data = request.get_json(silent=True) or {}
+    code = data.get("code")
+    redirect_uri = data.get("redirect_uri") or data.get("redirectUri")
 
-    response = requests.post(
-        "https://github.com/login/oauth/access_token",
-        headers={
-            "Accept": "application/json"
-        },
-        data={
-            "client_id": os.getenv("GITHUB_CLIENT_ID"),
-            "client_secret": os.getenv("GITHUB_CLIENT_SECRET"),
-            "code": code
-        }
-    )
+    if not code:
+        return jsonify({
+            "success": False,
+            "error": "Missing GitHub authorization code"
+        }), 400
 
-    token_data = response.json()
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+
+    missing_config = [
+        name for name, value in {
+            "GITHUB_CLIENT_ID": client_id,
+            "GITHUB_CLIENT_SECRET": client_secret
+        }.items()
+        if not value
+    ]
+
+    if missing_config:
+        return jsonify({
+            "success": False,
+            "error": (
+                "GitHub OAuth is not configured on the backend. "
+                f"Set {', '.join(missing_config)} in backend/.env and restart the backend."
+            )
+        }), 500
+
+    token_payload = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "code": code
+    }
+
+    if redirect_uri:
+        token_payload["redirect_uri"] = redirect_uri
+
+    try:
+        response = requests.post(
+            "https://github.com/login/oauth/access_token",
+            headers={
+                "Accept": "application/json"
+            },
+            data=token_payload,
+            timeout=15
+        )
+    except requests.RequestException as exc:
+        return jsonify({
+            "success": False,
+            "error": f"Unable to reach GitHub OAuth service: {exc}"
+        }), 502
+
+    try:
+        token_data = response.json()
+    except ValueError:
+        token_data = {}
     access_token = token_data.get("access_token")
 
     if not access_token:
+        github_error = token_data.get("error_description") or token_data.get("error")
+        message = "OAuth exchange failed"
+        if github_error:
+            message = f"{message}: {github_error}"
+
         return jsonify({
             "success": False,
-            "error": "OAuth exchange failed"
+            "error": message
         }), 401
-        
-    user_response = requests.get(
-        "https://api.github.com/user",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/vnd.github+json"
-        }
-    )
-    
+
+    try:
+        user_response = requests.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/vnd.github+json"
+            },
+            timeout=15
+        )
+    except requests.RequestException as exc:
+        return jsonify({
+            "success": False,
+            "error": f"Unable to reach GitHub user API: {exc}"
+        }), 502
+
+    if not user_response.ok:
+        return jsonify({
+            "success": False,
+            "error": "OAuth token received, but GitHub user profile could not be loaded"
+        }), 401
+
     user = user_response.json()
+    username = user.get("login")
+
+    if not username:
+        return jsonify({
+            "success": False,
+            "error": "OAuth token received, but GitHub username was missing"
+        }), 401
 
     return jsonify({
         "success": True,
         "token": access_token,
-        "username": user["login"]
+        "username": username
     })
 
 # ============================================
@@ -311,7 +405,7 @@ def check_data(repositoryName: str):
     """
     from urllib.parse import unquote
     repo = unquote(repositoryName)
-    
+
     # Validate repository format
     if "/" not in repo or repo.count("/") != 1:
         return jsonify({
@@ -445,8 +539,8 @@ if __name__ == "__main__":
             # Instead, we use periodic keepalive messages (every 30s) to prevent connection timeouts
             # during GitHub API rate limit waits
             server = pywsgi.WSGIServer(
-                (host, port), 
-                app, 
+                (host, port),
+                app,
                 log=None
             )
             print(f"WebSocket server configured - using periodic keepalive messages to prevent timeout during rate limit waits")
