@@ -131,7 +131,7 @@
     position: sticky;
     top: 0;
     z-index: 80;
-    padding: 10px 0 14px;
+    padding: 10px 10px 14px;
     background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, transparent), color-mix(in srgb, var(--bg) 72%, transparent));
     backdrop-filter: blur(12px);
 }

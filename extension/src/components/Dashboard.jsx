@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo } from '../websocket';
+import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
 
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -931,6 +931,28 @@ export default function Dashboard() {
     return { exists: false };
   };
 
+  const refreshPersistedRunCount = async (repo, delayMs = 0) => {
+    if (!repo) return { exists: false };
+
+    if (delayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+
+    const result = await checkExistingData(repo);
+    if (result?.exists) {
+      const persistedRuns = result.totalRuns || 0;
+      setProgress(prev => ({
+        ...prev,
+        items: Math.max(prev.items || 0, persistedRuns),
+        totalRuns: Math.max(prev.totalRuns || 0, persistedRuns),
+        complete: true,
+        isStreaming: false
+      }));
+    }
+
+    return result;
+  };
+
   const syncAvailableFiltersFromData = (dashboardData) => {
     if (!dashboardData) return;
 
@@ -1207,7 +1229,11 @@ export default function Dashboard() {
 
         setProgress(prev => ({
           ...prev,
-          items: partialData.totalRuns || 0,
+          items: partialData.originalTotalRuns || partialData.filteredTotalRuns || partialData.totalRuns || 0,
+          totalRuns: Math.max(
+            prev.totalRuns || 0,
+            partialData.originalTotalRuns || partialData.filteredTotalRuns || partialData.totalRuns || 0
+          ),
           complete: isComplete,
           isStreaming: !isComplete
         }));
@@ -1239,6 +1265,21 @@ export default function Dashboard() {
         isStreaming: false
       }));
     } catch (err) {
+      if (err.name === 'CollectionCancelledError') {
+        console.info('[Dashboard] Collection cancelled by user.');
+        setLoading(false);
+        setCollectionPaused(false);
+        setProgress(prev => ({
+          ...prev,
+          complete: true,
+          isStreaming: false
+        }));
+        setDataLoaded(!!data);
+        setCollectionStarted(!!data);
+        await refreshPersistedRunCount(currentRepo, 500);
+        return;
+      }
+
       console.error('Error loading dashboard data:', err);
       setError('Error loading data: ' + err.message);
       setLoading(false);
@@ -1246,8 +1287,23 @@ export default function Dashboard() {
     }
   };
 
-  const cancelCollection = () => {
-    console.info('[Dashboard] Cancel collection is currently disabled.');
+  const cancelCollection = async () => {
+    try {
+      await cancelWebSocketCollection(currentRepo);
+      setLoading(false);
+      setCollectionPaused(false);
+      setProgress(prev => ({
+        ...prev,
+        complete: true,
+        isStreaming: false
+      }));
+      setDataLoaded(!!data);
+      setCollectionStarted(!!data);
+      await refreshPersistedRunCount(currentRepo, 500);
+    } catch (err) {
+      console.error('[Dashboard] Error cancelling collection:', err);
+      setError('Error cancelling collection: ' + err.message);
+    }
   };
 
   const resumeCollection = () => {
@@ -1498,6 +1554,7 @@ export default function Dashboard() {
   // Apply ALL filters (including date) when any filter changes (works during collection too)
   // This ensures real-time filtering as data streams in
   useEffect(() => {
+    let cancelled = false;
     const datesChanged = prevDatesRef.current.start !== filters.start ||
       prevDatesRef.current.end !== filters.end;
 
@@ -1509,7 +1566,9 @@ export default function Dashboard() {
     // Re-apply all filters if we have a repo (works during collection too).
     // filterRunsLocally reads from _runsByRepo which contains all runs collected so far.
     dateFiltersRef.current = { start: filters.start, end: filters.end };
-    if (currentRepo) {
+    const refreshFilteredDashboard = async () => {
+      if (!currentRepo) return;
+
       const filtered = filterRunsLocally({
         workflow: filters.workflow,
         branch: filters.branch,
@@ -1519,15 +1578,40 @@ export default function Dashboard() {
       }, currentRepo);
 
       if (filtered) {
+        if (cancelled) return;
         setData(prev => ({
           ...filtered,
           workflows: prev?.workflows || availableFilters.workflows,
           branches: prev?.branches || availableFilters.branches,
           actors: prev?.actors || availableFilters.actors
         }));
+        return;
       }
-    }
-  }, [filters.start, filters.end, filters.workflow, filters.branch, filters.actor, currentRepo]);
+
+      // If the in-memory websocket cache is not available after a page
+      // refresh, fall back to the backend cache and reprocess it with the
+      // newly selected date range.
+      if (datesChanged && dataExists && !progress.isStreaming) {
+        await loadExistingData(currentRepo);
+      }
+    };
+
+    refreshFilteredDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    filters.start,
+    filters.end,
+    filters.workflow,
+    filters.branch,
+    filters.actor,
+    currentRepo,
+    dataExists,
+    progress.isStreaming,
+    availableFilters
+  ]);
 
   // Note: All filter changes (workflow, branch, actor, date) are now handled
   // in the single useEffect above to avoid duplicate filtering
