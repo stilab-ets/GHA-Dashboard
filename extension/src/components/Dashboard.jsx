@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
+import { buildExtractionFilters, filterRunsForScope, normalizeWorkflowIds } from '../scopeFilters.mjs';
 
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -426,7 +427,7 @@ function formatDateForInput(d) {
 
 function formatDateDisplay(dateStr) {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
+  const d = parseDateStr(dateStr);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
@@ -501,12 +502,11 @@ export default function Dashboard() {
 
   const getCurrentDefaults = () => {
     const now = new Date();
-    // Set default to current month (first day to last day)
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const defaultStart = formatDateForInput(firstDayOfMonth);
-    const defaultEnd = formatDateForInput(lastDayOfMonth);
-    return { defaultStart, defaultEnd };
+    return {
+      defaultStart: '',
+      defaultEnd: '',
+      today: formatDateForInput(now)
+    };
   };
 
   const { defaultStart, defaultEnd } = getCurrentDefaults();
@@ -554,10 +554,14 @@ export default function Dashboard() {
     start: defaultStart,
     end: defaultEnd
   });
+  const [collectionScopeWorkflowIds, setCollectionScopeWorkflowIds] = useState(['all']);
+  const [workflowOptions, setWorkflowOptions] = useState([]);
+  const [workflowOptionsLoading, setWorkflowOptionsLoading] = useState(false);
+  const [workflowOptionsError, setWorkflowOptionsError] = useState(null);
 
   const getActiveDateRange = () => ({
-    start: filters.start || defaultStart,
-    end: filters.end || defaultEnd
+    start: filters.start || '',
+    end: filters.end || ''
   });
 
   useEffect(() => {
@@ -626,6 +630,7 @@ export default function Dashboard() {
     branch: false,
     actor: false
   });
+  const [collectionWorkflowDropdownOpen, setCollectionWorkflowDropdownOpen] = useState(false);
 
   const [activeStatsTab, setActiveStatsTab] = useState('workflows');
   const [contributorSearchQuery, setContributorSearchQuery] = useState('');
@@ -634,6 +639,9 @@ export default function Dashboard() {
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
   const [selectingStart, setSelectingStart] = useState(true);
+  const [collectionDatePickerOpen, setCollectionDatePickerOpen] = useState(null);
+  const [collectionCalendarMonth, setCollectionCalendarMonth] = useState(new Date().getMonth());
+  const [collectionCalendarYear, setCollectionCalendarYear] = useState(new Date().getFullYear());
   const [selectedWorkflowForDuration, setSelectedWorkflowForDuration] = useState('all');
   const [tooltipData, setTooltipData] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
@@ -663,6 +671,8 @@ export default function Dashboard() {
     actor: useRef(null)
   };
   const datePickerRef = useRef(null);
+  const collectionDatePickerRef = useRef(null);
+  const collectionWorkflowPickerRef = useRef(null);
 
   // ============================================
   // Effects
@@ -822,6 +832,14 @@ export default function Dashboard() {
       if (datePickerRef.current && !datePickerRef.current.contains(event.target)) {
         setDatePickerOpen(false);
       }
+
+      if (collectionDatePickerRef.current && !collectionDatePickerRef.current.contains(event.target)) {
+        setCollectionDatePickerOpen(null);
+      }
+
+      if (collectionWorkflowPickerRef.current && !collectionWorkflowPickerRef.current.contains(event.target)) {
+        setCollectionWorkflowDropdownOpen(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -885,11 +903,76 @@ export default function Dashboard() {
     extractRepo();
   }, []);
 
-  // Check for existing data when repo changes (but don't auto-load it)
+  const getCollectionScope = () => ({
+    start: filters.start || '',
+    end: filters.end || '',
+    workflowIds: normalizeWorkflowIds(collectionScopeWorkflowIds)
+  });
+
+  const getGithubToken = () => new Promise((resolve) => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.session) {
+      chrome.storage.session.get(['githubToken'], (result) => resolve(result.githubToken || null));
+    } else {
+      resolve(null);
+    }
+  });
+
+  const buildScopedQuery = (scope = getCollectionScope()) => {
+    const params = new URLSearchParams();
+    if (scope.start) params.set('start', scope.start);
+    if (scope.end) params.set('end', scope.end);
+    normalizeWorkflowIds(scope.workflowIds).forEach(id => params.append('workflowIds', String(id)));
+    const query = params.toString();
+    return query ? `?${query}` : '';
+  };
+
+  const loadWorkflowOptions = async (repo) => {
+    if (!repo) return;
+
+    setWorkflowOptionsLoading(true);
+    setWorkflowOptionsError(null);
+
+    try {
+      const token = await getGithubToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const encodedRepo = encodeURIComponent(repo);
+      const response = await fetch(`http://127.0.0.1:3000/api/workflows/${encodedRepo}`, { headers });
+
+      if (!response.ok) {
+        throw new Error(`Unable to load workflows (${response.status})`);
+      }
+
+      const result = await response.json();
+      const workflows = Array.isArray(result.workflows) ? result.workflows : [];
+      setWorkflowOptions(workflows);
+      setCollectionScopeWorkflowIds(prev => {
+        const selectedIds = normalizeWorkflowIds(prev);
+        if (prev.includes('all') || selectedIds.length === 0) return ['all'];
+        const availableIds = new Set(workflows.map(workflow => Number(workflow.id)));
+        const nextIds = selectedIds.filter(id => availableIds.has(id));
+        return nextIds.length ? nextIds : ['all'];
+      });
+    } catch (err) {
+      console.error('[Dashboard] Error loading workflow options:', err);
+      setWorkflowOptionsError(err.message);
+      setWorkflowOptions([]);
+      setCollectionScopeWorkflowIds(['all']);
+    } finally {
+      setWorkflowOptionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentRepo) {
+      loadWorkflowOptions(currentRepo);
+    }
+  }, [currentRepo]);
+
+  // Check for existing scoped data when repo changes (but don't auto-load it)
   useEffect(() => {
     if (currentRepo && !collectionStarted && !data) {
       setCheckingData(true);
-      checkExistingData(currentRepo).then((result) => {
+      checkExistingData(currentRepo, getCollectionScope()).then((result) => {
         setCheckingData(false);
         if (result && result.exists) {
           // Just update the status that data exists, don't auto-load
@@ -905,19 +988,19 @@ export default function Dashboard() {
         setCheckingData(false);
       });
     }
-  }, [currentRepo, collectionStarted, data]);
+  }, [currentRepo, collectionStarted, data, filters.start, filters.end, collectionScopeWorkflowIds]);
 
   // ============================================
   // Data Loading Functions
   // ============================================
 
   // Check if data exists for the current repo
-  const checkExistingData = async (repo) => {
+  const checkExistingData = async (repo, scope = getCollectionScope()) => {
     if (!repo) return;
 
     try {
       const encodedRepo = encodeURIComponent(repo);
-      const response = await fetch(`http://127.0.0.1:3000/api/data/check/${encodedRepo}`);
+      const response = await fetch(`http://127.0.0.1:3000/api/data/check/${encodedRepo}${buildScopedQuery(scope)}`);
       if (response.ok) {
         const result = await response.json();
         setDataExists(result.exists);
@@ -966,12 +1049,12 @@ export default function Dashboard() {
   };
 
   // Load existing data from cache
-  const loadExistingData = async (repo) => {
+  const loadExistingData = async (repo, scope = getCollectionScope()) => {
     if (!repo) return false;
 
     try {
       const encodedRepo = encodeURIComponent(repo);
-      const response = await fetch(`http://127.0.0.1:3000/api/data/load/${encodedRepo}`);
+      const response = await fetch(`http://127.0.0.1:3000/api/data/load/${encodedRepo}${buildScopedQuery(scope)}`);
       if (response.ok) {
         const result = await response.json();
         if (result.runs && result.runs.length > 0) {
@@ -997,7 +1080,7 @@ export default function Dashboard() {
 
           // Now process the runs into dashboard format
           // Use convertRunsToDashboard directly (no dependency on _runsByRepo)
-          const processedData = processRunsToDashboardFormat(result.runs, repo);
+          const processedData = processRunsToDashboardFormat(result.runs, repo, scope);
 
           if (processedData) {
             console.log('[Dashboard] Processed data successfully:', processedData.totalRuns, 'runs');
@@ -1022,7 +1105,7 @@ export default function Dashboard() {
   };
 
   // Process runs into dashboard format using convertRunsToDashboard directly
-  const processRunsToDashboardFormat = (runs, repo = null) => {
+  const processRunsToDashboardFormat = (runs, repo = null, scope = getCollectionScope()) => {
     if (!runs || runs.length === 0) {
       console.log('[Dashboard] processRunsToDashboardFormat: No runs provided');
       return null;
@@ -1034,34 +1117,39 @@ export default function Dashboard() {
       return null;
     }
 
-    console.log(`[Dashboard] Processing ${runs.length} runs for repo: ${repoToUse}`);
-    cacheRunsForRepo(repoToUse, runs);
+    const scopedRuns = filterRunsForScope(runs, scope);
+    console.log(`[Dashboard] Processing ${scopedRuns.length} scoped runs for repo: ${repoToUse}`);
+    cacheRunsForRepo(repoToUse, scopedRuns);
 
     // Store runs in Chrome storage - this will trigger the storage listener in websocket.js
     // which will populate _runsByRepo for future use
     if (typeof chrome !== 'undefined' && chrome.storage) {
       chrome.storage.local.set({
-        wsRuns: runs,
+        wsRuns: scopedRuns,
         wsStatus: {
           isStreaming: false,
           isComplete: true,
           repo: repoToUse,
-          totalRuns: runs.length
+          totalRuns: scopedRuns.length
         }
       });
     }
 
     // Use convertRunsToDashboard directly instead of filterRunsLocally
     // This avoids the dependency on _runsByRepo being populated
-    const { start: startDate, end: endDate } = getActiveDateRange();
+    const { start: startDate, end: endDate, workflowIds } = {
+      ...getActiveDateRange(),
+      ...scope
+    };
 
     try {
-      const dashboardData = convertRunsToDashboard(runs, repoToUse, {
+      const dashboardData = convertRunsToDashboard(scopedRuns, repoToUse, {
         workflow: ['all'],
         branch: ['all'],
         actor: ['all'],
         startDate: startDate,
-        endDate: endDate
+        endDate: endDate,
+        workflowIds
       });
 
       if (dashboardData) {
@@ -1162,6 +1250,8 @@ export default function Dashboard() {
       console.log('[Dashboard] Using repo:', repo);
 
       const activeDateRange = getActiveDateRange();
+      const collectionScope = getCollectionScope();
+      let shouldRefreshAfterCache = Boolean(collectMore);
 
       // Preserve existing date filters when starting new collection
       // Only initialize defaults if filters haven't been set yet
@@ -1170,9 +1260,9 @@ export default function Dashboard() {
       }
 
       if (!collectMore && !preserveStreamingCache) {
-        const existing = await checkExistingData(repo);
+        const existing = await checkExistingData(repo, collectionScope);
         if (existing?.exists) {
-          const loaded = await loadExistingData(repo);
+          const loaded = await loadExistingData(repo, collectionScope);
           if (loaded) {
             setDataExists(true);
             setExistingRunsCount(existing.totalRuns || 0);
@@ -1183,10 +1273,10 @@ export default function Dashboard() {
               ...prev,
               items: existing.totalRuns || prev.items || 0,
               totalRuns: existing.totalRuns || prev.totalRuns || 0,
-              complete: true,
-              isStreaming: false
+              complete: false,
+              isStreaming: true
             }));
-            return;
+            shouldRefreshAfterCache = true;
           }
         }
       }
@@ -1214,7 +1304,8 @@ export default function Dashboard() {
           branch: filters.branch,
           actor: filters.actor,
           start: dateFiltersRef.current.start,
-          end: dateFiltersRef.current.end
+          end: dateFiltersRef.current.end,
+          workflowIds: collectionScope.workflowIds
         };
 
         // Apply local filters using latest filter values (including date range)
@@ -1241,18 +1332,19 @@ export default function Dashboard() {
         if (isComplete) {
           setDataLoaded(true);
           // Update data existence status after collection
-          checkExistingData(repo);
+          checkExistingData(repo, collectionScope);
         }
       };
 
       // Limit GitHub API collection to the visible date range. The dashboard
       // still filters client-side, but this avoids scanning the full history.
-      const wsFilters = {
+      const wsFilters = buildExtractionFilters({
         start: activeDateRange.start,
         end: activeDateRange.end,
+        workflowIds: collectionScope.workflowIds,
         fetchJobDetails: false,
-        forceRefresh: Boolean(collectMore)
-      };
+        forceRefresh: shouldRefreshAfterCache
+      });
 
       const finalData = await fetchDashboardDataViaWebSocket(repo, wsFilters, onProgress);
       setLoading(false);
@@ -1325,7 +1417,8 @@ export default function Dashboard() {
       branch: filters.branch,
       actor: filters.actor,
       startDate: activeDateRange.start,
-      endDate: activeDateRange.end
+      endDate: activeDateRange.end,
+      workflowIds: getCollectionScope().workflowIds
     };
 
     const filtered = filterRunsLocally(filterValues, rawData.repo || currentRepo);
@@ -1352,7 +1445,8 @@ export default function Dashboard() {
       branch: explicitFilters.branch || filters.branch,
       actor: explicitFilters.actor || filters.actor,
       startDate: explicitFilters.start || filters.start,
-      endDate: explicitFilters.end || filters.end
+      endDate: explicitFilters.end || filters.end,
+      workflowIds: explicitFilters.workflowIds || getCollectionScope().workflowIds
     }, rawData.repo || currentRepo);
 
     if (filtered) {
@@ -1469,7 +1563,8 @@ export default function Dashboard() {
           branch: filters.branch,
           actor: filters.actor,
           startDate: activeDateRange.start,
-          endDate: activeDateRange.end
+          endDate: activeDateRange.end,
+          workflowIds: getCollectionScope().workflowIds
         }, currentRepo);
 
         if (filtered) {
@@ -1518,7 +1613,7 @@ export default function Dashboard() {
         chrome.storage.onChanged.removeListener(handleStorageChange);
       }
     };
-  }, [currentRepo, filters, availableFilters]);
+  }, [currentRepo, filters, availableFilters, collectionScopeWorkflowIds]);
 
   // Real-time elapsed time counter (updates every second)
   useEffect(() => {
@@ -1574,7 +1669,8 @@ export default function Dashboard() {
         branch: filters.branch,
         actor: filters.actor,
         startDate: filters.start,
-        endDate: filters.end
+        endDate: filters.end,
+        workflowIds: getCollectionScope().workflowIds
       }, currentRepo);
 
       if (filtered) {
@@ -1587,12 +1683,11 @@ export default function Dashboard() {
         }));
         return;
       }
-
       // If the in-memory websocket cache is not available after a page
       // refresh, fall back to the backend cache and reprocess it with the
-      // newly selected date range.
+      // newly selected collection scope.
       if (datesChanged && dataExists && !progress.isStreaming) {
-        await loadExistingData(currentRepo);
+        await loadExistingData(currentRepo, getCollectionScope());
       }
     };
 
@@ -1607,12 +1702,378 @@ export default function Dashboard() {
     filters.workflow,
     filters.branch,
     filters.actor,
+    collectionScopeWorkflowIds,
     currentRepo,
     dataExists,
     progress.isStreaming,
     availableFilters
   ]);
 
+  const updateCollectionDate = (filterType, value) => {
+    const currentDefaults = getCurrentDefaults();
+    const nowStr = currentDefaults.today;
+    let newStart = filterType === 'start' ? value : filters.start;
+    let newEnd = filterType === 'end' ? value : filters.end;
+
+    if (newStart && newStart > nowStr) newStart = nowStr;
+    if (newEnd && newEnd > nowStr) newEnd = nowStr;
+
+    if (newStart && newEnd && newStart > newEnd) {
+      if (filterType === 'start') {
+        newEnd = newStart;
+      } else {
+        newStart = newEnd;
+      }
+    }
+
+    dateFiltersRef.current = { start: newStart, end: newEnd };
+    setFilters(prev => ({ ...prev, start: newStart, end: newEnd }));
+  };
+
+  const setCollectionDateValue = (filterType, dateValue) => {
+    const value = dateValue ? formatDateForInput(dateValue) : '';
+    let newStart = filterType === 'start' ? value : filters.start;
+    let newEnd = filterType === 'end' ? value : filters.end;
+
+    if (newStart && newEnd && newStart > newEnd) {
+      if (filterType === 'start') {
+        newEnd = newStart;
+      } else {
+        newStart = newEnd;
+      }
+    }
+
+    dateFiltersRef.current = { start: newStart, end: newEnd };
+    setFilters(prev => ({ ...prev, start: newStart, end: newEnd }));
+  };
+
+  const openCollectionDatePicker = (filterType) => {
+    const selectedDate = filterType === 'start'
+      ? parseDateStr(filters.start)
+      : parseDateStr(filters.end);
+
+    if (selectedDate) {
+      setCollectionCalendarMonth(selectedDate.getMonth());
+      setCollectionCalendarYear(selectedDate.getFullYear());
+    }
+
+    setCollectionWorkflowDropdownOpen(false);
+    setCollectionDatePickerOpen(current => current === filterType ? null : filterType);
+  };
+
+  const getCollectionDateLabel = (filterType) => {
+    const value = filterType === 'start' ? filters.start : filters.end;
+    if (value) return formatDateDisplay(value);
+    return filterType === 'start' ? 'No start date' : 'No end date';
+  };
+
+  const getCollectionWorkflowSummary = () => {
+    if (collectionScopeWorkflowIds.includes('all') || normalizeWorkflowIds(collectionScopeWorkflowIds).length === 0) {
+      return 'All workflows';
+    }
+
+    const selectedIds = normalizeWorkflowIds(collectionScopeWorkflowIds);
+    return `${selectedIds.length} workflow${selectedIds.length === 1 ? '' : 's'} selected`;
+  };
+
+  const getSelectedCollectionWorkflowLabels = () => {
+    if (collectionScopeWorkflowIds.includes('all') || normalizeWorkflowIds(collectionScopeWorkflowIds).length === 0) {
+      return ['All workflows'];
+    }
+
+    const selectedIds = new Set(normalizeWorkflowIds(collectionScopeWorkflowIds));
+    return workflowOptions
+      .filter(workflow => selectedIds.has(Number(workflow.id)))
+      .map(workflow => workflow.name);
+  };
+
+  const toggleCollectionWorkflow = (workflowId, checked) => {
+    setCollectionScopeWorkflowIds(prev => {
+      if (workflowId === 'all') {
+        return checked ? ['all'] : [];
+      }
+
+      const currentIds = normalizeWorkflowIds(prev);
+      const id = Number(workflowId);
+      const nextIds = checked
+        ? Array.from(new Set([...currentIds, id]))
+        : currentIds.filter(value => value !== id);
+
+      return nextIds.length ? nextIds : ['all'];
+    });
+  };
+
+  const renderCollectionDatePicker = (filterType) => {
+    const monthNames = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December'
+    ];
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const daysInMonth = getDaysInMonth(collectionCalendarYear, collectionCalendarMonth);
+    const firstDay = getFirstDayOfMonth(collectionCalendarYear, collectionCalendarMonth);
+    const today = new Date();
+    const selectedStart = filters.start ? parseDateStr(filters.start) : null;
+    const selectedEnd = filters.end ? parseDateStr(filters.end) : null;
+    const calendarDays = [
+      ...Array(firstDay).fill(null),
+      ...Array.from({ length: daysInMonth }, (_, index) => index + 1)
+    ];
+
+    const moveCollectionMonth = (direction) => {
+      if (direction < 0) {
+        if (collectionCalendarMonth === 0) {
+          setCollectionCalendarMonth(11);
+          setCollectionCalendarYear(collectionCalendarYear - 1);
+        } else {
+          setCollectionCalendarMonth(collectionCalendarMonth - 1);
+        }
+      } else if (collectionCalendarMonth === 11) {
+        setCollectionCalendarMonth(0);
+        setCollectionCalendarYear(collectionCalendarYear + 1);
+      } else {
+        setCollectionCalendarMonth(collectionCalendarMonth + 1);
+      }
+    };
+
+    const handleCollectionDateClick = (day) => {
+      const clickedDate = new Date(collectionCalendarYear, collectionCalendarMonth, day);
+      setCollectionDateValue(filterType, clickedDate);
+      setCollectionDatePickerOpen(null);
+    };
+
+    return (
+      <div
+        className="date-picker-popover collection-date-popover"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="collection-calendar-header">
+          <button
+            type="button"
+            className="collection-calendar-nav"
+            aria-label="Previous month"
+            onClick={() => moveCollectionMonth(-1)}
+          >
+            ←
+          </button>
+          <div className="collection-calendar-title">
+            {monthNames[collectionCalendarMonth]} {collectionCalendarYear}
+          </div>
+          <button
+            type="button"
+            className="collection-calendar-nav"
+            aria-label="Next month"
+            onClick={() => moveCollectionMonth(1)}
+          >
+            →
+          </button>
+        </div>
+
+        <div className="collection-calendar-grid" aria-label="Collection date range calendar">
+          {dayNames.map(day => (
+            <div key={day} className="collection-calendar-weekday">
+              {day}
+            </div>
+          ))}
+
+          {calendarDays.map((day, index) => {
+            if (day === null) {
+              return <div key={`empty-${index}`} className="collection-calendar-empty" />;
+            }
+
+            const cellDate = new Date(collectionCalendarYear, collectionCalendarMonth, day);
+            const isToday = isSameDay(cellDate, today);
+            const isStart = selectedStart && isSameDay(cellDate, selectedStart);
+            const isEnd = selectedEnd && isSameDay(cellDate, selectedEnd);
+            const isInRange =
+              selectedStart &&
+              selectedEnd &&
+              isDateInRange(cellDate, filters.start, filters.end);
+
+            return (
+              <button
+                key={day}
+                type="button"
+                className={[
+                  'collection-calendar-day',
+                  isToday ? 'today' : '',
+                  isStart || isEnd ? 'selected' : '',
+                  isInRange ? 'in-range' : ''
+                ].filter(Boolean).join(' ')}
+                aria-label={`${monthNames[collectionCalendarMonth]} ${day}, ${collectionCalendarYear}`}
+                onClick={() => handleCollectionDateClick(day)}
+              >
+                {day}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="collection-calendar-actions">
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => {
+              setCollectionDateValue(filterType, null);
+            }}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => setCollectionDatePickerOpen(null)}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCollectionScopePanel = () => {
+    const selectedWorkflowLabels = getSelectedCollectionWorkflowLabels();
+
+    return (
+      <section
+        className={`collection-scope-panel card ${collectionDatePickerOpen ? 'date-picker-active' : ''}`}
+        aria-label="Collection scope"
+      >
+        <div className="collection-scope-header">
+          <div>
+            <p className="eyebrow">{currentRepo || 'GitHub repository'}</p>
+            <h2>GitHub Actions Dashboard</h2>
+            <p>
+              Choose a date range and workflows before collecting data for{' '}
+              <strong>{currentRepo || 'this repository'}</strong>
+            </p>
+            {dataExists && (
+              <p className="collection-start-note">
+                {existingRunsCount} cached runs match this repository scope and can be reused.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="collection-scope-grid">
+          <div className="collection-date-fields" ref={collectionDatePickerRef}>
+            <div className="collection-date-field collection-date-picker-field">
+              <span>Start date</span>
+              <button
+                type="button"
+                className="collection-date-toggle"
+                aria-label="Collection start date"
+                aria-expanded={collectionDatePickerOpen === 'start'}
+                onClick={() => openCollectionDatePicker('start')}
+              >
+                <span>{getCollectionDateLabel('start')}</span>
+                <span className="dropdown-arrow">▼</span>
+              </button>
+              {collectionDatePickerOpen === 'start' && renderCollectionDatePicker('start')}
+            </div>
+
+            <div className="collection-date-field collection-date-picker-field">
+              <span>End date</span>
+              <button
+                type="button"
+                className="collection-date-toggle"
+                aria-label="Collection end date"
+                aria-expanded={collectionDatePickerOpen === 'end'}
+                onClick={() => openCollectionDatePicker('end')}
+              >
+                <span>{getCollectionDateLabel('end')}</span>
+                <span className="dropdown-arrow">▼</span>
+              </button>
+              {collectionDatePickerOpen === 'end' && renderCollectionDatePicker('end')}
+            </div>
+          </div>
+
+          <div className="collection-workflow-field" ref={collectionWorkflowPickerRef}>
+            <span>Workflows</span>
+            <div className="collection-workflow-picker">
+              <button
+                type="button"
+                className="collection-workflow-toggle"
+                aria-label={`Workflows ${getCollectionWorkflowSummary()}`}
+                aria-expanded={collectionWorkflowDropdownOpen}
+                onClick={() => {
+                  setCollectionDatePickerOpen(null);
+                  setCollectionWorkflowDropdownOpen(prev => !prev);
+                }}
+              >
+                <span>{getCollectionWorkflowSummary()}</span>
+                <span className="collection-workflow-chips" aria-hidden="true">
+                  {!collectionScopeWorkflowIds.includes('all') && selectedWorkflowLabels.slice(0, 2).map(label => (
+                    <span key={label}>{label}</span>
+                  ))}
+                  {!collectionScopeWorkflowIds.includes('all') && selectedWorkflowLabels.length > 2 && (
+                    <span>{`+${selectedWorkflowLabels.length - 2}`}</span>
+                  )}
+                </span>
+                <span className="dropdown-arrow">▼</span>
+              </button>
+
+              {collectionWorkflowDropdownOpen && (
+                <div className="collection-workflow-menu" role="group" aria-label="Workflow collection scope">
+                  <label className="collection-workflow-option all">
+                    <input
+                      type="checkbox"
+                      checked={collectionScopeWorkflowIds.includes('all')}
+                      onChange={(event) => toggleCollectionWorkflow('all', event.target.checked)}
+                    />
+                    <span>All workflows</span>
+                  </label>
+
+                  <div className="collection-workflow-options">
+                    {workflowOptions.map(workflow => (
+                      <label key={workflow.id} className="collection-workflow-option">
+                        <input
+                          type="checkbox"
+                          checked={!collectionScopeWorkflowIds.includes('all') && normalizeWorkflowIds(collectionScopeWorkflowIds).includes(Number(workflow.id))}
+                          onChange={(event) => toggleCollectionWorkflow(workflow.id, event.target.checked)}
+                        />
+                        <span>{workflow.name}</span>
+                        {workflow.path && <small>{workflow.path}</small>}
+                      </label>
+                    ))}
+                  </div>
+
+                  {workflowOptionsLoading && (
+                    <p className="collection-workflow-empty">Loading workflows...</p>
+                  )}
+                  {!workflowOptionsLoading && workflowOptions.length === 0 && (
+                    <p className="collection-workflow-empty">
+                      {workflowOptionsError || 'Workflow list unavailable; collection will include all workflows.'}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="collection-start-actions">
+          <button
+            className="primary-action primary-action-large"
+            onClick={() => loadDashboardData(false)}
+            type="button"
+            disabled={workflowOptionsLoading}
+          >
+            Start Data Collection
+          </button>
+        </div>
+      </section>
+    );
+  };
   // Note: All filter changes (workflow, branch, actor, date) are now handled
   // in the single useEffect above to avoid duplicate filtering
 
@@ -1620,30 +2081,7 @@ export default function Dashboard() {
   if (!collectionStarted && !loading && !data) {
     return (
       <div className={`dashboard ${dashboardTheme} container`}>
-        <section className="collection-start card">
-          <div>
-            <p className="eyebrow">{currentRepo || 'GitHub repository'}</p>
-            <h2>GitHub Actions Dashboard</h2>
-            <p>
-              Ready to collect workflow run data for <strong>{currentRepo || 'this repository'}</strong>
-            </p>
-            {dataExists && (
-              <p className="collection-start-note" style={{ color: '#4caf50', fontSize: '0.95em' }}>
-                ✓ Found {existingRunsCount} workflow runs cached locally (last updated: {lastUpdated ? new Date(lastUpdated).toLocaleDateString() : 'unknown'})
-              </p>
-            )}
-            <p className="collection-start-note">
-              {dataExists 
-                ? 'Click the button below to load existing data or collect new runs.'
-                : 'Collect all available workflow runs first, then use workflow, branch, actor, and date filters on the dashboard.'}
-            </p>
-          </div>
-          <div className="collection-start-actions">
-            <button className="primary-action primary-action-large" onClick={loadDashboardData} type="button">
-              {dataExists ? 'Load Data' : 'Start Data Collection'}
-            </button>
-          </div>
-        </section>
+        {renderCollectionScopePanel()}
       </div>
     );
   }
@@ -1705,19 +2143,7 @@ export default function Dashboard() {
     if (!collectionStarted) {
       return (
         <div className={`dashboard ${dashboardTheme} container`}>
-          <div className="collection-start card">
-            <h2>GitHub Actions Dashboard</h2>
-            <p>
-              Ready to collect workflow run data for <strong>{currentRepo || 'this repository'}</strong>
-            </p>
-            <button
-              className="primary-action primary-action-large"
-              onClick={() => loadDashboardData(false)}
-              type="button"
-            >
-              Start Data Collection
-            </button>
-          </div>
+          {renderCollectionScopePanel()}
         </div>
       );
     }
@@ -1759,16 +2185,16 @@ export default function Dashboard() {
   const handleFilterChange = (filterType, value) => {
     if (filterType === 'start' || filterType === 'end') {
       const currentDefaults = getCurrentDefaults();
-      const nowStr = currentDefaults.defaultEnd;
+      const nowStr = currentDefaults.today;
       let newStart = filterType === 'start' ? value : filters.start;
       let newEnd = filterType === 'end' ? value : filters.end;
 
-      if (newStart > nowStr) newStart = nowStr;
-      if (newEnd > nowStr) newEnd = nowStr;
+      if (newStart && newStart > nowStr) newStart = nowStr;
+      if (newEnd && newEnd > nowStr) newEnd = nowStr;
 
-      if (newStart > newEnd) {
+      if (newStart && newEnd && newStart > newEnd) {
         newEnd = newStart;
-      } else if (newEnd < newStart) {
+      } else if (newStart && newEnd && newEnd < newStart) {
         newStart = newEnd;
       }
 

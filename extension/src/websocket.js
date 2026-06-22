@@ -2,6 +2,16 @@
 // WebSocket Client
 // ============================================
 
+import { normalizeWorkflowIds } from './scopeFilters.mjs';
+
+function formatTodayForFilter() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Global Chrome storage events are shared across all extension contexts.
 // To avoid dashboards overwriting each other's state, we keep a cache of
 // runs per repository, and always use the repo passed into the public
@@ -724,6 +734,12 @@ export function convertRunsToDashboard(runs, repo, filters) {
     if (filters.workflow && !filters.workflow.includes('all')) {
       filteredRuns = filteredRuns.filter(run => filters.workflow.includes(run.workflow_name));
     }
+    // Filter by workflow IDs from the initial collection scope
+    const workflowIds = normalizeWorkflowIds(filters.workflowIds);
+    if (workflowIds.length > 0) {
+      const workflowIdSet = new Set(workflowIds);
+      filteredRuns = filteredRuns.filter(run => workflowIdSet.has(Number(run.workflow_id)));
+    }
     // Filter by branch
     if (filters.branch && !filters.branch.includes('all')) {
       filteredRuns = filteredRuns.filter(run => filters.branch.includes(run.branch));
@@ -733,15 +749,17 @@ export function convertRunsToDashboard(runs, repo, filters) {
       filteredRuns = filteredRuns.filter(run => filters.actor.includes(run.actor));
     }
     // Filter by date range (client-side)
-    if (filters.startDate && filters.endDate) {
-      const startDate = new Date(filters.startDate);
-      const endDate = new Date(filters.endDate);
+    const startFilter = filters.startDate || filters.start || null;
+    const endFilter = filters.endDate || filters.end || formatTodayForFilter();
+    if (startFilter || endFilter) {
+      const startDate = startFilter ? new Date(`${startFilter}T00:00:00`) : null;
+      const endDate = new Date(`${endFilter}T23:59:59.999`);
       endDate.setHours(23, 59, 59, 999); // Include entire end date
       
       filteredRuns = filteredRuns.filter(run => {
         if (!run.created_at) return false;
         const runDate = new Date(run.created_at);
-        return runDate >= startDate && runDate <= endDate;
+        return (!startDate || runDate >= startDate) && runDate <= endDate;
       });
     }
   }
@@ -860,6 +878,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
       filters: {
         start: filters.start,
         end: filters.end,
+        workflowIds: normalizeWorkflowIds(filters.workflowIds),
         fetchJobDetails: Boolean(filters.fetchJobDetails),
         forceRefresh: Boolean(filters.forceRefresh)
       }

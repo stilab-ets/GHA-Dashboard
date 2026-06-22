@@ -48,6 +48,7 @@ class AggregationFilters:
     author: str | None = None
     branch: str | None = None
     workflowName: str | None = None
+    workflowIds: list[int] | None = None
     fetchJobDetails: bool = False
     forceRefresh: bool = False
 
@@ -73,6 +74,19 @@ def _run_date_in_filter(run: dict, filters: AggregationFilters) -> bool:
         return True
 
     return filters.startDate <= run_date <= filters.endDate
+
+
+def _run_workflow_in_filter(run: dict, filters: AggregationFilters) -> bool:
+    workflow_ids = filters.workflowIds or []
+    if not workflow_ids:
+        return True
+
+    try:
+        run_workflow_id = int(run.get("workflow_id"))
+    except (TypeError, ValueError):
+        return False
+
+    return run_workflow_id in set(workflow_ids)
 
 
 def _send_keepalive_periodic(ws: Any, stop_flag: list):
@@ -150,6 +164,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         # Load GHAminer config
         config = load_config()
         config["fetch_job_details"] = bool(getattr(filters, "fetchJobDetails", False))
+        config["workflow_ids"] = list(getattr(filters, "workflowIds", None) or [])
         if filters.startDate != date(2000, 1, 1):
             config["start_date"] = filters.startDate.isoformat()
         if filters.endDate != date(2100, 1, 1):
@@ -170,7 +185,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             if existing_runs_dict:
                 existing_runs_list = [
                     run for run in existing_runs_dict.values()
-                    if _run_date_in_filter(run, filters)
+                    if _run_date_in_filter(run, filters) and _run_workflow_in_filter(run, filters)
                 ]
                 existing_runs_count = len(existing_runs_list)
                 existing_runs_by_id = {

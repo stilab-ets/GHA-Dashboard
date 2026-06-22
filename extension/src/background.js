@@ -14,6 +14,38 @@ function isSocketActive(socket) {
   return socket && socket.readyState !== SOCKET_CLOSING && socket.readyState !== SOCKET_CLOSED;
 }
 
+function normalizeWorkflowIds(workflowIds) {
+  if (!Array.isArray(workflowIds)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      workflowIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    ),
+  );
+}
+
+function sameWorkflowScope(left = [], right = []) {
+  const leftIds = normalizeWorkflowIds(left);
+  const rightIds = normalizeWorkflowIds(right);
+  return (
+    leftIds.length === rightIds.length &&
+    leftIds.every((value, index) => value === rightIds[index])
+  );
+}
+
+function cacheMatchesFilters(cached, filters = {}) {
+  if (!cached) return false;
+  return (
+    (cached.startDate || null) === (filters.startDate || filters.start || null) &&
+    (cached.endDate || null) === (filters.endDate || filters.end || null) &&
+    sameWorkflowScope(cached.workflowIds, filters.workflowIds)
+  );
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "UPDATE_REPO") {
     const tabId = sender?.tab?.id;
@@ -69,7 +101,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const cached = wsCache.get(repo);
     // Check cache - if we have complete data for this repo, use it (regardless of date filters)
     // Date filtering is done client-side, so we don't need to check dates here
-    if (cached && cached.isComplete && !forceRefresh) {
+    if (cached && cached.isComplete && cacheMatchesFilters(cached, filters) && !forceRefresh) {
       sendResponse({
         success: true,
         cached: true,
@@ -307,6 +339,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         startDate:
           extractionFilters.startDate || extractionFilters.start || null,
         endDate: extractionFilters.endDate || extractionFilters.end || null,
+        workflowIds: normalizeWorkflowIds(extractionFilters.workflowIds),
         phase1_elapsed: null, // Store Phase 1 elapsed time in memory to avoid race conditions
       });
 
