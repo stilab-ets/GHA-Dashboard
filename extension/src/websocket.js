@@ -23,6 +23,22 @@ const _pendingResolves = new Map();
 const _pendingRejects = new Map();
 const _timeoutIds = new Map();
 
+function clearPendingCollection(repo) {
+  if (_timeoutIds.has(repo)) {
+    clearTimeout(_timeoutIds.get(repo));
+    _timeoutIds.delete(repo);
+  }
+  _pendingResolves.delete(repo);
+  _pendingRejects.delete(repo);
+  _progressCallbacks.delete(repo);
+}
+
+function createCancellationError() {
+  const error = new Error('Collection cancelled');
+  error.name = 'CollectionCancelledError';
+  return error;
+}
+
 if (typeof chrome !== 'undefined' && chrome.storage) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
@@ -96,8 +112,15 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
         if (rejector) {
           rejector(new Error(status.error));
         }
-        _pendingRejects.delete(repo);
-        _pendingResolves.delete(repo);
+        clearPendingCollection(repo);
+      }
+
+      if (status.isCancelled && _pendingRejects.has(repo)) {
+        const rejector = _pendingRejects.get(repo);
+        if (rejector) {
+          rejector(createCancellationError());
+        }
+        clearPendingCollection(repo);
       }
     }
   });
@@ -863,6 +886,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
       if (chrome.runtime.lastError) {
         console.error('[WebSocket] Error:', chrome.runtime.lastError);
         reject(new Error(chrome.runtime.lastError.message));
+        clearPendingCollection(repo);
         return;
       }
 
@@ -870,6 +894,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
       if (response && response.busy) {
         const message = response.error || `Another repository (${response.currentRepo}) is currently streaming. Please wait until it finishes before starting a new extraction.`;
         reject(new Error(message));
+        clearPendingCollection(repo);
         return;
       }
 
@@ -880,8 +905,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
           onProgressCallback(dashboardData, true);
         }
         resolve(dashboardData);
-        _pendingResolves.delete(repo);
-        _pendingRejects.delete(repo);
+        clearPendingCollection(repo);
       } else {
         // Extended timeout for GHAminer collection (30 minutes)
         // GHAminer can take a long time for large repositories
@@ -901,8 +925,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
                   const dashboardData = convertRunsToDashboard([], repo, filters);
                   resolve(dashboardData);
                 }
-                _pendingResolves.delete(repo);
-                _pendingRejects.delete(repo);
+                clearPendingCollection(repo);
               } else {
                 // Still collecting, don't timeout yet
                 console.log('[WebSocket] Collection still in progress, not timing out yet...');
@@ -912,10 +935,37 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
           }
         }, 1800000); // 30 minutes
         
-        // Store timeout ID so we can clear it on completion
-        if (!_timeoutIds) _timeoutIds = new Map();
         _timeoutIds.set(repo, timeoutId);
       }
+    });
+  });
+}
+
+export function cancelWebSocketCollection(repo = null) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      action: 'cancelWebSocketExtraction',
+      repo: repo
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      if (repo) {
+        const rejector = _pendingRejects.get(repo);
+        if (rejector) {
+          rejector(createCancellationError());
+        }
+        clearPendingCollection(repo);
+      }
+
+      if (response && response.success === false) {
+        reject(new Error(response.error || 'Unable to cancel collection'));
+        return;
+      }
+
+      resolve(response || { success: true });
     });
   });
 }
