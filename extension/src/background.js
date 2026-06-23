@@ -13,6 +13,13 @@ function isSocketActive(socket) {
   return socket && socket.readyState !== SOCKET_CLOSING && socket.readyState !== SOCKET_CLOSED;
 }
 
+function getRunId(run) {
+  if (!run || run.id === undefined || run.id === null || run.id === "") {
+    return null;
+  }
+  return String(run.id);
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "UPDATE_REPO") {
     const tabId = sender?.tab?.id;
@@ -295,18 +302,21 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
               }
 
               if (message.type === "runs") {
-                // GHAminer sends runs with jobs already attached, so handle both cases:
-                // 1. New runs to add
-                // 2. Existing runs to update (if they come again)
                 const newRuns = [];
                 const updatedRunIds = new Set();
 
                 message.data.forEach((run) => {
-                  const index = cache.runs.findIndex((r) => r.id === run.id);
+                  const runId = getRunId(run);
+                  if (!runId) {
+                    console.warn("[Background] Skipping run without id", run);
+                    return;
+                  }
+
+                  const index = cache.runs.findIndex((r) => getRunId(r) === runId);
                   if (index >= 0) {
                     // Update existing run
                     cache.runs[index] = run;
-                    updatedRunIds.add(run.id);
+                    updatedRunIds.add(runId);
                   } else {
                     // Add new run
                     newRuns.push(run);

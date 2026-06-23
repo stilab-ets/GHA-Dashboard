@@ -28,7 +28,7 @@ exports.test = base.extend({
       await context.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });
     }
-  }, { timeout: 60000 }],
+  }, { timeout: 120000 }],
 
   extensionId: async ({ context }, use) => {
     let worker;

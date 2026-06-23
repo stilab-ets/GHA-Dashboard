@@ -29,6 +29,12 @@ class DataManager:
         self._cached_run_ids: Optional[Set[str]] = None
         self._cached_runs_with_jobs: Optional[Set[str]] = None
         self._cached_workflow_date_ranges: Optional[Dict[str, Dict]] = None
+
+    def _run_id(self, run_id) -> Optional[str]:
+        """Normalize a workflow run ID for cache comparisons."""
+        if run_id is None or run_id == '':
+            return None
+        return str(run_id)
     
     def _load_cache(self):
         """Load and cache data from persistence."""
@@ -72,7 +78,8 @@ class DataManager:
             True if run should be skipped
         """
         self._load_cache()
-        return str(run_id) in self._cached_run_ids
+        normalized_run_id = self._run_id(run_id)
+        return bool(normalized_run_id and normalized_run_id in self._cached_run_ids)
     
     def should_skip_jobs_for_run(self, run_id: str) -> bool:
         """
@@ -85,7 +92,8 @@ class DataManager:
             True if jobs should be skipped
         """
         self._load_cache()
-        return str(run_id) in self._cached_runs_with_jobs
+        normalized_run_id = self._run_id(run_id)
+        return bool(normalized_run_id and normalized_run_id in self._cached_runs_with_jobs)
     
     def should_skip_page(self, workflow_id: str, page_runs: List[Dict]) -> Tuple[bool, int]:
         """
@@ -184,7 +192,7 @@ class DataManager:
         
         existing_count = 0
         for run in page_runs:
-            run_id = str(run.get('id', ''))
+            run_id = self._run_id(run.get('id'))
             if run_id and run_id in self._cached_run_ids:
                 existing_count += 1
         
@@ -204,7 +212,7 @@ class DataManager:
         new_runs = []
         
         for run in runs:
-            run_id = str(run.get('id'))
+            run_id = self._run_id(run.get('id'))
             if run_id and run_id not in self._cached_run_ids:
                 new_runs.append(run)
         
@@ -224,7 +232,7 @@ class DataManager:
         runs_needing_jobs = []
         
         for run in runs:
-            run_id = str(run.get('id'))
+            run_id = self._run_id(run.get('id'))
             if run_id and run_id not in self._cached_runs_with_jobs:
                 runs_needing_jobs.append(run)
         
@@ -233,10 +241,12 @@ class DataManager:
     def get_existing_run(self, run_id: str) -> Optional[Dict]:
         """Get an existing run from cache, including jobs if available."""
         self._load_cache()
-        run = self._cached_runs.get(str(run_id))
+        run_id_str = self._run_id(run_id)
+        if not run_id_str:
+            return None
+        run = self._cached_runs.get(run_id_str)
         if run:
             # Load jobs if available
-            run_id_str = str(run_id)
             if run_id_str in self._cached_runs_with_jobs:
                 jobs = self.persistence.get_jobs_for_run(self.repo, run_id_str)
                 if jobs is not None:
@@ -257,13 +267,15 @@ class DataManager:
             return
         
         if run:
-            run_id = str(run.get('id'))
+            run_id = self._run_id(run.get('id'))
             if run_id:
                 self._cached_runs[run_id] = run
                 self._cached_run_ids.add(run_id)
         
         if run_id and jobs is not None:
-            run_id_str = str(run_id)
+            run_id_str = self._run_id(run_id)
+            if not run_id_str:
+                return
             if self._cached_runs_with_jobs is None:
                 self._cached_runs_with_jobs = set()
             self._cached_runs_with_jobs.add(run_id_str)

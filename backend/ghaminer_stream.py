@@ -70,6 +70,57 @@ def load_config(config_file: str = None) -> dict:
         }
 
 
+def get_run_identity(run: Dict[str, Any]) -> Optional[str]:
+    """Return the stable workflow run ID used for cache and collection de-duplication."""
+    run_id = run.get('id')
+    if run_id is None:
+        run_id = run.get('id_build')
+    if run_id is None or run_id == '':
+        return None
+    return str(run_id)
+
+
+def _merge_runs(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge duplicate run entries while preserving already collected job details."""
+    merged = {**existing, **incoming}
+    if existing.get('jobs') and not incoming.get('jobs'):
+        merged['jobs'] = existing['jobs']
+    if existing.get('job_details') and not incoming.get('job_details'):
+        merged['job_details'] = existing['job_details']
+    return merged
+
+
+def upsert_unique_run(runs: List[Dict[str, Any]], run: Dict[str, Any], seen_ids: set[str]) -> bool:
+    """
+    Add a run to a list only once.
+
+    Returns True when a new ID was inserted, False when the run was skipped or merged.
+    """
+    run_id = get_run_identity(run)
+    if not run_id:
+        return False
+
+    if run_id in seen_ids:
+        for index, existing in enumerate(runs):
+            if get_run_identity(existing) == run_id:
+                runs[index] = _merge_runs(existing, run)
+                break
+        return False
+
+    seen_ids.add(run_id)
+    runs.append(run)
+    return True
+
+
+def dedupe_runs_by_id(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return runs de-duplicated by workflow run ID, preserving insertion order."""
+    deduped: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for run in runs:
+        upsert_unique_run(deduped, run, seen_ids)
+    return deduped
+
+
 def convert_ghaminer_run_to_dashboard(run_data: dict, repo: str) -> dict:
     """
     Convert GHAminer's run data format to dashboard format
@@ -284,13 +335,14 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
     total_runs = 0
     new_runs_collected = 0
     all_runs = []  # Store all runs for Phase 2 (existing + new)
+    all_run_ids: set[str] = set()
     runs_to_save = []  # Batch runs for saving
     
     # Phase 2 needs every existing run; skip this in fast workflow-runs mode.
     if data_manager and persistence and config.get("fetch_job_details", False):
         all_existing_runs_dict = persistence.get_all_runs(repo)
         for run_id, run_data in all_existing_runs_dict.items():
-            all_runs.append(run_data)
+            upsert_unique_run(all_runs, run_data, all_run_ids)
         total_runs = len(all_runs)
         print(f"[GHAminer Stream] Loaded {len(all_runs)} existing runs into memory for Phase 2")
     # Use the total_count from API if available, otherwise fall back to estimation
@@ -395,7 +447,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                         run_id = str(run['id'])
                         existing_run = data_manager.get_existing_run(run_id)
                         if existing_run:
-                            all_runs.append(existing_run)
+                            upsert_unique_run(all_runs, existing_run, all_run_ids)
                     skip_next_pages = skip_count
                     last_skipped_page = page
                     # Skip to next page
@@ -423,7 +475,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                         run_id = str(run['id'])
                         existing_run = data_manager.get_existing_run(run_id)
                         if existing_run:
-                            all_runs.append(existing_run)
+                            upsert_unique_run(all_runs, existing_run, all_run_ids)
                 
                 # Backtracking logic: if we skipped pages and this page has NO existing runs,
                 # we might have skipped too far - go back 1 page
@@ -460,11 +512,12 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     # Try to get existing run from cache
                     existing_run = data_manager.get_existing_run(str(run_id))
                     if existing_run:
-                        all_runs.append(existing_run)
+                        added_existing_run = upsert_unique_run(all_runs, existing_run, all_run_ids)
                         existing_runs_count += 1
                         total_runs = len(all_runs)
                         display_total = actual_total if actual_total else total_runs
-                        yield (existing_run, total_runs, display_total, all_runs, new_runs_collected, existing_runs_count)
+                        if added_existing_run:
+                            yield (existing_run, total_runs, display_total, all_runs, new_runs_collected, existing_runs_count)
                     continue
                 
                 # Build basic run info (NO JOB DETAILS)
@@ -501,7 +554,8 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                 
                 # Convert to dashboard format (without jobs)
                 dashboard_run = convert_ghaminer_run_to_dashboard(run_data, repo)
-                all_runs.append(dashboard_run)
+                if not upsert_unique_run(all_runs, dashboard_run, all_run_ids):
+                    continue
                 total_runs = len(all_runs)  # Update total to include all runs
                 new_runs_collected += 1
                 
@@ -562,6 +616,9 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
         except Exception as e:
             print(f"[GHAminer Stream] Warning: Failed to save final runs batch: {e}")
     
+    all_runs = dedupe_runs_by_id(all_runs)
+    total_runs = len(all_runs)
+
     phase1_duration = time.time() - phase1_start_time
     print(f"[GHAminer Stream] Phase 1 complete: {new_runs_collected} new runs collected, {total_runs} total runs (including {existing_runs_count} existing)")
     
@@ -586,6 +643,7 @@ def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, An
         return
     
     phase2_start_time = time.time()
+    all_runs = dedupe_runs_by_id(all_runs)
     
     # Initialize data persistence and manager
     persistence = None
