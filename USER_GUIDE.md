@@ -1,176 +1,136 @@
-# User Guide – GHA Dashboard
+# User Guide - GHA Dashboard
 
-##  Introduction
-GHA Dashboard is a tool designed to analyze GitHub Actions workflow runs for any GitHub repository.  
+## Introduction
+
+GHA Dashboard analyzes GitHub Actions workflow runs for a GitHub repository.
+
 It includes:
-- a Chrome Extension displaying an interactive dashboard,
-- a Flask backend API,
-- a PostgreSQL database,
-- an automatic GitHub Actions extraction system.
+- a Chrome extension that displays the dashboard inside GitHub
+- a local Flask backend that serves API and WebSocket endpoints
+- local JSON persistence for cached workflow data
 
-This guide explains how to install, run, and use the dashboard.
+The intended flow is: start the Flask server locally, load the Chrome extension, then let the extension send the GitHub token to the backend when collecting data.
 
----
-##  1. Prerequisites
+## 1. Prerequisites
 
-###  Required Software
-- Docker & Docker Compose
-- Google Chrome (for the extension)
-- (Optional) GitHub Personal Access Token (PAT) with `repo` or `public_repo` permission
+- Python
+- Google Chrome
+- Optional: a GitHub OAuth app, or a GitHub Personal Access Token with `repo` or `public_repo` permission
 
-###  Configure your Token
-- Open the Chrome extension popup.
-- #### 2 Ways to Authenticate
-  - Option #1 (recommended): Login using GitHub OAuth to generate the token. OAuth requires `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `backend/.env`, then a backend restart.
-  - Option #2: Paste your GitHub Personal Access Token (PAT) in the “Token” field.
-- Save your changes.
-Once configured, the extension automatically uses your token to fetch GitHub Actions data.
+## 2. Backend Setup
 
----
+Clone the project:
 
-##  2. Installation
-
-### Step 1 — Clone the project
 ```bash
 git clone https://github.com/stilab-ets/GHA-Dashboard
-cd GHA-Dashboard
+cd GHA-Dashboard/backend
 ```
-### Step 2 — Start Docker
-```bash
-docker compose up --build
-```
-Services started:
-- Backend Flask → http://localhost:3000
-- PostgreSQL → port 5432
 
-### Step 3 - Test the backend
+Install backend dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Start the Flask backend:
+
+```bash
+python app.py
+```
+
+The backend runs on `http://localhost:3000` by default.
+
+Check that it is running:
+
 ```bash
 curl http://localhost:3000/health
 ```
 
-Expected output:
-{
-  "status": "ok",
-  "service": "GHA Dashboard Backend",
-  "csv_exists": true
-}
+## 3. Authentication
 
-##  3. Installing the Chrome Extension
+The extension handles token communication with the backend.
 
-### Step 1 — Open Chrome Extensions
+Two authentication modes are supported:
+- GitHub OAuth: configure `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `backend/.env`, then restart the backend.
+- Personal Access Token: paste your token in the extension popup and save it.
 
-Go to:
+The token is sent to the local backend only when the extension starts data collection.
+
+## 4. Installing the Chrome Extension
+
+Build or prepare the extension, then open Chrome at:
+
+```text
 chrome://extensions
-
-Enable Developer Mode (top right).
-
-### Step 2 — Load the extension
-Click Load unpacked
-Select the folder: /extension
-The “GHA Dashboard” icon will appear in Chrome.
-
-The folder to select is /extension/build
-
-##  4. Using the Dashboard
-
-### Step 1 — Open Chrome Extensions
-Example:
-https://github.com/facebook/react/actions
-https://github.com/rust-lang/crates.io/actions
-
-### Step 2 — Automatic activation
-The extension detects the repository and injects a button:
-
-“Open GHA Dashboard”
-
-Clicking it opens an analytics dashboard directly inside GitHub.
-
-##  5. Dashboard Features
-Available Filters :
-- Workflows
-- Branches
-- Actors
-- Date range
-
-Filters update dynamically based on extracted data.
-Generated Graphs & Metrics : 
-- Total workflow runs
-- Success vs Failure rate
-- Average & median build duration
-- Runs per day
-- Top workflows
-- Branch comparison
-- Failure rate timeline
-- Automatic spike & anomaly detection
-
-##  6. GitHub Data Extraction
-The backend can extract workflow runs using:
-
-Mode 1: GitHub REST API 
-Fast + reliable + supports pagination.
-
-Mode 2: GHAMiner
-Legacy mode using CSV generation.
-
-Manual extraction
-```bash
-curl "http://localhost:3000/api/extraction?repo=facebook/react"
 ```
 
-The API returns:
-- workflow runs
-- cleaned & normalized fields
-- workflow names
+Enable Developer Mode, click **Load unpacked**, and select:
+
+```text
+GHA-Dashboard/extension/build
+```
+
+## 5. Using the Dashboard
+
+Open a GitHub repository, for example:
+
+```text
+https://github.com/facebook/react/actions
+```
+
+The extension adds the GHA Dashboard entry point to GitHub. Open the dashboard and start data collection. The extension creates an extraction session with the Flask backend, sends the selected repository and filters, and streams workflow run data back into the dashboard.
+
+## 6. Data Storage
+
+Collected workflow data is cached locally as JSON files under:
+
+```text
+backend/data/storage/
+```
+
+Each repository gets its own local JSON file. You can delete these files to clear cached data.
+
+## 7. Dashboard Features
+
+Available filters:
+- workflows
 - branches
 - actors
-- timestamps
+- date range
 
-##  7. Database Synchronization
-To insert workflow runs into PostgreSQL:
+Available metrics and views include:
+- total workflow runs
+- success vs failure rate
+- average and median build duration
+- runs per day
+- workflow comparison
+- branch comparison
+- failure rate timeline
+- duration spikes and anomaly indicators
+
+## 8. Troubleshooting
+
+If the dashboard cannot load data:
+- confirm the backend is running at `http://localhost:3000/health`
+- confirm the GitHub token is configured in the extension popup or OAuth is configured in `backend/.env`
+- check the terminal running `python app.py` for backend errors
+- clear stale cached data in `backend/data/storage/` if needed
+
+If Chrome shows `ERR_CONNECTION_REFUSED`, restart the backend:
+
 ```bash
-curl -X POST "http://localhost:3000/api/sync?repo=facebook/react"
-```
-This does the following:
-
-- Extracts the latest workflow runs
-
-- Saves them in builds_features.csv
-
-- Inserts into DB (Repository → Workflow → WorkflowRun)
-
-- Prevents duplicates using id_build
-
-##  8. Troubleshooting
-
-"No extraction data available" : 
-Check:
-
-- Backend running → http://localhost:3000/health
-
-- Valid GitHub token
-
-- Docker is active
-
-CORS Error
-Ensure this is in app.py:
-from flask_cors import CORS
-CORS(app)
-
-ERR_CONNECTION_REFUSED
-Backend is not running.
-Restart:
-```bash
-docker compose up --build
+cd backend
+python app.py
 ```
 
-##  9. Contact & Support
+## 9. Contact & Support
 
 - @jaykay9999
------
-- Authors : Cassandre Ashley Javel, Alexander Pan, Maksym Pravdin, Vincent Renaud, Danny Alexander Villeda
-- Project : PFE009 Development of a dashboard for monitoring workflows with GitHub Actions – Final Year Project (ÉTS)
-- Year : 2026
------
-- Authors : Anthony Monton, Vyshmi Nagendran, Fatma Aljane, Gabriel Aubé, Valentin Palashev
-- Project : PFE017 Design and Development of an Intelligent Dashboard for Monitoring GitHub Actions – Final Year Project (ÉTS)
-- Year : 2025
+
+Authors: Cassandre Ashley Javel, Alexander Pan, Maksym Pravdin, Vincent Renaud, Danny Alexander Villeda
+Project: PFE009 Development of a dashboard for monitoring workflows with GitHub Actions - Final Year Project (ETS)
+Year: 2026
+
+Authors: Anthony Monton, Vyshmi Nagendran, Fatma Aljane, Gabriel Aube, Valentin Palashev
+Project: PFE017 Design and Development of an Intelligent Dashboard for Monitoring GitHub Actions - Final Year Project (ETS)
+Year: 2025

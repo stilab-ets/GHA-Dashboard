@@ -7,7 +7,7 @@ GHA-Dashboard is a comprehensive dashboard for analyzing GitHub Actions workflow
 - **Backend**: A Python Flask API that extracts, analyzes, and serves GitHub Actions data from repositories
 - **Frontend**: A Chrome browser extension built with React that provides a user-friendly interface to visualize the data
 
-The system uses PostgreSQL for data persistence and supports real-time data extraction via WebSocket connections.
+The system uses local JSON storage for data persistence and supports real-time data extraction via WebSocket connections.
 
 📺 **Installation Guide Video**: [Watch on YouTube](https://youtu.be/jxfAHsRjxsQ)
 
@@ -109,22 +109,20 @@ https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKI
 - `backend/`: Flask API and data processing
 - `extension/`: React Chrome extension
 - `doc/`: Documentation and architecture diagrams
-- `docker-compose.yml`: Service orchestration
 
 ### Key Technologies
 
-- **Backend**: Python, Flask, SQLAlchemy, PostgreSQL, WebSocket
+- **Backend**: Python, Flask, WebSocket, local JSON persistence
 - **Frontend**: React, Vite, Chrome Extension APIs
 - **Data Processing**: Pandas, GitHub API integration
-- **Containerization**: Docker, Docker Compose
 
 ## Troubleshooting
 
 ### Backend Issues
 
-- Check logs: `docker-compose logs backend`
-- Verify ports: Ensure 3000, 5432 are available
-- Database connection: Check PostgreSQL health
+- Check backend logs in the terminal running `python app.py`
+- Verify ports: Ensure 3000 is available
+- Data storage: Check `backend/data/storage/` if cached repository data looks stale
 
 ### Extension Issues
 
@@ -133,7 +131,7 @@ https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKI
 
 ### Common Problems
 
-- **Port conflicts**: Stop other services using ports 3000, 5432, 5050
+- **Port conflicts**: Stop other services using port 3000
 - **GitHub rate limits**: Provide a valid GitHub token
 - **Extension not loading**: Ensure manifest.json is valid and build/ is complete
 

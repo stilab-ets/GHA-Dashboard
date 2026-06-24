@@ -2,15 +2,15 @@
 
 ## Overview
 
-Streaming mode allows GHAminer to collect workflow runs page by page and stream them directly to the GHA Dashboard via WebSocket, without requiring Docker or PostgreSQL. The local CSV file is used as the database.
+Streaming mode allows GHAminer to collect workflow runs page by page and stream them directly to the GHA Dashboard via WebSocket, without requiring Docker or PostgreSQL. The backend stores cached data as local JSON files under `backend/data/storage/`.
 
 ## How It Works
 
 1. **Collect Workflow Runs**: Fetches workflow runs page by page (100 runs per API request) from GitHub API
 2. **Stream to Dashboard**: Each page of runs is immediately streamed to the connected WebSocket client
-3. **Save Initial Data**: All collected runs are saved to CSV (initially without job details)
+3. **Save Initial Data**: All collected runs are saved to local JSON storage (initially without job details)
 4. **Collect Job Details**: After all runs are collected, loops back to fetch job details for each run
-5. **Update CSV**: Updates the CSV file with job details and streams progress updates
+5. **Update Storage**: Updates local JSON storage with job details and streams progress updates
 
 ## Configuration
 
@@ -39,7 +39,7 @@ The endpoint will:
 - Start collecting workflow runs page by page
 - Stream each page as it's collected
 - Collect job details after all runs are done
-- Update the CSV file with complete data
+- Update local JSON storage with complete data
 
 ## WebSocket Message Types
 
@@ -84,15 +84,15 @@ Progress while collecting job details:
 }
 ```
 
-### `csv_updated`
-Notification when CSV is updated:
+### `complete`
+Notification when collection is complete:
 ```json
 {
-  "type": "csv_updated",
-  "data": {
-    "message": "CSV file updated with 200 runs",
-    "file_path": "builds_features.csv"
-  }
+  "type": "complete",
+  "phase": "workflow_runs",
+  "totalRuns": 200,
+  "newRuns": 50,
+  "existingRuns": 150
 }
 ```
 
@@ -107,26 +107,11 @@ Error messages:
 }
 ```
 
-## CSV Format
+## Local Storage
 
-The CSV file (`builds_features.csv`) contains the following columns:
+Cached data is stored in JSON files under `backend/data/storage/`. Each repository gets its own file, with `/` replaced by `_` in the filename.
 
-- `repo`: Repository name (owner/repo)
-- `id_build`: Workflow run ID
-- `workflow_id`: Workflow ID
-- `workflow_name`: Workflow name
-- `status`: Run status (queued, in_progress, completed)
-- `conclusion`: Run conclusion (success, failure, cancelled, etc.)
-- `created_at`: Run creation timestamp
-- `updated_at`: Run update timestamp
-- `branch`: Branch name
-- `commit_sha`: Commit SHA
-- `event`: Event that triggered the workflow
-- `issuer_name`: User who triggered the workflow
-- `run_number`: Run number
-- `build_duration`: Duration in seconds
-- `total_jobs`: Number of jobs (filled after job details collection)
-- `job_details`: JSON string with job details (filled after job details collection)
+The JSON payload stores workflow runs, jobs grouped by run, workflow date ranges, and a `last_updated` timestamp.
 
 ## Running Without Docker
 
@@ -143,15 +128,15 @@ cd backend
 python app.py
 ```
 
-3. Connect to the streaming endpoint via WebSocket or use the regular API endpoints that read from CSV.
+3. Connect to the streaming endpoint via WebSocket or use the regular API endpoints that read from local JSON storage.
 
 ## Benefits
 
-- **No Docker required**: Works with just Python and the CSV file
+- **No Docker required**: Works with just Python and local JSON files
 - **Real-time updates**: Data is streamed as it's collected
 - **Efficient**: Collects runs first, then job details (avoids blocking)
 - **Progress tracking**: WebSocket provides real-time progress updates
-- **CSV-based**: Simple file-based storage, easy to inspect and share
+- **JSON-based**: Simple file-based storage, easy to inspect and share
 
 
 

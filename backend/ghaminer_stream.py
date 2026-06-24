@@ -1,6 +1,6 @@
 """
 GHAminer Streaming Wrapper
-Converts GHAminer's batch CSV collection into real-time WebSocket streaming
+Streams GitHub Actions collection results to the dashboard and caches them locally.
 """
 import sys
 import os
@@ -19,7 +19,6 @@ backend_path = os.path.dirname(__file__)
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
-import requests
 import yaml
 
 # Try to import performance logger
@@ -41,8 +40,7 @@ except ImportError as e:
 # Import GHAminer modules
 try:
     from build_run_analyzer import get_jobs_for_run
-    from repo_info_collector import get_workflow_ids, get_repository_languages
-    from request_github import get_request
+    from repo_info_collector import get_workflow_ids
 except ImportError as e:
     print(f"[GHAminer Stream] Error importing GHAminer modules: {e}")
     print(f"[GHAminer Stream] GHAminer src path: {ghaminer_src_path}")
