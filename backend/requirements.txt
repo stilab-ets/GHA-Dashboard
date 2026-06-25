@@ -1,5 +1,4 @@
 Flask
-Flask-SQLAlchemy
 flask-cors
 requests
 pandas

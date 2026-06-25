@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last Updated**: [Date]
+**Last Updated**: 2026-06-24
 
 ## Overview
 
@@ -20,7 +20,7 @@ GHA-Dashboard is committed to protecting your privacy. This privacy policy expla
 
 ✅ **All data is stored locally on your machine** - Any data you collect using GHA-Dashboard is stored entirely on your local computer within your copy of the GHA-Dashboard repository.
 
-✅ **Data is stored in CSV files** - Collected GitHub Actions data is saved as CSV files in your local GHA-Dashboard directory.
+✅ **Data is stored in local JSON files** - Collected GitHub Actions data is saved as JSON files in your local GHA-Dashboard directory.
 
 ✅ **You have full control** - All data belongs to you and remains on your machine. You can delete, modify, or manage this data at any time.
 
@@ -28,8 +28,8 @@ GHA-Dashboard is committed to protecting your privacy. This privacy policy expla
 
 When you use GHA-Dashboard to collect GitHub Actions data:
 
-- All collected data is saved in CSV format
-- Files are stored locally within your `GHA-Dashboard` repository directory
+- All collected data is saved in JSON format
+- Files are stored locally under `backend/data/storage/` within your `GHA-Dashboard` repository directory
 - No data leaves your machine unless you explicitly choose to share or transfer it
 
 ## GitHub Token
@@ -53,7 +53,7 @@ The GHA-Dashboard Chrome extension:
 ## Your Rights
 
 - **Access**: All your data is accessible directly from your local files
-- **Deletion**: You can delete any CSV files or data at any time
+- **Deletion**: You can delete any local JSON files or data at any time
 - **Control**: You have complete control over what data is collected and stored
 
 ## Changes to This Policy
@@ -66,5 +66,5 @@ If you have any questions about this privacy policy or how we handle data, pleas
 
 ---
 
-**Summary**: GHA-Dashboard does not store, track, or collect any data on external servers. All data collection is local to your machine and stored in CSV files within your repository copy. You maintain full control over your data at all times.
+**Summary**: GHA-Dashboard does not store, track, or collect any data on external servers. All data collection is local to your machine and stored in JSON files within your repository copy. You maintain full control over your data at all times.
 
