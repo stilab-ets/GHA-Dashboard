@@ -3,6 +3,24 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function removeDirWithRetry(dir, attempts = 8) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (attempt === attempts) {
+        throw err;
+      }
+      await wait(250 * attempt);
+    }
+  }
+}
+
 exports.test = base.extend({
   context: [async ({}, use) => {
     const pathToExtension = path.resolve(__dirname, '..', 'build');
@@ -25,10 +43,10 @@ exports.test = base.extend({
           page.close({ runBeforeUnload: false }).catch(() => {})
         )
       );
-      await context.close();
-      fs.rmSync(userDataDir, { recursive: true, force: true });
+      await context.close().catch(() => {});
+      await removeDirWithRetry(userDataDir);
     }
-  }, { timeout: 60000 }],
+  }, { timeout: 120000 }],
 
   extensionId: async ({ context }, use) => {
     let worker;

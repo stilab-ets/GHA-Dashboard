@@ -22,6 +22,7 @@ const _progressCallbacks = new Map();
 const _pendingResolves = new Map();
 const _pendingRejects = new Map();
 const _timeoutIds = new Map();
+const _activeFiltersByRepo = new Map();
 
 function clearPendingCollection(repo) {
   if (_timeoutIds.has(repo)) {
@@ -31,6 +32,7 @@ function clearPendingCollection(repo) {
   _pendingResolves.delete(repo);
   _pendingRejects.delete(repo);
   _progressCallbacks.delete(repo);
+  _activeFiltersByRepo.delete(repo);
 }
 
 function createCancellationError() {
@@ -61,7 +63,8 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
         // registered its own callback via fetchDashboardDataViaWebSocket.
         if (_progressCallbacks.has(repo)) {
           const cb = _progressCallbacks.get(repo);
-          const dashboardData = convertRunsToDashboard(newRuns, repo, null);
+          const activeFilters = _activeFiltersByRepo.get(repo) || null;
+          const dashboardData = convertRunsToDashboard(newRuns, repo, activeFilters);
           cb(dashboardData, Boolean(status.isComplete));
         }
       });
@@ -85,7 +88,8 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
           const finalRuns = result.wsRuns || [];
           _runsByRepo.set(repo, finalRuns);
           
-          const dashboardData = convertRunsToDashboard(finalRuns, repo, null);
+          const activeFilters = _activeFiltersByRepo.get(repo) || null;
+          const dashboardData = convertRunsToDashboard(finalRuns, repo, activeFilters);
           
           const cb = _progressCallbacks.get(repo);
           if (cb) {
@@ -871,6 +875,10 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
     }
     _pendingResolves.set(repo, resolve);
     _pendingRejects.set(repo, reject);
+    _activeFiltersByRepo.set(repo, {
+      ...filters,
+      workflowIds: normalizeWorkflowIds(filters.workflowIds)
+    });
     _runsByRepo.set(repo, []);
     chrome.runtime.sendMessage({
       action: 'startWebSocketExtraction',

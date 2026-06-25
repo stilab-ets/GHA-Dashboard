@@ -35,6 +35,13 @@ class DataPersistence:
         # Sanitize repo name for filename (replace / with _)
         safe_repo = repo.replace('/', '_').replace('\\', '_')
         return self.data_dir / f"{safe_repo}.json"
+
+    def _run_id(self, run: Dict[str, Any]) -> Optional[str]:
+        """Return a normalized run ID, or None when the run cannot be keyed."""
+        run_id = run.get('id')
+        if run_id is None or run_id == '':
+            return None
+        return str(run_id)
     
     def _load_data(self, repo: str) -> Dict[str, Any]:
         """Load data for a repository from disk."""
@@ -93,7 +100,7 @@ class DataPersistence:
             repo: Repository name (owner/repo)
             run: Run data dictionary (must have 'id' field)
         """
-        run_id = str(run.get('id'))
+        run_id = self._run_id(run)
         if not run_id:
             print(f"[DataPersistence] Warning: Run missing 'id' field, skipping save")
             return
@@ -116,7 +123,7 @@ class DataPersistence:
         data = self._load_data(repo)
         
         for run in runs:
-            run_id = str(run.get('id'))
+            run_id = self._run_id(run)
             if run_id:
                 data['runs'][run_id] = run
         

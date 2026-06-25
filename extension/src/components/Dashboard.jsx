@@ -27,6 +27,8 @@ import {
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3', '#9c27b0', '#00bcd4'];
 const SHOW_OVERALL_HEALTH_CHECK = false;
+const ALL_TIME_START_DATE = '2000-01-01';
+const ALL_TIME_END_DATE = '2100-01-01';
 
 function UIIcon({ name }) {
   const icons = {
@@ -554,7 +556,18 @@ export default function Dashboard() {
     start: defaultStart,
     end: defaultEnd
   });
+  const defaultCollectionScope = {
+    start: defaultStart,
+    end: defaultEnd,
+    workflowIds: []
+  };
+  const [collectionDateRange, setCollectionDateRange] = useState({
+    start: defaultStart,
+    end: defaultEnd
+  });
   const [collectionScopeWorkflowIds, setCollectionScopeWorkflowIds] = useState(['all']);
+  const [appliedCollectionScope, setAppliedCollectionScope] = useState(defaultCollectionScope);
+  const appliedCollectionScopeRef = useRef(defaultCollectionScope);
   const [workflowOptions, setWorkflowOptions] = useState([]);
   const [workflowOptionsLoading, setWorkflowOptionsLoading] = useState(false);
   const [workflowOptionsError, setWorkflowOptionsError] = useState(null);
@@ -567,6 +580,57 @@ export default function Dashboard() {
   useEffect(() => {
     dateFiltersRef.current = getActiveDateRange();
   }, [filters.start, filters.end]);
+
+  const normalizeCollectionScope = (scope = {}) => ({
+    start: scope.start || '',
+    end: scope.end || '',
+    workflowIds: normalizeWorkflowIds(scope.workflowIds)
+  });
+
+  const hasIncompleteDateRange = (scope = {}) =>
+    Boolean(scope.start) !== Boolean(scope.end);
+
+  const applyCollectionScope = (scope) => {
+    const normalizedScope = normalizeCollectionScope(scope);
+    appliedCollectionScopeRef.current = normalizedScope;
+    setAppliedCollectionScope(normalizedScope);
+    setCollectionDateRange({
+      start: normalizedScope.start,
+      end: normalizedScope.end
+    });
+    dateFiltersRef.current = {
+      start: normalizedScope.start,
+      end: normalizedScope.end
+    };
+    prevDatesRef.current = {
+      start: normalizedScope.start,
+      end: normalizedScope.end
+    };
+    setFilters(prev => ({
+      ...prev,
+      start: normalizedScope.start,
+      end: normalizedScope.end
+    }));
+    return normalizedScope;
+  };
+
+  const getAppliedCollectionScope = () => appliedCollectionScopeRef.current;
+
+  const getCollectionScopeForRequest = (collectMore = false) => {
+    if (collectMore || data) {
+      const appliedScope = getAppliedCollectionScope();
+      const activeRange = dateFiltersRef.current || getActiveDateRange();
+      return {
+        start: activeRange.start || '',
+        end: activeRange.end || '',
+        workflowIds: appliedScope.workflowIds?.length
+          ? appliedScope.workflowIds
+          : normalizeWorkflowIds(collectionScopeWorkflowIds)
+      };
+    }
+
+    return getCollectionScope();
+  };
 
   // Current repo state
   const [currentRepo, setCurrentRepo] = useState(null);
@@ -904,8 +968,8 @@ export default function Dashboard() {
   }, []);
 
   const getCollectionScope = () => ({
-    start: filters.start || '',
-    end: filters.end || '',
+    start: collectionDateRange.start || '',
+    end: collectionDateRange.end || '',
     workflowIds: normalizeWorkflowIds(collectionScopeWorkflowIds)
   });
 
@@ -971,8 +1035,16 @@ export default function Dashboard() {
   // Check for existing scoped data when repo changes (but don't auto-load it)
   useEffect(() => {
     if (currentRepo && !collectionStarted && !data) {
+      const collectionScope = getCollectionScope();
+      if (hasIncompleteDateRange(collectionScope)) {
+        setCheckingData(false);
+        setDataExists(false);
+        setExistingRunsCount(0);
+        return;
+      }
+
       setCheckingData(true);
-      checkExistingData(currentRepo, getCollectionScope()).then((result) => {
+      checkExistingData(currentRepo, collectionScope).then((result) => {
         setCheckingData(false);
         if (result && result.exists) {
           // Just update the status that data exists, don't auto-load
@@ -988,7 +1060,7 @@ export default function Dashboard() {
         setCheckingData(false);
       });
     }
-  }, [currentRepo, collectionStarted, data, filters.start, filters.end, collectionScopeWorkflowIds]);
+  }, [currentRepo, collectionStarted, data, collectionDateRange.start, collectionDateRange.end, collectionScopeWorkflowIds]);
 
   // ============================================
   // Data Loading Functions
@@ -1117,7 +1189,8 @@ export default function Dashboard() {
       return null;
     }
 
-    const scopedRuns = filterRunsForScope(runs, scope);
+    const scopedFilters = normalizeCollectionScope(scope);
+    const scopedRuns = filterRunsForScope(runs, scopedFilters);
     console.log(`[Dashboard] Processing ${scopedRuns.length} scoped runs for repo: ${repoToUse}`);
     cacheRunsForRepo(repoToUse, scopedRuns);
 
@@ -1137,10 +1210,7 @@ export default function Dashboard() {
 
     // Use convertRunsToDashboard directly instead of filterRunsLocally
     // This avoids the dependency on _runsByRepo being populated
-    const { start: startDate, end: endDate, workflowIds } = {
-      ...getActiveDateRange(),
-      ...scope
-    };
+    const { start: startDate, end: endDate, workflowIds } = scopedFilters;
 
     try {
       const dashboardData = convertRunsToDashboard(scopedRuns, repoToUse, {
@@ -1167,6 +1237,23 @@ export default function Dashboard() {
 
   // Load data (only when dates change)
   const loadDashboardData = async (collectMore = false, options = {}) => {
+    const fallbackCollectionScope = getCollectionScopeForRequest(Boolean(collectMore));
+    const draftCollectionScope = normalizeCollectionScope({
+      ...fallbackCollectionScope,
+      ...(options.collectionScope || {}),
+      workflowIds: options.collectionScope?.workflowIds ?? fallbackCollectionScope.workflowIds
+    });
+    if (hasIncompleteDateRange(draftCollectionScope)) {
+      setError('Please select both a start date and an end date before collecting data.');
+      setLoading(false);
+      return;
+    }
+
+    const collectionScope = applyCollectionScope(draftCollectionScope);
+    const activeDateRange = {
+      start: collectionScope.start,
+      end: collectionScope.end
+    };
     const preserveStreamingCache = !!options.preserveStreamingCache;
     setCollectionStarted(true);
     setLoading(true);
@@ -1249,9 +1336,7 @@ export default function Dashboard() {
       setCurrentRepo(repo);
       console.log('[Dashboard] Using repo:', repo);
 
-      const activeDateRange = getActiveDateRange();
-      const collectionScope = getCollectionScope();
-      let shouldRefreshAfterCache = Boolean(collectMore);
+      let shouldRefreshAfterCache = Boolean(collectMore || options.forceRefresh);
 
       // Preserve existing date filters when starting new collection
       // Only initialize defaults if filters haven't been set yet
@@ -1418,7 +1503,7 @@ export default function Dashboard() {
       actor: filters.actor,
       startDate: activeDateRange.start,
       endDate: activeDateRange.end,
-      workflowIds: getCollectionScope().workflowIds
+      workflowIds: getAppliedCollectionScope().workflowIds
     };
 
     const filtered = filterRunsLocally(filterValues, rawData.repo || currentRepo);
@@ -1446,7 +1531,7 @@ export default function Dashboard() {
       actor: explicitFilters.actor || filters.actor,
       startDate: explicitFilters.start || filters.start,
       endDate: explicitFilters.end || filters.end,
-      workflowIds: explicitFilters.workflowIds || getCollectionScope().workflowIds
+      workflowIds: explicitFilters.workflowIds || getAppliedCollectionScope().workflowIds
     }, rawData.repo || currentRepo);
 
     if (filtered) {
@@ -1564,7 +1649,7 @@ export default function Dashboard() {
           actor: filters.actor,
           startDate: activeDateRange.start,
           endDate: activeDateRange.end,
-          workflowIds: getCollectionScope().workflowIds
+          workflowIds: getAppliedCollectionScope().workflowIds
         }, currentRepo);
 
         if (filtered) {
@@ -1613,7 +1698,7 @@ export default function Dashboard() {
         chrome.storage.onChanged.removeListener(handleStorageChange);
       }
     };
-  }, [currentRepo, filters, availableFilters, collectionScopeWorkflowIds]);
+  }, [currentRepo, filters, availableFilters, appliedCollectionScope]);
 
   // Real-time elapsed time counter (updates every second)
   useEffect(() => {
@@ -1670,7 +1755,7 @@ export default function Dashboard() {
         actor: filters.actor,
         startDate: filters.start,
         endDate: filters.end,
-        workflowIds: getCollectionScope().workflowIds
+        workflowIds: getAppliedCollectionScope().workflowIds
       }, currentRepo);
 
       if (filtered) {
@@ -1682,12 +1767,6 @@ export default function Dashboard() {
           actors: prev?.actors || availableFilters.actors
         }));
         return;
-      }
-      // If the in-memory websocket cache is not available after a page
-      // refresh, fall back to the backend cache and reprocess it with the
-      // newly selected collection scope.
-      if (datesChanged && dataExists && !progress.isStreaming) {
-        await loadExistingData(currentRepo, getCollectionScope());
       }
     };
 
@@ -1702,7 +1781,7 @@ export default function Dashboard() {
     filters.workflow,
     filters.branch,
     filters.actor,
-    collectionScopeWorkflowIds,
+    appliedCollectionScope,
     currentRepo,
     dataExists,
     progress.isStreaming,
@@ -1712,8 +1791,8 @@ export default function Dashboard() {
   const updateCollectionDate = (filterType, value) => {
     const currentDefaults = getCurrentDefaults();
     const nowStr = currentDefaults.today;
-    let newStart = filterType === 'start' ? value : filters.start;
-    let newEnd = filterType === 'end' ? value : filters.end;
+    let newStart = filterType === 'start' ? value : collectionDateRange.start;
+    let newEnd = filterType === 'end' ? value : collectionDateRange.end;
 
     if (newStart && newStart > nowStr) newStart = nowStr;
     if (newEnd && newEnd > nowStr) newEnd = nowStr;
@@ -1726,14 +1805,14 @@ export default function Dashboard() {
       }
     }
 
-    dateFiltersRef.current = { start: newStart, end: newEnd };
-    setFilters(prev => ({ ...prev, start: newStart, end: newEnd }));
+    setCollectionDateRange({ start: newStart, end: newEnd });
+    setError(null);
   };
 
   const setCollectionDateValue = (filterType, dateValue) => {
     const value = dateValue ? formatDateForInput(dateValue) : '';
-    let newStart = filterType === 'start' ? value : filters.start;
-    let newEnd = filterType === 'end' ? value : filters.end;
+    let newStart = filterType === 'start' ? value : collectionDateRange.start;
+    let newEnd = filterType === 'end' ? value : collectionDateRange.end;
 
     if (newStart && newEnd && newStart > newEnd) {
       if (filterType === 'start') {
@@ -1743,14 +1822,14 @@ export default function Dashboard() {
       }
     }
 
-    dateFiltersRef.current = { start: newStart, end: newEnd };
-    setFilters(prev => ({ ...prev, start: newStart, end: newEnd }));
+    setCollectionDateRange({ start: newStart, end: newEnd });
+    setError(null);
   };
 
   const openCollectionDatePicker = (filterType) => {
     const selectedDate = filterType === 'start'
-      ? parseDateStr(filters.start)
-      : parseDateStr(filters.end);
+      ? parseDateStr(collectionDateRange.start)
+      : parseDateStr(collectionDateRange.end);
 
     if (selectedDate) {
       setCollectionCalendarMonth(selectedDate.getMonth());
@@ -1762,7 +1841,7 @@ export default function Dashboard() {
   };
 
   const getCollectionDateLabel = (filterType) => {
-    const value = filterType === 'start' ? filters.start : filters.end;
+    const value = filterType === 'start' ? collectionDateRange.start : collectionDateRange.end;
     if (value) return formatDateDisplay(value);
     return filterType === 'start' ? 'No start date' : 'No end date';
   };
@@ -1822,8 +1901,8 @@ export default function Dashboard() {
     const daysInMonth = getDaysInMonth(collectionCalendarYear, collectionCalendarMonth);
     const firstDay = getFirstDayOfMonth(collectionCalendarYear, collectionCalendarMonth);
     const today = new Date();
-    const selectedStart = filters.start ? parseDateStr(filters.start) : null;
-    const selectedEnd = filters.end ? parseDateStr(filters.end) : null;
+    const selectedStart = collectionDateRange.start ? parseDateStr(collectionDateRange.start) : null;
+    const selectedEnd = collectionDateRange.end ? parseDateStr(collectionDateRange.end) : null;
     const calendarDays = [
       ...Array(firstDay).fill(null),
       ...Array.from({ length: daysInMonth }, (_, index) => index + 1)
@@ -1897,7 +1976,7 @@ export default function Dashboard() {
             const isInRange =
               selectedStart &&
               selectedEnd &&
-              isDateInRange(cellDate, filters.start, filters.end);
+              isDateInRange(cellDate, collectionDateRange.start, collectionDateRange.end);
 
             return (
               <button
@@ -1959,6 +2038,11 @@ export default function Dashboard() {
             {dataExists && (
               <p className="collection-start-note">
                 {existingRunsCount} cached runs match this repository scope and can be reused.
+              </p>
+            )}
+            {error && (
+              <p className="collection-start-note error">
+                {error}
               </p>
             )}
           </div>
@@ -2118,7 +2202,7 @@ export default function Dashboard() {
           {error}
         </p>
         <div style={{ marginTop: '12px' }}>
-          <button className="primary-action" onClick={loadDashboardData} type="button">Retry</button>
+          <button className="primary-action" onClick={() => loadDashboardData(false)} type="button">Retry</button>
         </div>
       </div>
     </div>
@@ -3148,6 +3232,10 @@ export default function Dashboard() {
                   </button>
 
                   {datePickerOpen && (() => {
+                    const activeRange = dateFiltersRef.current || { start: filters.start, end: filters.end };
+                    const activeStart = activeRange.start || filters.start || '';
+                    const activeEnd = activeRange.end || filters.end || '';
+
                     const handleSetDates = (startDate, endDate) => {
                       const startStr = formatDateForInput(startDate);
                       const endStr = formatDateForInput(endDate);
@@ -3168,11 +3256,11 @@ export default function Dashboard() {
                       const clickedDate = new Date(calendarYear, calendarMonth, day);
                       const clickedDateStr = formatDateForInput(clickedDate);
 
-                      if (selectingStart || !filters.start || clickedDateStr < filters.start) {
+                      if (selectingStart || !activeStart || clickedDateStr < activeStart) {
                         handleSetDates(clickedDate, clickedDate);
                         setSelectingStart(false);
                       } else {
-                        handleSetDates(parseDateStr(filters.start), clickedDate);
+                        handleSetDates(parseDateStr(activeStart), clickedDate);
                         setSelectingStart(true);
                       }
                     };
@@ -3197,8 +3285,8 @@ export default function Dashboard() {
                     const firstDay = getFirstDayOfMonth(calendarYear, calendarMonth);
                     const today = new Date();
 
-                    const selectedStart = filters.start ? parseDateStr(filters.start) : null;
-                    const selectedEnd = filters.end ? parseDateStr(filters.end) : null;
+                    const selectedStart = activeStart ? parseDateStr(activeStart) : null;
+                    const selectedEnd = activeEnd ? parseDateStr(activeEnd) : null;
 
                     const calendarDays = [
                       ...Array(firstDay).fill(null),
@@ -3274,8 +3362,8 @@ export default function Dashboard() {
                             onClick={(e) => {
                               e.stopPropagation();
 
-                              const farPast = new Date(2000, 0, 1);
-                              const farFuture = new Date(2100, 0, 1);
+                              const farPast = parseDateStr(ALL_TIME_START_DATE);
+                              const farFuture = parseDateStr(ALL_TIME_END_DATE);
 
                               handleSetDates(farPast, farFuture);
                             }}
@@ -3409,7 +3497,7 @@ export default function Dashboard() {
                               const isInRange =
                                 selectedStart &&
                                 selectedEnd &&
-                                isDateInRange(cellDate, filters.start, filters.end);
+                                isDateInRange(cellDate, activeStart, activeEnd);
 
                               return (
                                 <button
@@ -3455,12 +3543,12 @@ export default function Dashboard() {
                         >
                           <div>
                             <strong>From:</strong>{' '}
-                            {selectedStart ? formatDateDisplay(filters.start) : 'Not selected'}
+                            {selectedStart ? formatDateDisplay(activeStart) : 'Not selected'}
                           </div>
 
                           <div style={{ marginTop: '4px' }}>
                             <strong>To:</strong>{' '}
-                            {selectedEnd ? formatDateDisplay(filters.end) : 'Not selected'}
+                            {selectedEnd ? formatDateDisplay(activeEnd) : 'Not selected'}
                           </div>
                         </div>
 
