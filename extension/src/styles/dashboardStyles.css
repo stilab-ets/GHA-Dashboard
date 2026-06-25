@@ -347,6 +347,10 @@
     border-color: color-mix(in srgb, var(--info) 24%, var(--border)) !important;
 }
 
+.dashboard.collection-setup-dashboard {
+    padding-bottom: 24px;
+}
+
 .collection-scope-panel::before {
     content: "";
     position: absolute;
@@ -614,10 +618,9 @@
 }
 
 .collection-workflow-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    right: 0;
+    position: static;
+    margin-top: 8px;
+    width: 100%;
     z-index: 1200;
     padding: 8px;
     background: var(--card-bg);

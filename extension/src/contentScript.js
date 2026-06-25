@@ -462,6 +462,10 @@
         iframeDoc.head.appendChild(style);
 
         const getMinimumDashboardHeight = () => {
+          if (iframeDoc.querySelector('.collection-scope-panel')) {
+            return 360;
+          }
+
           const iframeRect = iframe.getBoundingClientRect();
           const viewportHeight = window.innerHeight || 900;
           const remainingViewport = viewportHeight - Math.max(0, iframeRect.top);

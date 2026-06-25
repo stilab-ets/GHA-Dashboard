@@ -2164,7 +2164,7 @@ export default function Dashboard() {
   // Show start collection button if collection hasn't started yet
   if (!collectionStarted && !loading && !data) {
     return (
-      <div className={`dashboard ${dashboardTheme} container`}>
+      <div className={`dashboard ${dashboardTheme} container collection-setup-dashboard`}>
         {renderCollectionScopePanel()}
       </div>
     );
