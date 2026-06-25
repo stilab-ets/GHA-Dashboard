@@ -4,6 +4,7 @@ const wsCache = new Map();
 let activeWebSocket = null;
 let currentRepo = null;
 let currentTabId = null; // Tab owning the active WebSocket
+let cancelRequestedForRepo = null;
 const SOCKET_CLOSING = 2;
 const SOCKET_CLOSED = 3;
 const WS_CONNECT_MAX_ATTEMPTS = 3;
@@ -13,11 +14,43 @@ function isSocketActive(socket) {
   return socket && socket.readyState !== SOCKET_CLOSING && socket.readyState !== SOCKET_CLOSED;
 }
 
+function normalizeWorkflowIds(workflowIds) {
+  if (!Array.isArray(workflowIds)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      workflowIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    ),
+  );
+}
+
+function sameWorkflowScope(left = [], right = []) {
+  const leftIds = normalizeWorkflowIds(left);
+  const rightIds = normalizeWorkflowIds(right);
+  return (
+    leftIds.length === rightIds.length &&
+    leftIds.every((value, index) => value === rightIds[index])
+  );
+}
+
 function getRunId(run) {
   if (!run || run.id === undefined || run.id === null || run.id === "") {
     return null;
   }
   return String(run.id);
+}
+
+function cacheMatchesFilters(cached, filters = {}) {
+  if (!cached) return false;
+  return (
+    (cached.startDate || null) === (filters.startDate || filters.start || null) &&
+    (cached.endDate || null) === (filters.endDate || filters.end || null) &&
+    sameWorkflowScope(cached.workflowIds, filters.workflowIds)
+  );
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -49,7 +82,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     return true;
   }
-
+ 
   if (request.action === "startWebSocketExtraction") {
     const { repo, filters } = request;
 
@@ -75,7 +108,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const cached = wsCache.get(repo);
     // Check cache - if we have complete data for this repo, use it (regardless of date filters)
     // Date filtering is done client-side, so we don't need to check dates here
-    if (cached && cached.isComplete && !forceRefresh) {
+    if (cached && cached.isComplete && cacheMatchesFilters(cached, filters) && !forceRefresh) {
       sendResponse({
         success: true,
         cached: true,
@@ -145,6 +178,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       wsCache.clear();
     }
     chrome.storage.local.remove(["wsRuns", "wsStatus"]);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (request.action === "cancelWebSocketExtraction") {
+    const { repo } = request;
+
+    if (repo && currentRepo && repo !== currentRepo) {
+      sendResponse({
+        success: false,
+        error: `No active collection for ${repo}`,
+      });
+      return true;
+    }
+
+    const repoToCancel = currentRepo || repo;
+    const cache = repoToCancel ? wsCache.get(repoToCancel) : null;
+    cancelRequestedForRepo = repoToCancel;
+
+    if (activeWebSocket) {
+      try {
+        activeWebSocket.close(1000, "Collection cancelled by user");
+      } catch (e) {
+        console.error("[Background] Error cancelling WebSocket:", e);
+      }
+    }
+
+    if (repoToCancel) {
+      chrome.storage.local.set({
+        wsRuns: [...(cache?.runs || [])],
+        wsStatus: {
+          isStreaming: false,
+          isComplete: false,
+          isCancelled: true,
+          repo: repoToCancel,
+          totalRuns: cache?.totalRuns || cache?.runs?.length || 0,
+          collectedRuns: cache?.runs?.length || 0,
+          phase: cache?.phase || "workflow_runs",
+        },
+      });
+    }
+
+    activeWebSocket = null;
+    currentRepo = null;
+    currentTabId = null;
+
     sendResponse({ success: true });
     return true;
   }
@@ -267,6 +346,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         startDate:
           extractionFilters.startDate || extractionFilters.start || null,
         endDate: extractionFilters.endDate || extractionFilters.end || null,
+        workflowIds: normalizeWorkflowIds(extractionFilters.workflowIds),
         phase1_elapsed: null, // Store Phase 1 elapsed time in memory to avoid race conditions
       });
 
@@ -486,6 +566,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             });
 
             const cache = wsCache.get(repo);
+            const wasCancelled = cancelRequestedForRepo === repo;
             const hadData = cache?.runs?.length > 0;
             const completed = !!cache?.isComplete;
             const runsWithJobs =
@@ -499,7 +580,21 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
               cacheIsComplete: completed,
             });
 
-            if (!hadData && !completed) {
+            if (wasCancelled) {
+              chrome.storage.local.set({
+                wsRuns: [...(cache?.runs || [])],
+                wsStatus: {
+                  isStreaming: false,
+                  isComplete: false,
+                  isCancelled: true,
+                  repo: repo,
+                  totalRuns: cache?.totalRuns || cache?.runs?.length || 0,
+                  collectedRuns: cache?.runs?.length || 0,
+                  totalPages: cache?.pageCount || 0,
+                  phase: cache?.phase || "workflow_runs",
+                },
+              });
+            } else if (!hadData && !completed) {
               if (!hasOpened && attempt < WS_CONNECT_MAX_ATTEMPTS && currentRepo === repo) {
                 console.log("[Background] WebSocket closed before opening; retrying", {
                   repo,
@@ -539,7 +634,13 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             activeWebSocket = null;
             // When the socket closes for any reason, clear ownership so
             // new repositories can start streaming.
+            if (currentRepo === repo) {
+              currentRepo = null;
+            }
             currentTabId = null;
+            if (wasCancelled) {
+              cancelRequestedForRepo = null;
+            }
           };
 
           activeWebSocket.onerror = (error) => {

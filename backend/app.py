@@ -20,8 +20,9 @@ import json
 import requests
 
 from analysis.endpoint import AggregationFilters, send_data
-from typing import cast
-from datetime import date
+from typing import Iterable, cast
+from datetime import date, datetime
+from urllib.parse import unquote
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--e2e", action="store_true", help="Enable E2E test mode")
@@ -101,6 +102,31 @@ def _bool_filter_value(value, default=False):
     return default
 
 
+def _workflow_id_filter_values(value) -> list[int]:
+    if value in (None, "", "all"):
+        return []
+
+    raw_values = value if isinstance(value, list) else [value]
+    workflow_ids = []
+
+    for raw_value in raw_values:
+        if raw_value in (None, "", "all"):
+            continue
+
+        try:
+            workflow_id = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid workflow ID: {raw_value}") from exc
+
+        if workflow_id <= 0:
+            raise ValueError(f"Invalid workflow ID: {raw_value}")
+
+        if workflow_id not in workflow_ids:
+            workflow_ids.append(workflow_id)
+
+    return workflow_ids
+
+
 def _build_aggregation_filters(filters_payload):
     filters = AggregationFilters()
 
@@ -118,6 +144,8 @@ def _build_aggregation_filters(filters_payload):
     end_date = filters_payload.get("endDate") or filters_payload.get("end")
     if end_date:
         filters.endDate = date.fromisoformat(cast(str, end_date))
+    else:
+        filters.endDate = date.today()
 
     branch = _first_filter_value(filters_payload.get("branch"))
     if branch:
@@ -130,6 +158,10 @@ def _build_aggregation_filters(filters_payload):
     workflow_name = _first_filter_value(filters_payload.get("workflowName") or filters_payload.get("workflow"))
     if workflow_name:
         filters.workflowName = cast(str, workflow_name)
+
+    filters.workflowIds = _workflow_id_filter_values(
+        filters_payload.get("workflowIds") or filters_payload.get("workflow_ids")
+    )
 
     fetch_job_details = filters_payload.get("fetchJobDetails")
     if fetch_job_details is None:
@@ -144,6 +176,58 @@ def _build_aggregation_filters(filters_payload):
     filters.forceRefresh = _bool_filter_value(force_refresh, default=False)
 
     return filters
+
+
+def _build_filters_from_request_args(args):
+    payload = {
+        "start": args.get("start") or args.get("startDate"),
+        "end": args.get("end") or args.get("endDate"),
+        "workflowIds": args.getlist("workflowIds") or args.getlist("workflow_ids"),
+    }
+    return _build_aggregation_filters(payload)
+
+
+def _run_date_in_scope(run, filters: AggregationFilters) -> bool:
+    created_at = run.get("created_at") or run.get("createdAt")
+    if not created_at:
+        return True
+
+    try:
+        run_date = datetime.fromisoformat(str(created_at).replace("Z", "+00:00")).date()
+    except ValueError:
+        return True
+
+    return filters.startDate <= run_date <= filters.endDate
+
+
+def _run_workflow_in_scope(run, filters: AggregationFilters) -> bool:
+    workflow_ids = filters.workflowIds or []
+    if not workflow_ids:
+        return True
+
+    try:
+        return int(run.get("workflow_id")) in set(workflow_ids)
+    except (TypeError, ValueError):
+        return False
+
+
+def _filter_runs_for_scope(runs: Iterable[dict], filters: AggregationFilters) -> list[dict]:
+    scoped_runs = []
+    seen_ids = set()
+
+    for run in runs:
+        run_id = run.get("id")
+        if run_id is None or str(run_id) in seen_ids:
+            continue
+        if not _run_date_in_scope(run, filters):
+            continue
+        if not _run_workflow_in_scope(run, filters):
+            continue
+
+        seen_ids.add(str(run_id))
+        scoped_runs.append(run)
+
+    return scoped_runs
 
 # ============================================
 # Health Check
@@ -396,6 +480,75 @@ def websocket_data(ws, extractionId: str):
 
 
 # ============================================
+# Workflow Discovery Endpoint
+# ============================================
+@app.get("/api/workflows/<path:repositoryName>")
+def get_workflows(repositoryName: str):
+    """
+    Return GitHub Actions workflows for a repository.
+    """
+    repo = unquote(repositoryName)
+
+    if "/" not in repo or repo.count("/") != 1:
+        return jsonify({
+            "error": f"Invalid repository format: {repo}. Expected format: owner/repo"
+        }), 400
+
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else None
+    if not token and os.getenv("ALLOW_ENV_GITHUB_TOKEN_FALLBACK") == "1":
+        token = os.getenv("GITHUB_TOKEN")
+
+    if not token:
+        return jsonify({
+            "error": "GitHub token required to load workflows"
+        }), 401
+
+    workflows = []
+    page = 1
+
+    try:
+        while True:
+            response = requests.get(
+                f"https://api.github.com/repos/{repo}/actions/workflows",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                },
+                params={"per_page": 100, "page": page},
+                timeout=15,
+            )
+
+            if response.status_code == 404:
+                return jsonify({"error": "Repository or workflows not found"}), 404
+            if response.status_code >= 400:
+                return jsonify({
+                    "error": "Unable to load workflows",
+                    "status": response.status_code
+                }), response.status_code
+
+            page_workflows = response.json().get("workflows", [])
+            workflows.extend([
+                {
+                    "id": workflow.get("id"),
+                    "name": workflow.get("name"),
+                    "path": workflow.get("path"),
+                    "state": workflow.get("state"),
+                }
+                for workflow in page_workflows
+                if workflow.get("id") is not None
+            ])
+
+            if len(page_workflows) < 100:
+                break
+            page += 1
+
+        return jsonify({"workflows": workflows}), 200
+    except requests.RequestException as e:
+        return jsonify({"error": str(e)}), 502
+
+
+# ============================================
 # Data Check Endpoint
 # ============================================
 @app.route("/api/data/check/<path:repositoryName>")
@@ -403,7 +556,6 @@ def check_data(repositoryName: str):
     """
     Check if data exists for a repository and return metadata.
     """
-    from urllib.parse import unquote
     repo = unquote(repositoryName)
 
     # Validate repository format
@@ -413,11 +565,16 @@ def check_data(repositoryName: str):
         }), 400
     
     try:
+        filters = _build_filters_from_request_args(request.args)
+    except ValueError as e:
+        return jsonify({"error": f"Invalid scope filters: {e}"}), 400
+
+    try:
         from data.persistence import DataPersistence
         persistence = DataPersistence()
         
         # Check if data exists
-        all_runs = persistence.get_all_runs(repo)
+        all_runs = _filter_runs_for_scope(persistence.get_all_runs(repo).values(), filters)
         runs_with_jobs = persistence.get_runs_with_jobs(repo)
         
         # Get last updated time
@@ -428,7 +585,7 @@ def check_data(repositoryName: str):
             return jsonify({
                 "exists": True,
                 "totalRuns": len(all_runs),
-                "runsWithJobs": len(runs_with_jobs),
+                "runsWithJobs": len([run for run in all_runs if str(run.get("id")) in runs_with_jobs]),
                 "lastUpdated": last_updated
             }), 200
         else:
@@ -449,7 +606,6 @@ def load_data(repositoryName: str):
     """
     Load existing data for a repository.
     """
-    from urllib.parse import unquote
     repo = unquote(repositoryName)
     
     # Validate repository format
@@ -459,12 +615,17 @@ def load_data(repositoryName: str):
         }), 400
     
     try:
+        filters = _build_filters_from_request_args(request.args)
+    except ValueError as e:
+        return jsonify({"error": f"Invalid scope filters: {e}"}), 400
+
+    try:
         from data.persistence import DataPersistence
         persistence = DataPersistence()
         
         # Load all runs
         all_runs_dict = persistence.get_all_runs(repo)
-        all_runs = list(all_runs_dict.values())
+        all_runs = _filter_runs_for_scope(all_runs_dict.values(), filters)
         
         # Load jobs for each run
         for run in all_runs:

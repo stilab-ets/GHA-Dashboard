@@ -2,6 +2,16 @@
 // WebSocket Client
 // ============================================
 
+import { normalizeWorkflowIds } from './scopeFilters.mjs';
+
+function formatTodayForFilter() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Global Chrome storage events are shared across all extension contexts.
 // To avoid dashboards overwriting each other's state, we keep a cache of
 // runs per repository, and always use the repo passed into the public
@@ -12,6 +22,24 @@ const _progressCallbacks = new Map();
 const _pendingResolves = new Map();
 const _pendingRejects = new Map();
 const _timeoutIds = new Map();
+const _activeFiltersByRepo = new Map();
+
+function clearPendingCollection(repo) {
+  if (_timeoutIds.has(repo)) {
+    clearTimeout(_timeoutIds.get(repo));
+    _timeoutIds.delete(repo);
+  }
+  _pendingResolves.delete(repo);
+  _pendingRejects.delete(repo);
+  _progressCallbacks.delete(repo);
+  _activeFiltersByRepo.delete(repo);
+}
+
+function createCancellationError() {
+  const error = new Error('Collection cancelled');
+  error.name = 'CollectionCancelledError';
+  return error;
+}
 
 if (typeof chrome !== 'undefined' && chrome.storage) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -35,7 +63,8 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
         // registered its own callback via fetchDashboardDataViaWebSocket.
         if (_progressCallbacks.has(repo)) {
           const cb = _progressCallbacks.get(repo);
-          const dashboardData = convertRunsToDashboard(newRuns, repo, null);
+          const activeFilters = _activeFiltersByRepo.get(repo) || null;
+          const dashboardData = convertRunsToDashboard(newRuns, repo, activeFilters);
           cb(dashboardData, Boolean(status.isComplete));
         }
       });
@@ -59,7 +88,8 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
           const finalRuns = result.wsRuns || [];
           _runsByRepo.set(repo, finalRuns);
           
-          const dashboardData = convertRunsToDashboard(finalRuns, repo, null);
+          const activeFilters = _activeFiltersByRepo.get(repo) || null;
+          const dashboardData = convertRunsToDashboard(finalRuns, repo, activeFilters);
           
           const cb = _progressCallbacks.get(repo);
           if (cb) {
@@ -86,8 +116,15 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
         if (rejector) {
           rejector(new Error(status.error));
         }
-        _pendingRejects.delete(repo);
-        _pendingResolves.delete(repo);
+        clearPendingCollection(repo);
+      }
+
+      if (status.isCancelled && _pendingRejects.has(repo)) {
+        const rejector = _pendingRejects.get(repo);
+        if (rejector) {
+          rejector(createCancellationError());
+        }
+        clearPendingCollection(repo);
       }
     }
   });
@@ -701,6 +738,12 @@ export function convertRunsToDashboard(runs, repo, filters) {
     if (filters.workflow && !filters.workflow.includes('all')) {
       filteredRuns = filteredRuns.filter(run => filters.workflow.includes(run.workflow_name));
     }
+    // Filter by workflow IDs from the initial collection scope
+    const workflowIds = normalizeWorkflowIds(filters.workflowIds);
+    if (workflowIds.length > 0) {
+      const workflowIdSet = new Set(workflowIds);
+      filteredRuns = filteredRuns.filter(run => workflowIdSet.has(Number(run.workflow_id)));
+    }
     // Filter by branch
     if (filters.branch && !filters.branch.includes('all')) {
       filteredRuns = filteredRuns.filter(run => filters.branch.includes(run.branch));
@@ -710,15 +753,17 @@ export function convertRunsToDashboard(runs, repo, filters) {
       filteredRuns = filteredRuns.filter(run => filters.actor.includes(run.actor));
     }
     // Filter by date range (client-side)
-    if (filters.startDate && filters.endDate) {
-      const startDate = new Date(filters.startDate);
-      const endDate = new Date(filters.endDate);
+    const startFilter = filters.startDate || filters.start || null;
+    const endFilter = filters.endDate || filters.end || formatTodayForFilter();
+    if (startFilter || endFilter) {
+      const startDate = startFilter ? new Date(`${startFilter}T00:00:00`) : null;
+      const endDate = new Date(`${endFilter}T23:59:59.999`);
       endDate.setHours(23, 59, 59, 999); // Include entire end date
       
       filteredRuns = filteredRuns.filter(run => {
         if (!run.created_at) return false;
         const runDate = new Date(run.created_at);
-        return runDate >= startDate && runDate <= endDate;
+        return (!startDate || runDate >= startDate) && runDate <= endDate;
       });
     }
   }
@@ -830,6 +875,10 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
     }
     _pendingResolves.set(repo, resolve);
     _pendingRejects.set(repo, reject);
+    _activeFiltersByRepo.set(repo, {
+      ...filters,
+      workflowIds: normalizeWorkflowIds(filters.workflowIds)
+    });
     _runsByRepo.set(repo, []);
     chrome.runtime.sendMessage({
       action: 'startWebSocketExtraction',
@@ -837,6 +886,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
       filters: {
         start: filters.start,
         end: filters.end,
+        workflowIds: normalizeWorkflowIds(filters.workflowIds),
         fetchJobDetails: Boolean(filters.fetchJobDetails),
         forceRefresh: Boolean(filters.forceRefresh)
       }
@@ -844,6 +894,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
       if (chrome.runtime.lastError) {
         console.error('[WebSocket] Error:', chrome.runtime.lastError);
         reject(new Error(chrome.runtime.lastError.message));
+        clearPendingCollection(repo);
         return;
       }
 
@@ -851,6 +902,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
       if (response && response.busy) {
         const message = response.error || `Another repository (${response.currentRepo}) is currently streaming. Please wait until it finishes before starting a new extraction.`;
         reject(new Error(message));
+        clearPendingCollection(repo);
         return;
       }
 
@@ -861,8 +913,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
           onProgressCallback(dashboardData, true);
         }
         resolve(dashboardData);
-        _pendingResolves.delete(repo);
-        _pendingRejects.delete(repo);
+        clearPendingCollection(repo);
       } else {
         // Extended timeout for GHAminer collection (30 minutes)
         // GHAminer can take a long time for large repositories
@@ -882,8 +933,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
                   const dashboardData = convertRunsToDashboard([], repo, filters);
                   resolve(dashboardData);
                 }
-                _pendingResolves.delete(repo);
-                _pendingRejects.delete(repo);
+                clearPendingCollection(repo);
               } else {
                 // Still collecting, don't timeout yet
                 console.log('[WebSocket] Collection still in progress, not timing out yet...');
@@ -893,10 +943,37 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
           }
         }, 1800000); // 30 minutes
         
-        // Store timeout ID so we can clear it on completion
-        if (!_timeoutIds) _timeoutIds = new Map();
         _timeoutIds.set(repo, timeoutId);
       }
+    });
+  });
+}
+
+export function cancelWebSocketCollection(repo = null) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      action: 'cancelWebSocketExtraction',
+      repo: repo
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      if (repo) {
+        const rejector = _pendingRejects.get(repo);
+        if (rejector) {
+          rejector(createCancellationError());
+        }
+        clearPendingCollection(repo);
+      }
+
+      if (response && response.success === false) {
+        reject(new Error(response.error || 'Unable to cancel collection'));
+        return;
+      }
+
+      resolve(response || { success: true });
     });
   });
 }

@@ -39,3 +39,110 @@ test('dashboard page opens correctly when dashboard button is clicked', async ({
     frame.locator('#root')
   ).toBeVisible();
 });
+
+test('dashboard collection scope sends dates and selected workflows', async ({ context, extensionId }) => {
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
+  await popup.evaluate(() => new Promise(resolve => {
+    chrome.storage.session.set({ githubToken: 'ghp_scope_test_token' }, () => resolve());
+  }));
+  await popup.close();
+
+  let extractionPayload = null;
+
+  await context.route('**/api/workflows/**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      workflows: [
+        { id: 101, name: 'Lint', path: '.github/workflows/lint.yml', state: 'active' },
+        { id: 202, name: 'Tests', path: '.github/workflows/tests.yml', state: 'active' },
+      ],
+    }),
+  }));
+
+  await context.route('**/api/data/check/**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      exists: false,
+      totalRuns: 0,
+      runsWithJobs: 0,
+      lastUpdated: null,
+    }),
+  }));
+
+  await context.route('**/api/extractions', async route => {
+    extractionPayload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, extractionId: 'scope-test-extraction' }),
+    });
+  });
+
+  const page = await context.newPage();
+  await page.goto(REPOSITORY_URL);
+  await page.locator('#gha-dashboard-nav-button').click();
+
+  const frame = page.frameLocator('#gha-dashboard-iframe');
+  const startDateButton = frame.getByRole('button', { name: /collection start date/i });
+  const endDateButton = frame.getByRole('button', { name: /collection end date/i });
+  await expect(startDateButton).toBeVisible();
+  await expect(startDateButton).toContainText('No start date');
+  await expect(endDateButton).toBeVisible();
+  await expect(endDateButton).toContainText('No end date');
+  await expect(frame.getByRole('button', { name: /workflows/i })).toBeVisible();
+  await expect(frame.getByRole('button', { name: /start data collection/i })).toBeVisible();
+
+  await startDateButton.click();
+
+  const monthIndexes = {
+    January: 0,
+    February: 1,
+    March: 2,
+    April: 3,
+    May: 4,
+    June: 5,
+    July: 6,
+    August: 7,
+    September: 8,
+    October: 9,
+    November: 10,
+    December: 11,
+  };
+
+  for (let index = 0; index < 36; index += 1) {
+    const title = await frame.locator('.collection-calendar-title').textContent();
+    if (title === 'June 2026') break;
+
+    const [monthName, yearText] = title.split(' ');
+    const year = Number(yearText);
+    const month = monthIndexes[monthName];
+    if (year > 2026 || (year === 2026 && month > monthIndexes.June)) {
+      await frame.getByRole('button', { name: /previous month/i }).click();
+    } else {
+      await frame.getByRole('button', { name: /next month/i }).click();
+    }
+  }
+
+  await frame.getByRole('button', { name: 'June 1, 2026' }).click();
+  await expect(startDateButton).toContainText('Jun 1, 2026');
+
+  await endDateButton.click();
+  await frame.getByRole('button', { name: 'June 30, 2026' }).click();
+  await expect(endDateButton).toContainText('Jun 30, 2026');
+
+  await frame.getByRole('button', { name: /workflows/i }).click();
+  await frame.getByRole('checkbox', { name: 'All workflows' }).uncheck();
+  await frame.getByRole('checkbox', { name: 'Lint' }).check();
+  await frame.getByRole('checkbox', { name: 'Tests' }).check();
+  await expect(frame.getByRole('button', { name: /2 workflows selected/i })).toBeVisible();
+  await frame.getByRole('button', { name: /2 workflows selected/i }).click();
+
+  await frame.getByRole('button', { name: /start data collection/i }).click();
+  await expect.poll(() => extractionPayload).not.toBeNull();
+  expect(extractionPayload.filters.start).toBe('2026-06-01');
+  expect(extractionPayload.filters.end).toBe('2026-06-30');
+  expect(extractionPayload.filters.workflowIds).toEqual([101, 202]);
+});

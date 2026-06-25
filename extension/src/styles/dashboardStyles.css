@@ -17,6 +17,7 @@
     box-sizing: border-box;
     overflow-x: hidden;
     overflow-x: clip;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
 }
 
 .dashboard h3 {
@@ -131,7 +132,7 @@
     position: sticky;
     top: 0;
     z-index: 80;
-    padding: 10px 0 14px;
+    padding: 10px 10px 14px;
     background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, transparent), color-mix(in srgb, var(--bg) 72%, transparent));
     backdrop-filter: blur(12px);
 }
@@ -323,10 +324,369 @@
     font-size: 14px !important;
 }
 
+.collection-start-note.error {
+    color: var(--danger) !important;
+    background: var(--danger-soft);
+    border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--border));
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
 .collection-start-actions {
     display: grid;
     justify-items: end;
     gap: 18px;
+}
+
+.collection-scope-panel {
+    position: relative;
+    max-width: 1080px;
+    margin: 64px auto;
+    padding: 28px !important;
+    overflow: visible;
+    border-color: color-mix(in srgb, var(--info) 24%, var(--border)) !important;
+}
+
+.collection-scope-panel::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 28px;
+    right: 28px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--info), var(--success));
+    border-radius: 0 0 999px 999px;
+}
+
+.collection-scope-panel.date-picker-active {
+    margin-bottom: 300px;
+}
+
+.collection-scope-header {
+    margin-bottom: 20px;
+}
+
+.collection-scope-header h2 {
+    margin: 6px 0 14px;
+    color: var(--text);
+    font-size: 32px;
+    font-weight: 850;
+    line-height: 1.15;
+}
+
+.collection-scope-header p {
+    max-width: 720px;
+    margin: 0;
+    color: var(--text);
+    font-size: 16px;
+}
+
+.collection-scope-header strong {
+    color: var(--success);
+}
+
+.collection-scope-grid {
+    display: grid;
+    grid-template-columns: minmax(360px, 1fr) minmax(320px, 1fr);
+    gap: 12px;
+    align-items: start;
+}
+
+.collection-date-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    min-width: 0;
+}
+
+.collection-date-field,
+.collection-workflow-field {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.collection-date-field > span,
+.collection-workflow-field > span {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 850;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.collection-date-field input[type="date"],
+.collection-date-toggle,
+.collection-workflow-toggle {
+    width: 100%;
+    min-height: 46px;
+    padding: 9px 12px;
+    box-sizing: border-box;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font: inherit;
+    font-weight: 750;
+}
+
+.collection-date-field input[type="date"]:focus-visible,
+.collection-date-toggle:focus-visible,
+.collection-workflow-toggle:focus-visible {
+    outline: none;
+    border-color: var(--info);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 24%, transparent);
+}
+
+.collection-date-picker-field {
+    position: relative;
+}
+
+.collection-date-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.collection-date-toggle > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.collection-date-popover {
+    left: 0;
+    right: auto;
+    width: min(420px, calc(100vw - 32px));
+    padding: 18px;
+}
+
+.collection-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.collection-calendar-title {
+    color: #fff;
+    font-size: 18px;
+    font-weight: 850;
+    text-align: center;
+}
+
+.collection-calendar-nav {
+    width: 42px;
+    height: 36px;
+    display: inline-grid;
+    place-items: center;
+    color: #fff;
+    background: transparent;
+    border: 1px solid #444;
+    border-radius: 8px;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 800;
+}
+
+.collection-calendar-nav:hover,
+.collection-calendar-nav:focus-visible {
+    border-color: var(--info);
+    outline: none;
+}
+
+.collection-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(34px, 1fr));
+    gap: 6px;
+}
+
+.collection-calendar-weekday {
+    padding: 6px 0 8px;
+    color: #888;
+    font-size: 12px;
+    font-weight: 850;
+    text-align: center;
+}
+
+.collection-calendar-empty,
+.collection-calendar-day {
+    height: 38px;
+}
+
+.collection-calendar-day {
+    color: #fff;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 750;
+}
+
+.collection-calendar-day:hover {
+    border-color: color-mix(in srgb, var(--info) 65%, transparent);
+    background: color-mix(in srgb, var(--info) 12%, transparent);
+}
+
+.collection-calendar-day.today {
+    border-color: var(--info);
+}
+
+.collection-calendar-day.in-range {
+    background: rgba(33, 150, 243, 0.22);
+}
+
+.collection-calendar-day.selected {
+    color: #fff;
+    background: var(--info);
+    border-color: var(--info);
+}
+
+.collection-calendar-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.secondary-action {
+    min-height: 38px;
+    padding: 8px 16px;
+    color: var(--text);
+    background: color-mix(in srgb, var(--card-bg) 74%, var(--bg));
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 750;
+}
+
+.secondary-action:hover,
+.secondary-action:focus-visible {
+    border-color: var(--info);
+    outline: none;
+}
+
+.collection-workflow-picker {
+    position: relative;
+}
+
+.collection-workflow-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.collection-workflow-toggle > span:first-child {
+    flex: 0 0 auto;
+}
+
+.collection-workflow-chips {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    overflow: hidden;
+}
+
+.collection-workflow-chips span {
+    max-width: 180px;
+    padding: 4px 8px;
+    overflow: hidden;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--card-bg) 78%, var(--bg));
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.collection-workflow-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    z-index: 1200;
+    padding: 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.36);
+}
+
+.collection-workflow-options {
+    max-height: 230px;
+    overflow: auto;
+    display: grid;
+    gap: 4px;
+}
+
+.collection-workflow-option {
+    min-height: 38px;
+    padding: 8px 10px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 10px;
+    align-items: center;
+    color: var(--text);
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.collection-workflow-option:hover {
+    background: var(--info-soft);
+}
+
+.collection-workflow-option.all {
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    border-radius: 7px 7px 0 0;
+}
+
+.collection-workflow-option input {
+    accent-color: var(--info);
+}
+
+.collection-workflow-option span,
+.collection-workflow-option small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.collection-workflow-option span {
+    font-weight: 750;
+}
+
+.collection-workflow-option small {
+    grid-column: 2;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.collection-workflow-empty {
+    margin: 8px 10px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.collection-scope-panel .collection-start-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 18px;
 }
 
 .stats-row {
@@ -1269,6 +1629,10 @@ html, body {
         grid-template-columns: auto minmax(160px, 1fr);
     }
 
+    .collection-scope-grid {
+        grid-template-columns: 1fr;
+    }
+
     .banner-progress,
     .banner-times,
     .cancel-action,
@@ -1312,6 +1676,23 @@ html, body {
     
     .stat-card {
         width: 100%;
+    }
+
+    .collection-scope-panel {
+        margin: 32px 0;
+        padding: 20px !important;
+    }
+
+    .collection-scope-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .collection-date-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .collection-workflow-field {
+        grid-column: auto;
     }
 
     .chart-card-header {
