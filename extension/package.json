@@ -7,13 +7,16 @@
     "build": "vite build",
     "preview": "vite preview",
     "pack": "npm run build && node src/scripts/assemble.js",
+    "pack:chromium": "npm run build && node src/scripts/assemble.js chromium",
+    "pack:firefox": "npm run build && node src/scripts/assemble.js firefox",
     "dist": "npm run pack && powershell -NoProfile -Command \"Compress-Archive -Path build\\* -DestinationPath gha-dashboard.zip -Force\"",
     "test:e2e": "playwright test tests"
   },
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "recharts": "^3.5.1"
+    "recharts": "^3.5.1",
+    "webextension-polyfill": "^0.12.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

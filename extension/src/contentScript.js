@@ -1,3 +1,5 @@
+import browser from "webextension-polyfill";
+
 (function () {
   'use strict';
 
@@ -41,9 +43,9 @@
     const repo = extractRepoFromURL(location.href);
     const theme = detectGitHubTheme();
 
-    if (repo && chrome.runtime) {
+    if (repo && browser.runtime) {
       try {
-        chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo, theme });
+        browser.runtime.sendMessage({ type: "UPDATE_REPO", repo, theme });
       } catch (e) {
         reloadAfterExtensionContextInvalidated();
       }
@@ -410,7 +412,7 @@
     
     let dashboardUrl;
     try {
-      dashboardUrl = chrome.runtime.getURL('src/dashboard/dashboard.html');
+      dashboardUrl = browser.runtime.getURL('src/dashboard/dashboard.html');
     } catch (e) {
       reloadAfterExtensionContextInvalidated();
       return;
