@@ -1,3 +1,6 @@
+import base64
+import urllib.parse
+
 import os
 import secrets
 import sys
@@ -11,7 +14,7 @@ try:
 except ImportError:
     GEVENT_AVAILABLE = False
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_sock import Sock
@@ -244,88 +247,97 @@ def health():
 # ============================================
 # Authentication Endpoint
 # ============================================
-@app.post("/auth/github")
-def github_auth():
+# ============================================
+# Authentication Endpoints (Proxy Pattern)
+# ============================================
+
+@app.get("/auth/login")
+def github_login():
+    print("ici")
+    ext_uri = request.args.get("extension_redirect_uri")
+    if not ext_uri:
+        print("ici1")
+        return jsonify({"error": "Missing extension_redirect_uri"}), 400
+
     if E2E_MODE:
-        # In E2E mode, return a dummy token for testing purposes
-        return jsonify({
-            "success": True,
-            "token": os.getenv("TEST_GITHUB_TOKEN"),
-            "username": os.getenv("TEST_GITHUB_USERNAME")
-        })
+        print("ici2")
+        dummy_token = os.getenv("TEST_GITHUB_TOKEN", "dummy_token")
+        dummy_user = os.getenv("TEST_GITHUB_USERNAME", "e2e_user")
+        return redirect(f"{ext_uri}?token={dummy_token}&username={dummy_user}")
 
-    data = request.get_json(silent=True) or {}
-    code = data.get("code")
-    redirect_uri = data.get("redirect_uri") or data.get("redirectUri")
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id:
+        print("ici3")
+        return jsonify({"error": "Missing GITHUB_CLIENT_ID on backend"}), 500
 
+    # On encode l'URL de l'extension dans le 'state' pour la récupérer lors du callback
+    state_data = json.dumps({"ext_uri": ext_uri})
+    state = base64.urlsafe_b64encode(state_data.encode()).decode()
+
+    github_auth_url = (
+        "https://github.com/login/oauth/authorize"
+        f"?client_id={client_id}"
+        f"&scope=repo%20workflow%20read:user"
+        f"&state={state}"
+    )
+    print("ici4")
+    return redirect(github_auth_url)
+
+
+@app.get("/auth/callback")
+def github_callback():
+    print("iciCallback")
+    code = request.args.get("code")
+    state = request.args.get("state")
+    error = request.args.get("error")
+
+    # Décoder le state pour retrouver l'URL de retour de l'extension
+    try:
+        state_data = json.loads(base64.urlsafe_b64decode(state.encode()).decode())
+        ext_uri = state_data.get("ext_uri")
+        print("iciCallback1")
+    except Exception:
+        print("iciCallback2")
+        return jsonify({"error": "Invalid or missing state"}), 400
+
+    if error:
+        print("iciCallback3")
+        return redirect(f"{ext_uri}?error={urllib.parse.quote(error)}")
     if not code:
-        return jsonify({
-            "success": False,
-            "error": "Missing GitHub authorization code"
-        }), 400
+        print("iciCallback4")
+        return redirect(f"{ext_uri}?error=Missing+code")
 
     client_id = os.getenv("GITHUB_CLIENT_ID")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
 
-    missing_config = [
-        name for name, value in {
-            "GITHUB_CLIENT_ID": client_id,
-            "GITHUB_CLIENT_SECRET": client_secret
-        }.items()
-        if not value
-    ]
-
-    if missing_config:
-        return jsonify({
-            "success": False,
-            "error": (
-                "GitHub OAuth is not configured on the backend. "
-                f"Set {', '.join(missing_config)} in backend/.env and restart the backend."
-            )
-        }), 500
-
-    token_payload = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "code": code
-    }
-
-    if redirect_uri:
-        token_payload["redirect_uri"] = redirect_uri
-
+    # 1. Échanger le code contre le token d'accès
     try:
+        print("iciCallback5")
         response = requests.post(
             "https://github.com/login/oauth/access_token",
-            headers={
-                "Accept": "application/json"
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code
             },
-            data=token_payload,
             timeout=15
         )
-    except requests.RequestException as exc:
-        return jsonify({
-            "success": False,
-            "error": f"Unable to reach GitHub OAuth service: {exc}"
-        }), 502
-
-    try:
         token_data = response.json()
-    except ValueError:
-        token_data = {}
-    access_token = token_data.get("access_token")
+        access_token = token_data.get("access_token")
+        print("iciCallback6")
+    except requests.RequestException:
+        print("iciCallback7")
+        return redirect(f"{ext_uri}?error=Network+error+reaching+GitHub")
 
     if not access_token:
-        github_error = token_data.get("error_description") or token_data.get("error")
-        message = "OAuth exchange failed"
-        if github_error:
-            message = f"{message}: {github_error}"
+        print("iciCallback8")
+        err_desc = token_data.get("error_description", "OAuth exchange failed")
+        return redirect(f"{ext_uri}?error={urllib.parse.quote(err_desc)}")
 
-        return jsonify({
-            "success": False,
-            "error": message
-        }), 401
-
+    # 2. Récupérer le nom d'utilisateur avec le token
     try:
+        print("iciCallback9")
         user_response = requests.get(
             "https://api.github.com/user",
             headers={
@@ -334,32 +346,16 @@ def github_auth():
             },
             timeout=15
         )
-    except requests.RequestException as exc:
-        return jsonify({
-            "success": False,
-            "error": f"Unable to reach GitHub user API: {exc}"
-        }), 502
+        username = user_response.json().get("login", "")
+    except requests.RequestException:
+        print("iciCallback10")
+        username = "Unknown"
 
-    if not user_response.ok:
-        return jsonify({
-            "success": False,
-            "error": "OAuth token received, but GitHub user profile could not be loaded"
-        }), 401
-
-    user = user_response.json()
-    username = user.get("login")
-
-    if not username:
-        return jsonify({
-            "success": False,
-            "error": "OAuth token received, but GitHub username was missing"
-        }), 401
-
-    return jsonify({
-        "success": True,
-        "token": access_token,
-        "username": username
-    })
+    # 3. Redirection finale vers l'extension avec les données
+    print("iciCallback11")
+    final_url = f"{ext_uri}?token={access_token}&username={urllib.parse.quote(username)}"
+    print(final_url)
+    return redirect(final_url)
 
 # ============================================
 # Extraction Session Endpoint

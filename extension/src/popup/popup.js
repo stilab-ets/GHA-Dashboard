@@ -1,3 +1,4 @@
+import browser from "webextension-polyfill";
 import { CONFIG } from "../config.js";
 
 // GitHub Token field handling
@@ -14,28 +15,35 @@ document.addEventListener("DOMContentLoaded", () => {
   const BACKEND_URL = CONFIG.BACKEND_URL;
 
   // Don't show token, only say if it's available or not
-  chrome.storage.session.get(["githubToken", "githubUsername"], (result) => {
-    setAuthenticatedState(Boolean(result.githubToken), result.githubUsername);
+  (async () => {
+    const result = await browser.storage.session.get([
+      "githubToken",
+      "githubUsername",
+    ]);
+
+    setAuthenticatedState(
+      Boolean(result.githubToken),
+      result.githubUsername,
+    );
+  })();
+
+  authBtn.addEventListener("click", async () => {
+    await loginWithGitHub();
   });
 
-  authBtn.addEventListener("click", () => {
-    loginWithGitHub();
-  });
-
-  saveBtn.addEventListener("click", () => {
+  saveBtn.addEventListener("click", async () => {
     const token = tokenInput.value.trim();
     if (token.length > 0) {
-      chrome.storage.session.set({ githubToken: token }, () => {
-        chrome.storage.local.remove(["githubToken"]);
-        setAuthenticatedState(true);
-      });
+      await browser.storage.session.set({ githubToken: token });
+      await browser.storage.local.remove(["githubToken"]);
+      setAuthenticatedState(true);
     } else {
       clearToken();
     }
   });
 
-  forgetBtn.addEventListener("click", () => {
-    clearToken();
+  forgetBtn.addEventListener("click", async () => {
+    await clearToken();
   });
 
   function setAuthenticatedState(isAuthenticated, username = null) {
@@ -57,121 +65,68 @@ document.addEventListener("DOMContentLoaded", () => {
     statusSpan.className = "status-message info";
   }
 
-  function clearToken() {
-    chrome.storage.session.remove(["githubToken", "githubUsername"], () => {
-      chrome.storage.local.remove(["githubToken"]);
-      setAuthenticatedState(false);
-    });
+  async function clearToken() {
+    await browser.storage.session.remove([
+      "githubToken",
+      "githubUsername",
+    ]);
+
+    await browser.storage.local.remove(["githubToken"]);
+
+    setAuthenticatedState(false);
   }
 
-  function loginWithGitHub() {
+  async function loginWithGitHub() {
     const statusSpan = document.getElementById("token-status");
-    const redirectUri = chrome.identity.getRedirectURL();
-    const state = crypto.randomUUID();
 
-    if (!CLIENT_ID) {
-      statusSpan.textContent = "GitHub OAuth client ID is missing in extension config";
-      statusSpan.className = "status-message error";
-      return;
-    }
+    // L'URL de retour de l'extension (différente sur Chrome et Firefox)
+    const redirectUri = browser.identity.getRedirectURL();
 
-    chrome.storage.session.set({ oauthState: state });
+    statusSpan.textContent = "Redirection vers GitHub via le backend...";
+    statusSpan.className = "status-message info";
 
-    const url =
-      `https://github.com/login/oauth/authorize` +
-      `?client_id=${CLIENT_ID}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&scope=${encodeURIComponent("repo workflow read:user")}` +
-      `&state=${encodeURIComponent(state)}`;
+    // On pointe vers NOTRE backend, en lui passant l'URL de l'extension 
+    // pour qu'il sache où renvoyer le token à la fin.
+    const authUrl = `${BACKEND_URL}/auth/login?extension_redirect_uri=${encodeURIComponent(redirectUri)}`;
 
-    chrome.identity.launchWebAuthFlow(
-      {
-        url,
+    try {
+      // launchWebAuthFlow va ouvrir la page, suivre les redirections, et s'arrêter
+      // quand le navigateur atteindra finalement l'URL `redirectUri`
+      console.log("beforeLaunch")
+      const finalUrl = await browser.identity.launchWebAuthFlow({
+        url: authUrl,
         interactive: true,
-      },
-      async (redirectUrl) => {
-        try {
-          if (chrome.runtime.lastError) {
-            statusSpan.textContent = "OAuth failed";
-            statusSpan.className = "status-message error";
-            return;
-          }
+      });
+      console.log("afterLaunch", finalUrl)
 
-          if (!redirectUrl) {
-            statusSpan.textContent = "No redirect URL received";
-            statusSpan.className = "status-message error";
-            return;
-          }
+      if (!finalUrl) throw new Error("Aucune URL de redirection reçue.");
 
-          const returnedState = new URL(redirectUrl).searchParams.get("state");
-          const code = new URL(redirectUrl).searchParams.get("code");
+      // On parse l'URL finale générée par notre backend
+      const urlParams = new URL(finalUrl).searchParams;
+      const token = urlParams.get("token");
+      const username = urlParams.get("username");
+      const error = urlParams.get("error");
 
-          chrome.storage.session.get(["oauthState"], async (storageResult) => {
-            try {
-              if (storageResult.oauthState !== returnedState) {
-                statusSpan.textContent = "OAuth state mismatch";
-                statusSpan.className = "status-message error";
-                return;
-              }
+      if (error) throw new Error(decodeURIComponent(error));
+      if (!token) throw new Error("Aucun token renvoyé par le backend.");
 
-              chrome.storage.session.remove(["oauthState"]);
+      // Sauvegarde et mise à jour de l'UI
+      await browser.storage.session.set({
+        githubToken: token,
+        githubUsername: username || "Utilisateur",
+      });
 
-              if (!code) {
-                statusSpan.textContent = "No authorization code found";
-                statusSpan.className = "status-message error";
-                return;
-              }
+      await browser.storage.local.remove(["githubToken"]);
+      setAuthenticatedState(true, username);
 
-              statusSpan.textContent = "Exchanging code...";
-              statusSpan.className = "status-message info";
-
-              const response = await fetch(`${BACKEND_URL}/auth/github`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ code, redirectUri }),
-              });
-
-              let authResult = null;
-              try {
-                authResult = await response.json();
-              } catch (_) {
-                authResult = null;
-              }
-
-              if (!response.ok) {
-                throw new Error(authResult?.error || `Backend error: ${response.status}`);
-              }
-
-              if (!authResult.token) {
-                statusSpan.textContent = "No token received from backend";
-                statusSpan.className = "status-message error";
-                return;
-              }
-
-              chrome.storage.session.set(
-                {
-                  githubToken: authResult.token,
-                  githubUsername: authResult.username,
-                },
-                () => {
-                  chrome.storage.local.remove(["githubToken"]);
-                  setAuthenticatedState(true, authResult.username);
-                },
-              );
-            } catch (err) {
-              console.error(err);
-              statusSpan.textContent = "Login failed: " + err.message;
-              statusSpan.className = "status-message error";
-            }
-          });
-        } catch (err) {
-          console.error(err);
-          statusSpan.textContent = "Login failed: " + err.message;
-          statusSpan.className = "status-message error";
-        }
-      },
-    );
+    } catch (err) {
+      console.error(err);
+      statusSpan.textContent = "Échec de connexion : " + err.message;
+      statusSpan.className = "status-message error";
+      console.log("erreurChose")
+      console.error(err);
+      console.error(err.message);
+      console.error(err.stack);
+    }
   }
 });

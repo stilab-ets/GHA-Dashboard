@@ -3,13 +3,18 @@
   "version": "0.1.0",
   "description": "Dashboard for monitoring GitHub Actions workflows metrics.",
   "manifest_version": 3,
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuZzaKtGfgGx+ED8yZkIIT/XXH5r19+Kof9MoTCVEH2WdqCnY/a9MaOFIDT7qyveqHlliC9qmG2TzGNsjR3nx4ZNo19OF7eILP4pUqgBHEU2q3uP8kLkG97Pv6IkxeihT5gAX8X+nX9z4xcsNe0hJL2iij6gC92Eg61gwFz75zf7vMLZRV/qlUEs+j9wh7R9LpuPXYOaxaEOOY4nWw2s++mGfaBYupoBP2yD2evLPG4/VavCq5Y17lMO4ifCgNEYGOVtVr/mKpRyDE7h7IVx9NjzJqWn+l85EbIq/f+l0kwSIduvBEk0OhK9/Msaf+sOV3sIdKPmasIoxAbmgdtQCqwIDAQAB",
-
+   "browser_specific_settings": {
+    "gecko": {
+      "id": "gha-dashboard@ets.ca"
+    }
+  },
   "permissions": ["storage", "tabs", "scripting", "identity"],
   "host_permissions": ["https://github.com/*", "https://api.github.com/*"],
 
   "background": {
-    "service_worker": "src/background.js"
+    "scripts": [
+      "src/background.js"
+    ]
   },
 
   "content_security_policy": {
@@ -33,8 +38,7 @@
         "react_page/*",
         "src/assets/dashboard.png"
       ],
-      "matches": ["https://github.com/*"],
-      "use_dynamic_url": true   
+      "matches": ["https://github.com/*"] 
     }
   ],
 

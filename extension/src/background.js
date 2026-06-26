@@ -1,3 +1,5 @@
+import browser from "webextension-polyfill";
+
 // Background Service Worker - WebSocket Manager with GitHub Token
 
 const wsCache = new Map();
@@ -53,7 +55,7 @@ function cacheMatchesFilters(cached, filters = {}) {
   );
 }
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "UPDATE_REPO") {
     const tabId = sender?.tab?.id;
     const updates = {};
@@ -78,7 +80,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (Object.keys(updates).length > 0) {
-      chrome.storage.local.set(updates);
+      browser.storage.local.set(updates);
     }
     return true;
   }
@@ -119,11 +121,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     // If the same repo is already streaming, keep that socket alive and let
-    // the dashboard re-attach through chrome.storage updates.
+    // the dashboard re-attach through browser.storage updates.
     if (activeWebSocket && currentRepo === repo) {
       if (isSocketActive(activeWebSocket)) {
         if (cached) {
-          chrome.storage.local.set({
+          browser.storage.local.set({
             wsRuns: [...(cached.runs || [])],
             wsStatus: {
               isStreaming: true,
@@ -177,7 +179,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else {
       wsCache.clear();
     }
-    chrome.storage.local.remove(["wsRuns", "wsStatus"]);
+    browser.storage.local.remove(["wsRuns", "wsStatus"]);
     sendResponse({ success: true });
     return true;
   }
@@ -206,7 +208,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (repoToCancel) {
-      chrome.storage.local.set({
+      browser.storage.local.set({
         wsRuns: [...(cache?.runs || [])],
         wsStatus: {
           isStreaming: false,
@@ -232,7 +234,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 // Close WebSocket if the owner tab is closed
-chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+browser.tabs.onRemoved.addListener((tabId, removeInfo) => {
   if (currentTabId !== null && tabId === currentTabId && activeWebSocket) {
     try {
       activeWebSocket.close();
@@ -248,7 +250,7 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
 // Keep the WebSocket alive if the owner tab refreshes. GitHub can trigger a
 // page load while the dashboard iframe is mounted; closing here aborts the
 // first collection, then Retry appears to work only because data was cached.
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!activeWebSocket || currentTabId === null) return;
 
   // We only care about the tab that owns the current WebSocket
@@ -272,7 +274,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
   currentRepo = repo;
   currentTabId = tabId ?? null;
 
-  chrome.storage.local.set({
+  browser.storage.local.set({
     wsRuns: [],
     wsStatus: {
       isStreaming: true,
@@ -288,11 +290,11 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
   });
 
   // Get GitHub token from storage
-  chrome.storage.session.get(["githubToken"], async (result) => {
-    const token = result.githubToken;
+  (async () => {
+    const { githubToken: token } = await browser.storage.session.get("githubToken");
 
     if (!token) {
-      chrome.storage.local.set({
+      await browser.storage.local.set({
         wsStatus: {
           isStreaming: false,
           isComplete: false,
@@ -358,7 +360,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
 
           activeWebSocket.onopen = () => {
             hasOpened = true;
-            chrome.storage.local.set({
+            browser.storage.local.set({
               wsStatus: {
                 isStreaming: true,
                 isComplete: false,
@@ -455,7 +457,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                   statusUpdate.phase2_eta = message.eta_seconds || null;
                 }
 
-                chrome.storage.local.set({
+                browser.storage.local.set({
                   wsRuns: [...cache.runs],
                   wsStatus: statusUpdate,
                 });
@@ -470,7 +472,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 // IMPORTANT: Store phase1_elapsed in memory cache to avoid race conditions
                 cache.phase1_elapsed = message.elapsed_time || null;
 
-                chrome.storage.local.set({
+                browser.storage.local.set({
                   wsStatus: {
                     isStreaming: true,
                     isComplete: false,
@@ -488,7 +490,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 ).length;
 
                 // Use phase1_elapsed from memory cache (NO race condition!)
-                chrome.storage.local.set({
+                browser.storage.local.set({
                   wsRuns: [...cache.runs], // Trigger update
                   wsStatus: {
                     isStreaming: true,
@@ -527,7 +529,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                   totalPages: message.totalPages,
                 });
 
-                chrome.storage.local.set({
+                browser.storage.local.set({
                   wsRuns: [...cache.runs], // Ensure final state is saved
                   wsStatus: {
                     isStreaming: false,
@@ -543,7 +545,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 });
               } else if (message.type === "error") {
                 console.error("[Background] Server error:", message.message);
-                chrome.storage.local.set({
+                browser.storage.local.set({
                   wsStatus: {
                     isStreaming: false,
                     isComplete: false,
@@ -581,7 +583,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
             });
 
             if (wasCancelled) {
-              chrome.storage.local.set({
+              browser.storage.local.set({
                 wsRuns: [...(cache?.runs || [])],
                 wsStatus: {
                   isStreaming: false,
@@ -606,7 +608,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 return;
               }
 
-              chrome.storage.local.set({
+              browser.storage.local.set({
                 wsStatus: {
                   isStreaming: false,
                   isComplete: false,
@@ -620,7 +622,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
                 cache.isComplete = true;
               }
 
-              chrome.storage.local.set({
+              browser.storage.local.set({
                 wsStatus: {
                   isStreaming: false,
                   isComplete: true,
@@ -651,7 +653,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
 
             console.error("[Background] WebSocket error:", error);
 
-            chrome.storage.local.set({
+            browser.storage.local.set({
               wsStatus: {
                 isStreaming: false,
                 isComplete: false,
@@ -664,7 +666,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         } catch (error) {
           console.error("[Background] Failed to create WebSocket:", error);
 
-          chrome.storage.local.set({
+          browser.storage.local.set({
             wsStatus: {
               isStreaming: false,
               isComplete: false,
@@ -681,7 +683,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
     } catch (error) {
       console.error("[Background] Failed to create extraction session:", error);
 
-      chrome.storage.local.set({
+      browser.storage.local.set({
         wsStatus: {
           isStreaming: false,
           isComplete: false,
@@ -693,7 +695,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
       currentRepo = null;
       currentTabId = null;
     }
-  });
+  })();
 }
 
 console.log("[Background] GHA Dashboard Background Script loaded");
