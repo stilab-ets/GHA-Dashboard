@@ -643,47 +643,62 @@ export default function Dashboard() {
   const [checkingData, setCheckingData] = useState(true);
   const prevDatesRef = useRef({ start: defaultStart, end: defaultEnd });
 
-  useEffect(async () => {
+  useEffect(() => {
+    let mediaQuery = null;
+    let syncSystemTheme = null;
+
     const applyTheme = (theme) => {
-      if (theme === 'light' || theme === 'dark') {
+      if (theme === "light" || theme === "dark") {
         setDashboardTheme(theme);
       }
     };
 
-    applyTheme(new URLSearchParams(window.location.search).get('theme'));
-
     const handleMessage = (event) => {
-      if (event.data?.type === 'GHA_DASHBOARD_THEME') {
+      if (event.data?.type === "GHA_DASHBOARD_THEME") {
         applyTheme(event.data.theme);
       }
     };
 
-    window.addEventListener('message', handleMessage);
+    const run = async () => {
+      if (browser.storage && browser.tabs) {
+        const tabs = await browser.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
 
-    if (browser.storage && browser.tabs) {
-      const tabs = await browser.tabs.query({active: true, currentWindow: true});
-      const activeTab = tabs[0];
-      if (activeTab && typeof activeTab.id === 'number') {
-        const key = `githubTheme_${activeTab.id}`;
-        const result = await browser.storage.local.get([key, 'githubTheme']);
-        applyTheme(result[key] || result.githubTheme);
-      } else {
-        const result = await browser.storage.local.get(['githubTheme']);
-        applyTheme(result.githubTheme);
+        const activeTab = tabs[0];
+
+        if (activeTab && typeof activeTab.id === "number") {
+          const key = `githubTheme_${activeTab.id}`;
+          const result = await browser.storage.local.get([key, "githubTheme"]);
+          applyTheme(result[key] || result.githubTheme);
+        } else {
+          const result = await browser.storage.local.get(["githubTheme"]);
+          applyTheme(result.githubTheme);
+        }
+      } else if (window.matchMedia) {
+        mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
+
+        syncSystemTheme = () =>
+          setDashboardTheme(mediaQuery.matches ? "light" : "dark");
+
+        syncSystemTheme();
+        mediaQuery.addEventListener("change", syncSystemTheme);
       }
-    } else if (window.matchMedia) {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
-      const syncSystemTheme = () => setDashboardTheme(mediaQuery.matches ? 'light' : 'dark');
-      syncSystemTheme();
-      mediaQuery.addEventListener('change', syncSystemTheme);
-      return () => {
-        window.removeEventListener('message', handleMessage);
-        mediaQuery.removeEventListener('change', syncSystemTheme);
-      };
-    }
+    };
+
+    applyTheme(new URLSearchParams(window.location.search).get("theme"));
+
+    window.addEventListener("message", handleMessage);
+
+    run();
 
     return () => {
-      window.removeEventListener('message', handleMessage);
+      window.removeEventListener("message", handleMessage);
+
+      if (mediaQuery && syncSystemTheme) {
+        mediaQuery.removeEventListener("change", syncSystemTheme);
+      }
     };
   }, []);
 
@@ -967,13 +982,13 @@ export default function Dashboard() {
     workflowIds: normalizeWorkflowIds(collectionScopeWorkflowIds)
   });
 
-  const getGithubToken = () => async () => {
-    if (browser.storage?.session) {
-      const result = await browser.storage.session.get(['githubToken']);
-      resolve(result.githubToken || null);
-    } else {
-      resolve(null);
+  const getGithubToken = async () => {
+    if (!browser.storage?.session) {
+      return null;
     }
+
+    const result = await browser.storage.session.get("githubToken");
+    return result.githubToken ?? null;
   };
 
   const buildScopedQuery = (scope = getCollectionScope()) => {
@@ -1540,7 +1555,7 @@ export default function Dashboard() {
   };
 
   // Monitor storage changes and trigger data refresh when runs (with jobs) are updated
-  useEffect(async () => {
+  useEffect(() => {
     if (!browser.storage) return;
 
     const handleStorageChange = (changes, areaName) => {
@@ -1662,35 +1677,44 @@ export default function Dashboard() {
 
     browser.storage.onChanged.addListener(handleStorageChange);
 
-    // Check initial state
-    const result = await browser.storage.local.get(['wsStatus']);
-    const status = result.wsStatus || {};
-    if (status) {
-      if (status.totalRuns) {
-        lastKnownTotalRunsRef.current = status.totalRuns;
-      }
-      setProgress({
-        items: (status.collectedRuns !== undefined && status.collectedRuns !== null)
-          ? status.collectedRuns
-          : 0, // Current collected count
-        complete: status.isComplete || false,
-        isStreaming: status.isStreaming || false,
-        phase: status.phase || 'workflow_runs',
-        totalRuns: status.totalRuns || lastKnownTotalRunsRef.current || 0, // Total count from API
-        elapsed_time: status.elapsed_time || null,
-        eta_seconds: status.eta_seconds || null,
-        phase1_elapsed: status.phase1_elapsed || null,
-        phase2_elapsed: status.phase2_elapsed || null,
-        phase2_eta: status.phase2_eta || null
-      });
-    }
+    const run = async () => {
+      // Check initial state
+      const result = await browser.storage.local.get(['wsStatus']);
+      const status = result.wsStatus || {};
 
-    return () => {
-      if (browser.storage) {
-        browser.storage.onChanged.removeListener(handleStorageChange);
+      if (status) {
+        if (status.totalRuns) {
+          lastKnownTotalRunsRef.current = status.totalRuns;
+        }
+
+        setProgress({
+          items:
+            status.collectedRuns !== undefined &&
+            status.collectedRuns !== null
+              ? status.collectedRuns
+              : 0,
+          complete: status.isComplete || false,
+          isStreaming: status.isStreaming || false,
+          phase: status.phase || 'workflow_runs',
+          totalRuns:
+            status.totalRuns ||
+            lastKnownTotalRunsRef.current ||
+            0,
+          elapsed_time: status.elapsed_time || null,
+          eta_seconds: status.eta_seconds || null,
+          phase1_elapsed: status.phase1_elapsed || null,
+          phase2_elapsed: status.phase2_elapsed || null,
+          phase2_eta: status.phase2_eta || null
+        });
       }
     };
-  }, [currentRepo, filters, availableFilters, appliedCollectionScope]);
+
+    run();
+
+    return () => {
+      browser.storage.onChanged.removeListener(handleStorageChange);
+    };
+  }, [currentRepo, filters, availableFilters, appliedCollectionScope]);  
 
   // Real-time elapsed time counter (updates every second)
   useEffect(() => {
