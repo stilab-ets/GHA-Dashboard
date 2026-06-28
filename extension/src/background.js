@@ -236,6 +236,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; 
   }
 
+  if (request.action === "getGithubToken") {
+    return browser.storage.session.get("githubToken");
+  }
+
   return false;
 });
 

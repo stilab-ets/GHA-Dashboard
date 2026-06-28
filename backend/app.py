@@ -1,4 +1,5 @@
 import base64
+import re
 import urllib.parse
 
 import os
@@ -29,9 +30,7 @@ from urllib.parse import unquote
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--e2e", action="store_true", help="Enable E2E test mode")
-
 args = parser.parse_args()
-
 E2E_MODE = args.e2e
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,26 +41,25 @@ load_dotenv(os.path.join(BACKEND_DIR, ".env"), override=True)
 app = Flask(__name__)
 sock = Sock(app)
 
-DEFAULT_EXTENSION_ORIGINS = "chrome-extension://hgehgkjceklknibnacgjhefociphnhaf"
+CHROME_EXTENSION_ID = f"chrome-extension://{os.getenv('CHROME_EXTENSION_ID')}"
+    
+def is_allowed_origin(origin):
+    if origin is None:
+        return False
 
-def get_allowed_extension_origins():
-    raw_origins = os.getenv("GHA_EXTENSION_ORIGINS", DEFAULT_EXTENSION_ORIGINS)
-    return [
-        origin.strip()
-        for origin in raw_origins.split(",")
-        if origin.strip()
-    ]
+    if origin == CHROME_EXTENSION_ID or origin.startswith("moz-extension://"):
+        return True
 
-
-def is_allowed_extension_origin(origin):
-    return origin in get_allowed_extension_origins()
-
+    return False
 
 CORS(
     app,
     resources={
         r"/*": {
-            "origins": get_allowed_extension_origins(),
+            "origins": [
+                CHROME_EXTENSION_ID,
+                re.compile(r"moz-extension://.*"),
+            ],
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"],
         }
@@ -418,7 +416,7 @@ def websocket_data(ws, extractionId: str):
     WebSocket endpoint for streaming GitHub Actions data via GHAminer
     """
     origin = request.headers.get("Origin")
-    if not is_allowed_extension_origin(origin):
+    if not is_allowed_origin(origin):
         ws.send(json.dumps({
             "type": "error",
             "message": "Forbidden WebSocket origin"

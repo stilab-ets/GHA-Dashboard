@@ -1,5 +1,6 @@
 (function () {
   'use strict';
+
   const browser = globalThis.browser || window.browser;
 
   /* ---------------------------------------------------------
@@ -10,7 +11,7 @@
       const urlObj = new URL(url);
       if (urlObj.hostname === 'github.com') {
         const parts = urlObj.pathname.split('/').filter(Boolean);
-        if (parts.length >= 2) return `${parts[0]}/${parts[1]}`; 
+        if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
       }
     } catch (err) {
       console.error("[GHA Dashboard] URL parse error:", err);
@@ -104,68 +105,99 @@
   const MAX_INJECT_RETRIES = 20; // Try for up to 2 seconds (20 * 100ms)
   
   const injectDashboardButton = () => {
-    // 1. Vérifier si déjà présent pour éviter les doublons
+    // Don't inject if already exists
     if (document.querySelector("#gha-dashboard-nav-button")) {
+      injectRetryCount = 0; // Reset counter on success
       return;
     }
 
-    // 2. Trouver la barre de navigation
-    const nav = document.querySelector('nav[aria-label="Repository" i]');
+    // Try multiple selectors to find the navigation container
+    const nav =
+      document.querySelector('nav[aria-label="Repository"]') ||
+      document.querySelector('.UnderlineNav-body') ||
+      document.querySelector('[data-pjax-container] nav ul') ||
+      document.querySelector('nav.UnderlineNav ul.UnderlineNav-body');
+
     if (!nav) {
       injectRetryCount++;
       if (injectRetryCount < MAX_INJECT_RETRIES) {
+        console.log(`[GHA Dashboard] Navigation bar not found, retrying... (${injectRetryCount}/${MAX_INJECT_RETRIES})`);
         setTimeout(injectDashboardButton, 100);
         return;
+      } else {
+        console.log('[GHA Dashboard] Navigation bar not found after max retries, will observe DOM for it');
+        injectRetryCount = 0;
+        // Set up a MutationObserver to watch for navigation bar
+        observeForNavigationBar();
+        return;
       }
-      observeForNavigationBar();
-      return;
     }
 
-    const navList = nav.querySelector('ul');
+    // Reset retry count on success
+    injectRetryCount = 0;
+
+    // Find the nav list - try multiple approaches
+    let navList = nav.querySelector('ul.UnderlineNav-body');
     if (!navList) {
+      navList = nav.querySelector('ul');
+    }
+    if (!navList && nav.tagName === 'UL') {
+      navList = nav;
+    }
+
+    if (!navList) {
+      console.log('[GHA Dashboard] Navigation list not found, retrying...');
       setTimeout(injectDashboardButton, 100);
       return;
     }
 
-    // 3. CLONAGE : Récupérer un onglet existant pour hériter des classes React
-    const existingItems = navList.querySelectorAll('li');
-    if (existingItems.length === 0) return;
-    
-    // On clone le dernier élément de la liste
-    const templateItem = existingItems[existingItems.length - 1]; 
-    const navItem = templateItem.cloneNode(true); 
+    const navItem = document.createElement('li');
     navItem.id = 'gha-dashboard-nav-button';
+    navItem.className = 'd-flex';
 
-    // 4. Nettoyage et personnalisation du bouton cloné
-    const button = navItem.querySelector('a');
-    if (button) {
-      button.href = '#';
-      button.setAttribute('aria-selected', 'false');
-      button.removeAttribute('aria-current');
-      
-      // On retire les attributs qui pourraient créer des conflits avec le système GitHub
-      button.removeAttribute('data-tab-item');
-      button.classList.remove('selected'); 
+    const button = document.createElement('a');
+    button.href = '#';
+    button.className = 'UnderlineNav-item';
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', 'false');
+    button.innerHTML = `
+      <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" style="fill: currentColor; margin-right: 4px;">
+        <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"></path>
+      </svg>
+      GHA-Dashboard
+    `;
+    button.style.cssText = 'cursor: pointer; text-decoration: none;';
+    
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleDashboard();
+    });
 
-      // 5. Injection du contenu
-      button.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" style="fill: currentColor;">
-            <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"></path>
-          </svg>
-          <span>GHA-Dashboard</span>
-        </div>
-      `;
-      
-      button.addEventListener('click', (e) => {
-        e.preventDefault();
-        toggleDashboard();
-      });
-    }
-
+    navItem.appendChild(button);
     navList.appendChild(navItem);
+    
     dashboardButton = button;
-    console.log('[GHA Dashboard] Button successfully cloned and injected');
+
+    // Add listeners to other nav items to close dashboard when clicked
+    const allNavItems = nav.querySelectorAll('.UnderlineNav-item:not(#gha-dashboard-nav-button .UnderlineNav-item)');
+    allNavItems.forEach(item => {
+      item.addEventListener('click', (e) => {
+        if (dashboardContainer && isDashboardActive) {
+          // Check if clicking the same URL we were on before dashboard
+          const clickedUrl = item.getAttribute('href');
+          if (clickedUrl && previousUrl && clickedUrl === previousUrl) {
+            // Same section - force page reload to avoid issues
+            e.preventDefault();
+            console.log('[GHA Dashboard] Reloading page to avoid state issues');
+            window.location.reload();
+            return;
+          }
+          hideDashboard();
+        }
+      });
+    });
+
+    console.log('[GHA Dashboard] Button injected into navigation bar');
   };
 
   /* ---------------------------------------------------------
@@ -619,7 +651,7 @@
   /* ---------------------------------------------------------
    * Observe GitHub navigation (PJAX / Turbo)
    * --------------------------------------------------------- */
-  /*const observeNavigation = () => {
+  const observeNavigation = () => {
     let lastUrl = location.href;
     new MutationObserver(() => {
       const url = location.href;
@@ -653,50 +685,7 @@
         }
       }
     }).observe(document.body, { subtree: true, childList: true });
-  };*/
-
-  /* ---------------------------------------------------------
-   * Observe GitHub navigation (Turbo / PJAX)
-   * --------------------------------------------------------- */
-  const handleGitHubNavigation = () => {
-    // Nettoyage de l'état précédent
-    const existingBtn = document.querySelector('#gha-dashboard-nav-button');
-    if (existingBtn) {
-      existingBtn.remove();
-    }
-    
-    if (dashboardContainer && dashboardContainer.parentNode) {
-      dashboardContainer.parentNode.removeChild(dashboardContainer);
-      dashboardContainer = null;
-    }
-    
-    document.body.classList.remove('gha-dashboard-active');
-    
-    if (originalContent && originalContent.parentNode) {
-      originalContent.style.display = '';
-      originalContent = null;
-    }
-    
-    dashboardButton = null;
-    injectRetryCount = 0; // Reset retry count on navigation
-    
-    if (isGitHubRepoPage()) {
-      syncGitHubContext();
-      // Relance l'observateur de la barre de navigation
-      observeForNavigationBar();
-      
-      // Injecte le bouton avec un léger délai pour s'assurer que le DOM est stable
-      setTimeout(() => {
-        injectDashboardButton();
-      }, 150);
-    }
   };
-
-  // Écoute les événements de navigation natifs de GitHub
-  document.addEventListener("turbo:render", handleGitHubNavigation);
-  
-  // Pour assurer la compatibilité avec d'anciennes pages ou d'autres types de chargement
-  document.addEventListener("pjax:end", handleGitHubNavigation);
 
   /* ---------------------------------------------------------
    * Init
@@ -707,7 +696,7 @@
     initialize();
   }
 
-  //observeNavigation();
+  observeNavigation();
 
   const themeObserver = new MutationObserver(() => {
     syncGitHubContext();

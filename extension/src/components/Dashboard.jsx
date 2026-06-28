@@ -751,6 +751,9 @@ export default function Dashboard() {
   const collectionDatePickerRef = useRef(null);
   const collectionWorkflowPickerRef = useRef(null);
 
+  const animationFrameId = useRef(null);
+  const lastHeightSent = useRef(0);
+
   // ============================================
   // Effects
   // ============================================
@@ -805,10 +808,21 @@ export default function Dashboard() {
     };
 
     const scheduleHeightPost = () => {
-      if (animationFrameId !== null) {
-        window.cancelAnimationFrame(animationFrameId);
+      if (!animationFrameId || !lastHeightSent) return;
+      
+      if (animationFrameId.current !== null) {
+        window.cancelAnimationFrame(animationFrameId.current);
       }
-      animationFrameId = window.requestAnimationFrame(postDashboardHeight);
+
+      animationFrameId.current = window.requestAnimationFrame(() => {
+        const newHeight = getDashboardHeight();
+
+        // 3. On vérifie et met à jour avec .current
+        if (Math.abs(newHeight - lastHeightSent.current) > 10) {
+          lastHeightSent.current = newHeight;
+          window.parent.postMessage({ type: 'GHA_DASHBOARD_HEIGHT', height: newHeight }, '*');
+        }
+      });
     };
 
     scheduleHeightPost();
@@ -982,14 +996,13 @@ export default function Dashboard() {
     workflowIds: normalizeWorkflowIds(collectionScopeWorkflowIds)
   });
 
-  const getGithubToken = async () => {
-    if (!browser.storage?.session) {
-      return null;
-    }
+  async function getGithubToken() {
+    const result = await browser.runtime.sendMessage({
+      action: "getGithubToken"
+    });
 
-    const result = await browser.storage.session.get("githubToken");
     return result.githubToken ?? null;
-  };
+  }
 
   const buildScopedQuery = (scope = getCollectionScope()) => {
     const params = new URLSearchParams();
