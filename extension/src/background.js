@@ -1,7 +1,7 @@
-import browser from "webextension-polyfill";
-
 // Background Service Worker - WebSocket Manager with GitHub Token
+import { CONFIG } from "./config.js";
 
+const browser = globalThis.browser || window.browser;
 const wsCache = new Map();
 let activeWebSocket = null;
 let currentRepo = null;
@@ -230,8 +230,52 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "authenticate") {
+    console.log("[Background] Starting authentication flow");
+    handleAuthentication().then(sendResponse);
+    return true; 
+  }
+
   return false;
 });
+
+async function handleAuthentication() {
+  try {
+    const redirectUri = browser.identity.getRedirectURL();
+    const authUrl = `${CONFIG.BACKEND_URL}/auth/login?extension_redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+    console.log("Lancement du WebAuthFlow vers:", authUrl);
+    
+    const finalUrl = await browser.identity.launchWebAuthFlow({
+      url: authUrl,
+      interactive: true,
+    });
+
+    if (!finalUrl) throw new Error("Aucune URL de redirection reçue.");
+
+    const urlParams = new URL(finalUrl).searchParams;
+    const token = urlParams.get("token");
+    const username = urlParams.get("username");
+    const error = urlParams.get("error");
+
+    if (error) throw new Error(decodeURIComponent(error));
+    if (!token) throw new Error("Aucun token renvoyé par le backend.");
+
+    // Sauvegarde en session
+    await browser.storage.session.set({
+      githubToken: token,
+      githubUsername: username || "Utilisateur",
+    });
+    
+    // Nettoyage au cas où
+    await browser.storage.local.remove(["githubToken"]);
+
+    return { success: true, username: username || "Utilisateur" };
+  } catch (err) {
+    console.error("Erreur d'authentification:", err);
+    return { success: false, error: err.message };
+  }
+}
 
 // Close WebSocket if the owner tab is closed
 browser.tabs.onRemoved.addListener((tabId, removeInfo) => {

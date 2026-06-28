@@ -44,7 +44,6 @@ sock = Sock(app)
 
 DEFAULT_EXTENSION_ORIGINS = "chrome-extension://hgehgkjceklknibnacgjhefociphnhaf"
 
-
 def get_allowed_extension_origins():
     raw_origins = os.getenv("GHA_EXTENSION_ORIGINS", DEFAULT_EXTENSION_ORIGINS)
     return [
@@ -246,9 +245,6 @@ def health():
 
 # ============================================
 # Authentication Endpoint
-# ============================================
-# ============================================
-# Authentication Endpoints (Proxy Pattern)
 # ============================================
 
 @app.get("/auth/login")

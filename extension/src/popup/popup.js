@@ -78,55 +78,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loginWithGitHub() {
     const statusSpan = document.getElementById("token-status");
-
-    // L'URL de retour de l'extension (différente sur Chrome et Firefox)
-    const redirectUri = browser.identity.getRedirectURL();
-
     statusSpan.textContent = "Redirection vers GitHub via le backend...";
     statusSpan.className = "status-message info";
 
-    // On pointe vers NOTRE backend, en lui passant l'URL de l'extension 
-    // pour qu'il sache où renvoyer le token à la fin.
-    const authUrl = `${BACKEND_URL}/auth/login?extension_redirect_uri=${encodeURIComponent(redirectUri)}`;
-
     try {
-      // launchWebAuthFlow va ouvrir la page, suivre les redirections, et s'arrêter
-      // quand le navigateur atteindra finalement l'URL `redirectUri`
-      console.log("beforeLaunch")
-      const finalUrl = await browser.identity.launchWebAuthFlow({
-        url: authUrl,
-        interactive: true,
-      });
-      console.log("afterLaunch", finalUrl)
+      console.log("Envoi du message au background...");
+      // On délègue l'action au background script
+      const response = await browser.runtime.sendMessage({ action: "authenticate" });
 
-      if (!finalUrl) throw new Error("Aucune URL de redirection reçue.");
-
-      // On parse l'URL finale générée par notre backend
-      const urlParams = new URL(finalUrl).searchParams;
-      const token = urlParams.get("token");
-      const username = urlParams.get("username");
-      const error = urlParams.get("error");
-
-      if (error) throw new Error(decodeURIComponent(error));
-      if (!token) throw new Error("Aucun token renvoyé par le backend.");
-
-      // Sauvegarde et mise à jour de l'UI
-      await browser.storage.session.set({
-        githubToken: token,
-        githubUsername: username || "Utilisateur",
-      });
-
-      await browser.storage.local.remove(["githubToken"]);
-      setAuthenticatedState(true, username);
-
+      if (response && response.success) {
+        setAuthenticatedState(true, response.username);
+      } else {
+        throw new Error(response?.error || "Erreur inconnue lors de l'authentification.");
+      }
     } catch (err) {
       console.error(err);
       statusSpan.textContent = "Échec de connexion : " + err.message;
       statusSpan.className = "status-message error";
-      console.log("erreurChose")
-      console.error(err);
-      console.error(err.message);
-      console.error(err.stack);
     }
   }
 });

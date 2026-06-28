@@ -14,7 +14,8 @@
   "background": {
     "scripts": [
       "src/background.js"
-    ]
+    ],
+    "type": "module"
   },
 
   "content_security_policy": {

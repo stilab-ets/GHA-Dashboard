@@ -7,8 +7,6 @@
     "build": "vite build",
     "preview": "vite preview",
     "pack": "npm run build && node src/scripts/assemble.js",
-    "pack:chromium": "npm run build && node src/scripts/assemble.js chromium",
-    "pack:firefox": "npm run build && node src/scripts/assemble.js firefox",
     "dist": "npm run pack && powershell -NoProfile -Command \"Compress-Archive -Path build\\* -DestinationPath gha-dashboard.zip -Force\"",
     "test:e2e": "playwright test tests"
   },

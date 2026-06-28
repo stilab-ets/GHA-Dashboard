@@ -44,6 +44,7 @@ async function main() {
       src: `manifests/manifest.${target}.json`,
       dest: 'manifest.json'
     },
+    { src: 'src/config.js', dest: 'config.js' },
     { src: 'src/background.js', dest: 'background.js' },
     { src: 'src/contentScript.js', dest: 'contentScript.js' },
     { src: 'src/popup/popup.css', dest: 'popup/popup.css' }
