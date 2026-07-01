@@ -1,5 +1,4 @@
 import browser from "webextension-polyfill";
-import { CONFIG } from "../config.js";
 
 // GitHub Token field handling
 document.addEventListener("DOMContentLoaded", () => {
@@ -11,8 +10,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const oauthAuthSection = document.getElementById("oauth-auth-section");
   const authenticatedSection = document.getElementById("authenticated-section");
   const statusSpan = document.getElementById("token-status");
-  const CLIENT_ID = CONFIG.GITHUB_CLIENT_ID;
-  const BACKEND_URL = CONFIG.BACKEND_URL;
 
   // Don't show token, only say if it's available or not
   (async () => {
