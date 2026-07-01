@@ -247,14 +247,14 @@ async function handleAuthentication() {
     const redirectUri = browser.identity.getRedirectURL();
     const authUrl = `${BACKEND_URL}/auth/login?extension_redirect_uri=${encodeURIComponent(redirectUri)}`;
 
-    console.log("Lancement du WebAuthFlow vers:", authUrl);
+    console.log("Launching WebAuthFlow to:", authUrl);
     
     const finalUrl = await browser.identity.launchWebAuthFlow({
       url: authUrl,
       interactive: true,
     });
 
-    if (!finalUrl) throw new Error("Aucune URL de redirection reçue.");
+    if (!finalUrl) throw new Error("No URL received.");
 
     const urlParams = new URL(finalUrl).searchParams;
     const token = urlParams.get("token");
@@ -262,20 +262,20 @@ async function handleAuthentication() {
     const error = urlParams.get("error");
 
     if (error) throw new Error(decodeURIComponent(error));
-    if (!token) throw new Error("Aucun token renvoyé par le backend.");
+    if (!token) throw new Error("No token returned by the backend.");
 
-    // Sauvegarde en session
+    // Save the session
     await browser.storage.session.set({
       githubToken: token,
-      githubUsername: username || "Utilisateur",
+      githubUsername: username || "User",
     });
     
-    // Nettoyage au cas où
+    // Cleanup
     await browser.storage.local.remove(["githubToken"]);
 
-    return { success: true, username: username || "Utilisateur" };
+    return { success: true, username: username || "User" };
   } catch (err) {
-    console.error("Erreur d'authentification:", err);
+    console.error("Error during authentication:", err);
     return { success: false, error: err.message };
   }
 }
