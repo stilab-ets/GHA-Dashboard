@@ -1,4 +1,4 @@
-const { test, expect } = require('./fixtures');
+const { test, expect } = require('../fixtures');
 
 const REPOSITORY_URL = 'https://github.com/AUTOMATIC1111/stable-diffusion-webui';
 

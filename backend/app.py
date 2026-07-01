@@ -1,3 +1,7 @@
+import base64
+import re
+import urllib.parse
+
 import os
 import secrets
 import sys
@@ -11,7 +15,7 @@ try:
 except ImportError:
     GEVENT_AVAILABLE = False
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_sock import Sock
@@ -26,9 +30,7 @@ from urllib.parse import unquote
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--e2e", action="store_true", help="Enable E2E test mode")
-
 args = parser.parse_args()
-
 E2E_MODE = args.e2e
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,27 +41,25 @@ load_dotenv(os.path.join(BACKEND_DIR, ".env"), override=True)
 app = Flask(__name__)
 sock = Sock(app)
 
-DEFAULT_EXTENSION_ORIGINS = "chrome-extension://hgehgkjceklknibnacgjhefociphnhaf"
+CHROME_EXTENSION_ID = f"chrome-extension://{os.getenv('CHROME_EXTENSION_ID')}"
+    
+def is_allowed_origin(origin):
+    if origin is None:
+        return False
 
+    if origin == CHROME_EXTENSION_ID or origin.startswith("moz-extension://"):
+        return True
 
-def get_allowed_extension_origins():
-    raw_origins = os.getenv("GHA_EXTENSION_ORIGINS", DEFAULT_EXTENSION_ORIGINS)
-    return [
-        origin.strip()
-        for origin in raw_origins.split(",")
-        if origin.strip()
-    ]
-
-
-def is_allowed_extension_origin(origin):
-    return origin in get_allowed_extension_origins()
-
+    return False
 
 CORS(
     app,
     resources={
         r"/*": {
-            "origins": get_allowed_extension_origins(),
+            "origins": [
+                CHROME_EXTENSION_ID,
+                re.compile(r"moz-extension://.*"),
+            ],
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"],
         }
@@ -244,87 +244,78 @@ def health():
 # ============================================
 # Authentication Endpoint
 # ============================================
-@app.post("/auth/github")
-def github_auth():
+
+@app.get("/auth/login")
+def github_login():
+    ext_uri = request.args.get("extension_redirect_uri")
+    if not ext_uri:
+        return jsonify({"error": "Missing extension_redirect_uri"}), 400
+
     if E2E_MODE:
-        # In E2E mode, return a dummy token for testing purposes
-        return jsonify({
-            "success": True,
-            "token": os.getenv("TEST_GITHUB_TOKEN"),
-            "username": os.getenv("TEST_GITHUB_USERNAME")
-        })
+        dummy_token = os.getenv("TEST_GITHUB_TOKEN", "dummy_token")
+        dummy_user = os.getenv("TEST_GITHUB_USERNAME", "e2e_user")
+        return redirect(f"{ext_uri}?token={dummy_token}&username={dummy_user}")
 
-    data = request.get_json(silent=True) or {}
-    code = data.get("code")
-    redirect_uri = data.get("redirect_uri") or data.get("redirectUri")
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id:
+        return jsonify({"error": "Missing GITHUB_CLIENT_ID on backend"}), 500
 
+    # Encode the URL of the extension in a state tu get it in the callback
+    state_data = json.dumps({"ext_uri": ext_uri})
+    state = base64.urlsafe_b64encode(state_data.encode()).decode()
+
+    github_auth_url = (
+        "https://github.com/login/oauth/authorize"
+        f"?client_id={client_id}"
+        f"&scope=repo%20workflow%20read:user"
+        f"&state={state}"
+    )
+    return redirect(github_auth_url)
+
+
+@app.get("/auth/callback")
+def github_callback():
+    code = request.args.get("code")
+    state = request.args.get("state")
+    error = request.args.get("error")
+
+    # Decode the state to retrieve the extension's redirect URL
+    try:
+        state_data = json.loads(base64.urlsafe_b64decode(state.encode()).decode())
+        ext_uri = state_data.get("ext_uri")
+    except Exception:
+        return jsonify({"error": "Invalid or missing state"}), 400
+
+    if error:
+        return redirect(f"{ext_uri}?error={urllib.parse.quote(error)}")
     if not code:
-        return jsonify({
-            "success": False,
-            "error": "Missing GitHub authorization code"
-        }), 400
+        return redirect(f"{ext_uri}?error=Missing+code")
 
     client_id = os.getenv("GITHUB_CLIENT_ID")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
 
-    missing_config = [
-        name for name, value in {
-            "GITHUB_CLIENT_ID": client_id,
-            "GITHUB_CLIENT_SECRET": client_secret
-        }.items()
-        if not value
-    ]
-
-    if missing_config:
-        return jsonify({
-            "success": False,
-            "error": (
-                "GitHub OAuth is not configured on the backend. "
-                f"Set {', '.join(missing_config)} in backend/.env and restart the backend."
-            )
-        }), 500
-
-    token_payload = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "code": code
-    }
-
-    if redirect_uri:
-        token_payload["redirect_uri"] = redirect_uri
-
+    # 1. Exchange the code for an access token
     try:
         response = requests.post(
             "https://github.com/login/oauth/access_token",
-            headers={
-                "Accept": "application/json"
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code
             },
-            data=token_payload,
             timeout=15
         )
-    except requests.RequestException as exc:
-        return jsonify({
-            "success": False,
-            "error": f"Unable to reach GitHub OAuth service: {exc}"
-        }), 502
-
-    try:
         token_data = response.json()
-    except ValueError:
-        token_data = {}
-    access_token = token_data.get("access_token")
+        access_token = token_data.get("access_token")
+    except requests.RequestException:
+        return redirect(f"{ext_uri}?error=Network+error+reaching+GitHub")
 
     if not access_token:
-        github_error = token_data.get("error_description") or token_data.get("error")
-        message = "OAuth exchange failed"
-        if github_error:
-            message = f"{message}: {github_error}"
+        err_desc = token_data.get("error_description", "OAuth exchange failed")
+        return redirect(f"{ext_uri}?error={urllib.parse.quote(err_desc)}")
 
-        return jsonify({
-            "success": False,
-            "error": message
-        }), 401
-
+    # 2. Retrieve the username with the token
     try:
         user_response = requests.get(
             "https://api.github.com/user",
@@ -334,32 +325,13 @@ def github_auth():
             },
             timeout=15
         )
-    except requests.RequestException as exc:
-        return jsonify({
-            "success": False,
-            "error": f"Unable to reach GitHub user API: {exc}"
-        }), 502
+        username = user_response.json().get("login", "")
+    except requests.RequestException:
+        username = "Unknown"
 
-    if not user_response.ok:
-        return jsonify({
-            "success": False,
-            "error": "OAuth token received, but GitHub user profile could not be loaded"
-        }), 401
-
-    user = user_response.json()
-    username = user.get("login")
-
-    if not username:
-        return jsonify({
-            "success": False,
-            "error": "OAuth token received, but GitHub username was missing"
-        }), 401
-
-    return jsonify({
-        "success": True,
-        "token": access_token,
-        "username": username
-    })
+    # 3. Final redirection to the extension with the data
+    final_url = f"{ext_uri}?token={access_token}&username={urllib.parse.quote(username)}"
+    return redirect(final_url)
 
 # ============================================
 # Extraction Session Endpoint
@@ -401,10 +373,10 @@ def create_extraction():
     _cleanup_expired_extractions()
     now = time.time()
 
-    #Generate an unique extraction ID
+    # Generate an unique extraction ID
     extraction_id = secrets.token_urlsafe(32)
 
-    #Store extraction info in memory with TTL 5 mins
+    # Store extraction info in memory with TTL 5 mins
     extractions[extraction_id] = {
         "token": token,
         "repo": repo,
@@ -426,7 +398,7 @@ def websocket_data(ws, extractionId: str):
     WebSocket endpoint for streaming GitHub Actions data via GHAminer
     """
     origin = request.headers.get("Origin")
-    if not is_allowed_extension_origin(origin):
+    if not is_allowed_origin(origin):
         ws.send(json.dumps({
             "type": "error",
             "message": "Forbidden WebSocket origin"

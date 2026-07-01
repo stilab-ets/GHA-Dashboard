@@ -5,7 +5,7 @@
 GHA-Dashboard is a comprehensive dashboard for analyzing GitHub Actions workflows and builds. The project consists of two main components:
 
 - **Backend**: A Python Flask API that extracts, analyzes, and serves GitHub Actions data from repositories
-- **Frontend**: A Chrome browser extension built with React that provides a user-friendly interface to visualize the data
+- **Frontend**: A Browser extension built with React that provides a user-friendly interface to visualize the data
 
 The system uses local JSON storage for data persistence and supports real-time data extraction via WebSocket connections.
 
@@ -41,25 +41,37 @@ GITHUB_CLIENT_ID=your_oauth_app_client_id
 GITHUB_CLIENT_SECRET=your_oauth_app_client_secret
 ```
 
-The `GITHUB_CLIENT_ID` must match the `GITHUB_CLIENT_ID` in `extension/src/config.js`. Restart the backend after changing these values. If you do not configure OAuth, you can still paste a personal access token in the extension popup.
+Restart the backend after changing these values. If you do not configure OAuth, you can still paste a personal access token in the extension popup.
 
 ```bash
 python app.py
 ```
 
-### Step 5: Load the extension in Chrome
+### Step 5: Load the extension 
 
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable **Developer mode** (top right)
-3. Click **Load unpacked**
-4. Select the folder: `GHA-Dashboard/extension/build/`
+#### Option #1: Chromium
+
+1. Go to the extension folder via `cd extension` 
+2. Execute `npm run pack` or `npm run pack chromium`
+3. Open Chrome/Brave/etc.. and go to `chrome://extensions/`
+4. Enable **Developer mode** (top right)
+5. Click **Load unpacked**
+6. Select the folder: `GHA-Dashboard/extension/build/`
+
+#### Option #2: Firefox
+
+1. Go to the extension folder via `cd extension` 
+2. Execute `npm run pack firefox`
+3. Open Firefox and go to `about:debugging#/runtime/this-firefox`
+4. Click **Load Temporary Add-on...**
+5. Select the manifest: `GHA-Dashboard/extension/build/manifest.json`
 
 ### Step 6: Add your GitHub access token
 
 #### Option #1: Use GitHub OAuth (recommended)
 
 1. **Connect using your GitHub credentials**
-   - Click the GHA Dashboard extension icon in Chrome top right (puzzle icon)
+   - Click the GHA Dashboard extension icon in the top right (puzzle icon)
    - Click **Authenticate with GitHub**
    - Click **Authorize**
    - Enter your GitHub password
@@ -73,7 +85,7 @@ python app.py
    - Generate the token and copy it
 
 2. **Add the token to the extension**
-   - Click the GHA Dashboard extension icon in Chrome top right (puzzle icon)
+   - Click the GHA Dashboard extension icon in the top right (puzzle icon)
    - Paste your GitHub token into the token input field
    - Click **Save**
 
@@ -95,6 +107,24 @@ Click **Start Data Collection** and wait until the process completes.
 
 After using GHA-Dashboard, please fill out this short form (2-3 miniutes) to submit your feedback
 https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKIqqWU9w--jA/viewform?usp=dialog
+
+## Tests
+
+### Extension 
+
+1. Go to the backend folder via `cd backend` 
+2. Execute `python app.py --e2e`
+1. Go to the extension folder via `cd ../extension` 
+2. Execute `npm run test:e2e`
+
+> [!NOTE]
+> As playwright do not support extension for firefox, all E2E tests use chromium
+
+### Backend
+
+1. Go to the backend folder via `cd backend` 
+2. Execute `pytest`
+
 ## Contributing
 
 ### Development Workflow
@@ -107,13 +137,13 @@ https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKI
 ### Code Structure
 
 - `backend/`: Flask API and data processing
-- `extension/`: React Chrome extension
+- `extension/`: React Browser extension
 - `doc/`: Documentation and architecture diagrams
 
 ### Key Technologies
 
 - **Backend**: Python, Flask, WebSocket, local JSON persistence
-- **Frontend**: React, Vite, Chrome Extension APIs
+- **Frontend**: React, Vite, Browser Extension APIs
 - **Data Processing**: Pandas, GitHub API integration
 
 ## Troubleshooting

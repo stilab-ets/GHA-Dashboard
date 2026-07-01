@@ -2,6 +2,13 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 
+const target = process.argv[2] || "chromium";
+
+if (!["chromium", "firefox"].includes(target)) {
+  console.error(`Unknown target: ${target}`);
+  process.exit(1);
+}
+
 async function ensureDir(dir) {
   await fsp.mkdir(dir, { recursive: true });
 }
@@ -33,7 +40,10 @@ async function main() {
 
   // files to copy into packaged extension root
   const fileMappings = [
-    { src: 'manifest.json', dest: 'manifest.json' },
+    {
+      src: `manifests/manifest.${target}.json`,
+      dest: 'manifest.json'
+    },
     { src: 'src/background.js', dest: 'background.js' },
     { src: 'src/contentScript.js', dest: 'contentScript.js' },
     { src: 'src/popup/popup.css', dest: 'popup/popup.css' }
@@ -51,8 +61,19 @@ async function main() {
   let manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
 
   // Update background service worker path
-  if (manifest.background && manifest.background.service_worker) {
-    manifest.background.service_worker = manifest.background.service_worker.replace('src/', '');
+  if (manifest.background) {
+
+    if (manifest.background.service_worker) {
+        manifest.background.service_worker =
+            manifest.background.service_worker.replace('src/', '');
+    }
+
+    if (manifest.background.scripts) {
+        manifest.background.scripts =
+            manifest.background.scripts.map(script =>
+                script.replace('src/', '')
+            );
+    }
   }
 
   // Update content scripts paths
