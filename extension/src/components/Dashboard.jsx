@@ -761,8 +761,6 @@ export default function Dashboard() {
   useEffect(() => {
     if (!window.parent || window.parent === window) return undefined;
 
-    let animationFrameId = null;
-
     const getDashboardHeight = () => {
       const root = document.getElementById('root');
       const dashboard = root?.querySelector('.dashboard');
@@ -799,17 +797,7 @@ export default function Dashboard() {
       return Math.ceil(Math.max(360, contentBottom - dashboardTop + paddingBottom));
     };
 
-    const postDashboardHeight = () => {
-      animationFrameId = null;
-      window.parent.postMessage({
-        type: 'GHA_DASHBOARD_HEIGHT',
-        height: getDashboardHeight()
-      }, '*');
-    };
-
     const scheduleHeightPost = () => {
-      if (!animationFrameId || !lastHeightSent) return;
-      
       if (animationFrameId.current !== null) {
         window.cancelAnimationFrame(animationFrameId.current);
       }
@@ -817,7 +805,6 @@ export default function Dashboard() {
       animationFrameId.current = window.requestAnimationFrame(() => {
         const newHeight = getDashboardHeight();
 
-        // 3. On vérifie et met à jour avec .current
         if (Math.abs(newHeight - lastHeightSent.current) > 10) {
           lastHeightSent.current = newHeight;
           window.parent.postMessage({ type: 'GHA_DASHBOARD_HEIGHT', height: newHeight }, '*');
@@ -849,8 +836,8 @@ export default function Dashboard() {
     const intervalId = window.setInterval(scheduleHeightPost, 1000);
 
     return () => {
-      if (animationFrameId !== null) {
-        window.cancelAnimationFrame(animationFrameId);
+      if (animationFrameId.current !== null) {
+        window.cancelAnimationFrame(animationFrameId.current);
       }
       if (resizeObserver) resizeObserver.disconnect();
       mutationObserver.disconnect();

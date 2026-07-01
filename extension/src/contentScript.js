@@ -362,7 +362,7 @@
       width: 100%;
       max-width: 100%;
       min-width: 0;
-      min-height: 900px;
+      min-height: 360px;
       margin: 0;
       padding: 0;
       box-sizing: border-box;
@@ -376,8 +376,8 @@
       width: 100%;
       max-width: 100%;
       min-width: 0;
-      height: 900px;
-      min-height: 900px;
+      height: 360px;
+      min-height: 360px;
       border: none;
       display: block;
       margin: 0;
