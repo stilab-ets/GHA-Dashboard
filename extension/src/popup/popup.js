@@ -78,22 +78,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loginWithGitHub() {
     const statusSpan = document.getElementById("token-status");
-    statusSpan.textContent = "Redirection vers GitHub via le backend...";
+    statusSpan.textContent = "Redirecting to GitHub via the background...";
     statusSpan.className = "status-message info";
 
     try {
-      console.log("Envoi du message au background...");
-      // On délègue l'action au background script
+      console.log("Sending the message to the background...");
+      // Delegating the action to the background script
       const response = await browser.runtime.sendMessage({ action: "authenticate" });
 
       if (response && response.success) {
         setAuthenticatedState(true, response.username);
       } else {
-        throw new Error(response?.error || "Erreur inconnue lors de l'authentification.");
+        throw new Error(response?.error || "Unknown error occurred during authentication.");
       }
     } catch (err) {
       console.error(err);
-      statusSpan.textContent = "Échec de connexion : " + err.message;
+      statusSpan.textContent = "Failed to connect : " + err.message;
       statusSpan.className = "status-message error";
     }
   }

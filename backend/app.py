@@ -264,7 +264,7 @@ def github_login():
         print("ici3")
         return jsonify({"error": "Missing GITHUB_CLIENT_ID on backend"}), 500
 
-    # On encode l'URL de l'extension dans le 'state' pour la récupérer lors du callback
+    # Encode the URL of the extension in a state tu get it in the callback
     state_data = json.dumps({"ext_uri": ext_uri})
     state = base64.urlsafe_b64encode(state_data.encode()).decode()
 
@@ -285,7 +285,7 @@ def github_callback():
     state = request.args.get("state")
     error = request.args.get("error")
 
-    # Décoder le state pour retrouver l'URL de retour de l'extension
+    # Decode the state to retrieve the extension's redirect URL
     try:
         state_data = json.loads(base64.urlsafe_b64decode(state.encode()).decode())
         ext_uri = state_data.get("ext_uri")
@@ -304,7 +304,7 @@ def github_callback():
     client_id = os.getenv("GITHUB_CLIENT_ID")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
 
-    # 1. Échanger le code contre le token d'accès
+    # 1. Exchange the code for an access token
     try:
         print("iciCallback5")
         response = requests.post(
@@ -329,7 +329,7 @@ def github_callback():
         err_desc = token_data.get("error_description", "OAuth exchange failed")
         return redirect(f"{ext_uri}?error={urllib.parse.quote(err_desc)}")
 
-    # 2. Récupérer le nom d'utilisateur avec le token
+    # 2. Retrieve the username with the token
     try:
         print("iciCallback9")
         user_response = requests.get(
@@ -345,7 +345,7 @@ def github_callback():
         print("iciCallback10")
         username = "Unknown"
 
-    # 3. Redirection finale vers l'extension avec les données
+    # 3. Final redirection to the extension with the data
     print("iciCallback11")
     final_url = f"{ext_uri}?token={access_token}&username={urllib.parse.quote(username)}"
     print(final_url)
@@ -391,10 +391,10 @@ def create_extraction():
     _cleanup_expired_extractions()
     now = time.time()
 
-    #Generate an unique extraction ID
+    # Generate an unique extraction ID
     extraction_id = secrets.token_urlsafe(32)
 
-    #Store extraction info in memory with TTL 5 mins
+    # Store extraction info in memory with TTL 5 mins
     extractions[extraction_id] = {
         "token": token,
         "repo": repo,
