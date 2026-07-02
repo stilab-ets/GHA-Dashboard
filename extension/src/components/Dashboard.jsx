@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
-import { buildExtractionFilters, filterRunsForScope, normalizeWorkflowIds } from '../scopeFilters.mjs';
+import { buildDashboardCollectionFilters, filterRunsForScope, normalizeWorkflowIds } from '../scopeFilters.mjs';
 
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -1423,11 +1423,10 @@ export default function Dashboard() {
 
       // Limit GitHub API collection to the visible date range. The dashboard
       // still filters client-side, but this avoids scanning the full history.
-      const wsFilters = buildExtractionFilters({
+      const wsFilters = buildDashboardCollectionFilters({
         start: activeDateRange.start,
         end: activeDateRange.end,
         workflowIds: collectionScope.workflowIds,
-        fetchJobDetails: false,
         forceRefresh: shouldRefreshAfterCache
       });
 

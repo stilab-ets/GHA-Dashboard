@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildDashboardCollectionFilters,
   buildExtractionFilters,
   filterRunsForScope,
   normalizeWorkflowIds,
@@ -37,6 +38,23 @@ test('buildExtractionFilters leaves empty start open and defaults empty end to t
     workflowIds: [123],
     fetchJobDetails: false,
     forceRefresh: false,
+  });
+});
+
+test('buildDashboardCollectionFilters requests job details for dashboard collection', () => {
+  const filters = buildDashboardCollectionFilters({
+    start: '2026-06-01',
+    end: '2026-06-30',
+    workflowIds: ['101', '202'],
+    forceRefresh: true,
+  });
+
+  assert.deepEqual(filters, {
+    start: '2026-06-01',
+    end: '2026-06-30',
+    workflowIds: [101, 202],
+    fetchJobDetails: true,
+    forceRefresh: true,
   });
 });
 
