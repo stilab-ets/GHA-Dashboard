@@ -10,6 +10,15 @@ export function normalizeWorkflowIds(workflowIds) {
   ));
 }
 
+export function sameWorkflowScope(left = [], right = []) {
+  const leftIds = normalizeWorkflowIds(left);
+  const rightIds = normalizeWorkflowIds(right);
+  return (
+    leftIds.length === rightIds.length &&
+    leftIds.every((value, index) => value === rightIds[index])
+  );
+}
+
 function formatToday() {
   const today = new Date();
   const year = today.getFullYear();

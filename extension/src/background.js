@@ -1,4 +1,5 @@
 // Background Service Worker - WebSocket Manager with GitHub Token
+import { normalizeWorkflowIds, sameWorkflowScope } from "./scopeFilters.mjs";
 
 const wsCache = new Map();
 let activeWebSocket = null;
@@ -12,29 +13,6 @@ const WS_CONNECT_RETRY_DELAY_MS = 1000;
 
 function isSocketActive(socket) {
   return socket && socket.readyState !== SOCKET_CLOSING && socket.readyState !== SOCKET_CLOSED;
-}
-
-function normalizeWorkflowIds(workflowIds) {
-  if (!Array.isArray(workflowIds)) {
-    return [];
-  }
-
-  return Array.from(
-    new Set(
-      workflowIds
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0),
-    ),
-  );
-}
-
-function sameWorkflowScope(left = [], right = []) {
-  const leftIds = normalizeWorkflowIds(left);
-  const rightIds = normalizeWorkflowIds(right);
-  return (
-    leftIds.length === rightIds.length &&
-    leftIds.every((value, index) => value === rightIds[index])
-  );
 }
 
 function getRunId(run) {
