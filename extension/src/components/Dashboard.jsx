@@ -2147,7 +2147,7 @@ export default function Dashboard() {
         <div className="collection-start-actions">
           <button
             className="primary-action primary-action-large"
-            onClick={() => loadDashboardData(collectMore)}
+            onClick={() => loadDashboardData(false)}
             type="button"
             disabled={workflowOptionsLoading}
           >
