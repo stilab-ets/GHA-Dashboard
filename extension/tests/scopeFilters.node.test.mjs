@@ -4,8 +4,10 @@ import test from 'node:test';
 import {
   buildDashboardCollectionFilters,
   filterRunsForScope,
+  mergeWorkflowNames,
   normalizeWorkflowIds,
   sameWorkflowScope,
+  workflowIdsForNames,
 } from '../src/scopeFilters.mjs';
 
 test('normalizes workflow ids for extraction filters', () => {
@@ -16,6 +18,38 @@ test('compares workflow scopes after normalization', () => {
   assert.equal(sameWorkflowScope(['10', 20], [10, '20']), true);
   assert.equal(sameWorkflowScope([20, 10], [10, 20]), false);
   assert.equal(sameWorkflowScope(['10'], ['10', 20]), false);
+});
+
+test('merges collected workflow names with repository workflow options', () => {
+  assert.deepEqual(
+    mergeWorkflowNames(
+      ['all', 'Check Code with Prettier'],
+      [
+        { id: 101, name: 'Automatically fix typos' },
+        { id: 202, name: 'Check Code with Prettier' },
+        { id: 303, name: '' },
+      ],
+    ),
+    ['all', 'Automatically fix typos', 'Check Code with Prettier'],
+  );
+});
+
+test('resolves selected dashboard workflow names to collection workflow ids', () => {
+  assert.deepEqual(
+    workflowIdsForNames(
+      [
+        { id: '101', name: 'Automatically fix typos' },
+        { id: 202, name: 'Check Code with Prettier' },
+      ],
+      ['Check Code with Prettier'],
+    ),
+    [202],
+  );
+
+  assert.deepEqual(
+    workflowIdsForNames([{ id: 101, name: 'Automatically fix typos' }], ['all']),
+    [],
+  );
 });
 
 test('builds dashboard collection filters with workflow scope and job details', () => {

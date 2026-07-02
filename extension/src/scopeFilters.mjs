@@ -19,6 +19,37 @@ export function sameWorkflowScope(left = [], right = []) {
   );
 }
 
+export function mergeWorkflowNames(collectedWorkflowNames = [], workflowOptions = []) {
+  const names = new Set();
+
+  for (const name of collectedWorkflowNames) {
+    if (name && name !== 'all') {
+      names.add(name);
+    }
+  }
+
+  for (const workflow of workflowOptions) {
+    if (workflow?.name) {
+      names.add(workflow.name);
+    }
+  }
+
+  return ['all', ...Array.from(names).sort()];
+}
+
+export function workflowIdsForNames(workflowOptions = [], selectedWorkflowNames = []) {
+  if (!Array.isArray(selectedWorkflowNames) || selectedWorkflowNames.includes('all')) {
+    return [];
+  }
+
+  const selectedNames = new Set(selectedWorkflowNames.filter(Boolean));
+  return normalizeWorkflowIds(
+    workflowOptions
+      .filter(workflow => selectedNames.has(workflow?.name))
+      .map(workflow => workflow.id)
+  );
+}
+
 function formatToday() {
   const today = new Date();
   const year = today.getFullYear();

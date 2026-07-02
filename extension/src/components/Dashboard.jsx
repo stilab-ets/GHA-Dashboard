@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
-import { buildDashboardCollectionFilters, filterRunsForScope, normalizeWorkflowIds } from '../scopeFilters.mjs';
-import { shouldShowCollectionSetup } from '../dashboardState.mjs';
+import { buildDashboardCollectionFilters, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForNames } from '../scopeFilters.mjs';
 
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -572,7 +571,6 @@ export default function Dashboard() {
   const [workflowOptions, setWorkflowOptions] = useState([]);
   const [workflowOptionsLoading, setWorkflowOptionsLoading] = useState(false);
   const [workflowOptionsError, setWorkflowOptionsError] = useState(null);
-  const [configuringCollection, setConfiguringCollection] = useState(false);
 
   const getActiveDateRange = () => ({
     start: filters.start || '',
@@ -1257,7 +1255,6 @@ export default function Dashboard() {
       end: collectionScope.end
     };
     const preserveStreamingCache = !!options.preserveStreamingCache;
-    setConfiguringCollection(false);
     setCollectionStarted(true);
     setLoading(true);
     setError(null);
@@ -1455,7 +1452,6 @@ export default function Dashboard() {
         }));
         setDataLoaded(!!data);
         setCollectionStarted(!!data);
-        setConfiguringCollection(true);
         await refreshPersistedRunCount(currentRepo, 500);
         return;
       }
@@ -1479,7 +1475,6 @@ export default function Dashboard() {
       }));
       setDataLoaded(!!data);
       setCollectionStarted(!!data);
-      setConfiguringCollection(true);
       await refreshPersistedRunCount(currentRepo, 500);
     } catch (err) {
       console.error('[Dashboard] Error cancelling collection:', err);
@@ -2023,7 +2018,7 @@ export default function Dashboard() {
     );
   };
 
-  const renderCollectionScopePanel = ({ collectMore = false } = {}) => {
+  const renderCollectionScopePanel = () => {
     const selectedWorkflowLabels = getSelectedCollectionWorkflowLabels();
 
     return (
@@ -2156,7 +2151,7 @@ export default function Dashboard() {
             type="button"
             disabled={workflowOptionsLoading}
           >
-            {collectMore ? 'Collect More Data' : 'Start Data Collection'}
+            Start Data Collection
           </button>
         </div>
       </section>
@@ -2166,14 +2161,7 @@ export default function Dashboard() {
   // in the single useEffect above to avoid duplicate filtering
 
   // Show start collection button if collection hasn't started yet
-  const showCollectionSetup = shouldShowCollectionSetup({
-    collectionStarted,
-    loading,
-    hasData: Boolean(data),
-    configuringCollection,
-  });
-
-  if (showCollectionSetup && !data) {
+  if (!collectionStarted && !loading && !data) {
     return (
       <div className={`dashboard ${dashboardTheme} container collection-setup-dashboard`}>
         {renderCollectionScopePanel()}
@@ -2266,6 +2254,7 @@ export default function Dashboard() {
   } = data;
 
   const { workflows, branches, actors } = availableFilters;
+  const dashboardWorkflowNames = mergeWorkflowNames(workflows, workflowOptions);
 
   const totalStatus = statusBreakdown.reduce((sum, s) => sum + (s.value || 0), 0);
   const statusData = statusBreakdown.map(s => ({
@@ -2276,6 +2265,17 @@ export default function Dashboard() {
   // ============================================
   // Event Handlers
   // ============================================
+
+  const collectMoreDataFromDashboardFilters = () => {
+    const workflowIds = workflowIdsForNames(workflowOptions, filters.workflow);
+    setError(null);
+    setCollectionScopeWorkflowIds(workflowIds.length > 0 ? workflowIds : ['all']);
+    loadDashboardData(true, {
+      collectionScope: {
+        workflowIds,
+      },
+    });
+  };
 
   const handleFilterChange = (filterType, value) => {
     if (filterType === 'start' || filterType === 'end') {
@@ -3051,8 +3051,6 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {showCollectionSetup && renderCollectionScopePanel({ collectMore: true })}
-
         {/* Filter Panel */}
         <div className="filter-panel card">
           <div className="filter-row">
@@ -3092,7 +3090,7 @@ export default function Dashboard() {
                           <span>All workflows</span>
                         </label>
 
-                        {workflows.filter(w => w !== 'all').map(w => (
+                        {dashboardWorkflowNames.filter(w => w !== 'all').map(w => (
                           <label key={w} className="dropdown-item">
                             <input
                               type="checkbox"
@@ -3598,11 +3596,7 @@ export default function Dashboard() {
                     <span>Data</span>
 
                     <button
-                      onClick={() => {
-                        setError(null);
-                        setConfiguringCollection(true);
-                        setCollectionWorkflowDropdownOpen(true);
-                      }}
+                      onClick={collectMoreDataFromDashboardFilters}
                       className="primary-action"
                       type="button"
                     >
