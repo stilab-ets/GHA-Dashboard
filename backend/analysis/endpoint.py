@@ -89,6 +89,21 @@ def _run_workflow_in_filter(run: dict, filters: AggregationFilters) -> bool:
     return run_workflow_id in set(workflow_ids)
 
 
+def _attach_persisted_jobs_to_runs(repo: str, runs: list[dict], persistence: Any) -> list[dict]:
+    hydrated_runs = []
+
+    for run in runs:
+        hydrated_run = run.copy()
+        run_id = hydrated_run.get("id")
+        if run_id is not None:
+            jobs = persistence.get_jobs_for_run(repo, str(run_id))
+            if jobs is not None:
+                hydrated_run["jobs"] = jobs
+        hydrated_runs.append(hydrated_run)
+
+    return hydrated_runs
+
+
 def _send_keepalive_periodic(ws: Any, stop_flag: list):
     """
     Background task that sends keepalive messages every 30 seconds
@@ -187,6 +202,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     run for run in existing_runs_dict.values()
                     if _run_date_in_filter(run, filters) and _run_workflow_in_filter(run, filters)
                 ]
+                existing_runs_list = _attach_persisted_jobs_to_runs(repo, existing_runs_list, persistence)
                 existing_runs_count = len(existing_runs_list)
                 existing_runs_by_id = {
                     str(run.get("id")): run
@@ -347,7 +363,11 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     from data.persistence import DataPersistence
                     persistence = DataPersistence()
                     all_existing_runs_dict = persistence.get_all_runs(repo)
-                    all_runs_list = list(all_existing_runs_dict.values())
+                    all_runs_list = _attach_persisted_jobs_to_runs(
+                        repo,
+                        list(all_existing_runs_dict.values()),
+                        persistence
+                    )
                     print(f"[WebSocket] Loaded {len(all_runs_list)} existing runs for Phase 2")
                 except Exception as e:
                     print(f"[WebSocket] Warning: Failed to load existing runs for Phase 2: {e}")

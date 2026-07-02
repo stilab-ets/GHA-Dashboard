@@ -68,3 +68,24 @@ def test_filter_runs_for_scope_filters_dates_workflows_and_dedupes(monkeypatch):
     scoped = app_module._filter_runs_for_scope(runs, filters)
 
     assert [run["id"] for run in scoped] == [1, 4]
+
+
+def test_attach_persisted_jobs_to_runs_keeps_cached_websocket_jobs(monkeypatch):
+    from analysis import endpoint as endpoint_module
+
+    class PersistenceStub:
+        def get_jobs_for_run(self, repo, run_id):
+            if repo == "owner/repo" and run_id == "101":
+                return [{"name": "build", "conclusion": "success"}]
+            return None
+
+    runs = [
+        {"id": 101, "workflow_id": 10, "created_at": "2026-06-02T10:00:00Z"},
+        {"id": 102, "workflow_id": 10, "created_at": "2026-06-03T10:00:00Z", "jobs": []},
+    ]
+
+    hydrated = endpoint_module._attach_persisted_jobs_to_runs("owner/repo", runs, PersistenceStub())
+
+    assert hydrated[0]["jobs"] == [{"name": "build", "conclusion": "success"}]
+    assert hydrated[1]["jobs"] == []
+    assert "jobs" not in runs[0]
