@@ -20,6 +20,7 @@ test('buildExtractionFilters includes dates and selected workflow IDs', () => {
     start: '2026-06-01',
     end: '2026-06-30',
     workflowIds: [123, 456],
+    refreshWorkflowIds: [],
     fetchJobDetails: false,
     forceRefresh: false,
   });
@@ -36,6 +37,7 @@ test('buildExtractionFilters leaves empty start open and defaults empty end to t
   assert.deepEqual(filters, {
     end: '2026-06-17',
     workflowIds: [123],
+    refreshWorkflowIds: [],
     fetchJobDetails: false,
     forceRefresh: false,
   });
@@ -53,6 +55,7 @@ test('buildDashboardCollectionFilters requests job details for dashboard collect
     start: '2026-06-01',
     end: '2026-06-30',
     workflowIds: [101, 202],
+    refreshWorkflowIds: [],
     fetchJobDetails: true,
     forceRefresh: true,
   });

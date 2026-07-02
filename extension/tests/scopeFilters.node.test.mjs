@@ -8,6 +8,7 @@ import {
   mergeWorkflowNames,
   normalizeWorkflowIds,
   sameWorkflowScope,
+  workflowIdsForSelectionDelta,
   workflowNamesForIds,
   workflowIdsForNames,
 } from '../src/scopeFilters.mjs';
@@ -75,6 +76,23 @@ test('extends an existing workflow scope with selected dashboard workflows', () 
   ]);
 });
 
+test('resolves only newly selected dashboard workflows for refresh scope', () => {
+  const workflowOptions = [
+    { id: 101, name: 'Check Code with Prettier' },
+    { id: 202, name: 'Publish to Image Registry' },
+    { id: 303, name: 'AI Unit Tests & Type Check' },
+  ];
+
+  assert.deepEqual(
+    workflowIdsForSelectionDelta(
+      workflowOptions,
+      [101, 202],
+      ['Check Code with Prettier', 'Publish to Image Registry', 'AI Unit Tests & Type Check'],
+    ),
+    [303],
+  );
+});
+
 test('keeps repo-wide workflow scope repo-wide when collecting more', () => {
   assert.deepEqual(
     extendWorkflowScopeForSelection(
@@ -92,12 +110,14 @@ test('builds dashboard collection filters with workflow scope and job details', 
       start: '2026-06-01',
       end: '2026-06-30',
       workflowIds: ['10', 20],
+      refreshWorkflowIds: ['20'],
       forceRefresh: true,
     }),
     {
       start: '2026-06-01',
       end: '2026-06-30',
       workflowIds: [10, 20],
+      refreshWorkflowIds: [20],
       fetchJobDetails: true,
       forceRefresh: true,
     },

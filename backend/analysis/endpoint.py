@@ -54,6 +54,7 @@ class AggregationFilters:
     branch: str | None = None
     workflowName: str | None = None
     workflowIds: list[int] | None = None
+    refreshWorkflowIds: list[int] | None = None
     fetchJobDetails: bool = False
     forceRefresh: bool = False
 
@@ -210,7 +211,11 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         # Load GHAminer config
         config = load_config()
         config["fetch_job_details"] = bool(getattr(filters, "fetchJobDetails", False))
-        config["workflow_ids"] = list(getattr(filters, "workflowIds", None) or [])
+        refresh_workflow_ids = list(getattr(filters, "refreshWorkflowIds", None) or [])
+        display_workflow_ids = list(getattr(filters, "workflowIds", None) or [])
+        config["workflow_ids"] = refresh_workflow_ids or display_workflow_ids
+        if refresh_workflow_ids:
+            config["job_workflow_ids"] = refresh_workflow_ids
         if filters.startDate != date(2000, 1, 1):
             config["start_date"] = filters.startDate.isoformat()
         if filters.endDate != date(2100, 1, 1):

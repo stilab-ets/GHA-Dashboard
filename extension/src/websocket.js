@@ -877,7 +877,8 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
     _pendingRejects.set(repo, reject);
     _activeFiltersByRepo.set(repo, {
       ...filters,
-      workflowIds: normalizeWorkflowIds(filters.workflowIds)
+      workflowIds: normalizeWorkflowIds(filters.workflowIds),
+      refreshWorkflowIds: normalizeWorkflowIds(filters.refreshWorkflowIds)
     });
     _runsByRepo.set(repo, []);
     chrome.runtime.sendMessage({
@@ -887,6 +888,7 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
         start: filters.start,
         end: filters.end,
         workflowIds: normalizeWorkflowIds(filters.workflowIds),
+        refreshWorkflowIds: normalizeWorkflowIds(filters.refreshWorkflowIds),
         fetchJobDetails: Boolean(filters.fetchJobDetails),
         forceRefresh: Boolean(filters.forceRefresh)
       }

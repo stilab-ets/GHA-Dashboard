@@ -162,6 +162,9 @@ def _build_aggregation_filters(filters_payload):
     filters.workflowIds = _workflow_id_filter_values(
         filters_payload.get("workflowIds") or filters_payload.get("workflow_ids")
     )
+    filters.refreshWorkflowIds = _workflow_id_filter_values(
+        filters_payload.get("refreshWorkflowIds") or filters_payload.get("refresh_workflow_ids")
+    )
 
     fetch_job_details = filters_payload.get("fetchJobDetails")
     if fetch_job_details is None:

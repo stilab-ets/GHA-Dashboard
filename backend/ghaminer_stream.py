@@ -642,6 +642,23 @@ def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, An
     
     phase2_start_time = time.time()
     all_runs = dedupe_runs_by_id(all_runs)
+    job_workflow_ids = {
+        int(workflow_id)
+        for workflow_id in config.get("job_workflow_ids", [])
+        if str(workflow_id).isdigit()
+    }
+    if job_workflow_ids:
+        def _run_matches_job_workflow_scope(run):
+            try:
+                return int(run.get("workflow_id")) in job_workflow_ids
+            except (TypeError, ValueError):
+                return False
+
+        all_runs = [
+            run for run in all_runs
+            if _run_matches_job_workflow_scope(run)
+        ]
+        print(f"[GHAminer Stream] Phase 2: Limited job collection to {len(job_workflow_ids)} refreshed workflows")
     
     # Initialize data persistence and manager
     persistence = None

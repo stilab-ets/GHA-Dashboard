@@ -68,6 +68,24 @@ export function extendWorkflowScopeForSelection(
   return normalizeWorkflowIds([...existingIds, ...selectedIds]);
 }
 
+export function workflowIdsForSelectionDelta(
+  workflowOptions = [],
+  existingWorkflowIds = [],
+  selectedWorkflowNames = [],
+) {
+  if (!Array.isArray(selectedWorkflowNames) || selectedWorkflowNames.includes('all')) {
+    return [];
+  }
+
+  const existingIds = new Set(normalizeWorkflowIds(existingWorkflowIds));
+  if (existingIds.size === 0) {
+    return [];
+  }
+
+  return workflowIdsForNames(workflowOptions, selectedWorkflowNames)
+    .filter(id => !existingIds.has(id));
+}
+
 export function workflowNamesForIds(workflowOptions = [], workflowIds = []) {
   const ids = normalizeWorkflowIds(workflowIds);
   if (ids.length === 0) {
@@ -106,6 +124,7 @@ export function buildExtractionFilters({
   start,
   end,
   workflowIds = [],
+  refreshWorkflowIds = [],
   fetchJobDetails = false,
   forceRefresh = false,
   today,
@@ -114,6 +133,7 @@ export function buildExtractionFilters({
   const filters = {
     end: resolvedDates.end,
     workflowIds: normalizeWorkflowIds(workflowIds),
+    refreshWorkflowIds: normalizeWorkflowIds(refreshWorkflowIds),
     fetchJobDetails: Boolean(fetchJobDetails),
     forceRefresh: Boolean(forceRefresh),
   };
