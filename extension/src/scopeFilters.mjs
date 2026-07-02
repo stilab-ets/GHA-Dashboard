@@ -50,6 +50,39 @@ export function workflowIdsForNames(workflowOptions = [], selectedWorkflowNames 
   );
 }
 
+export function extendWorkflowScopeForSelection(
+  workflowOptions = [],
+  existingWorkflowIds = [],
+  selectedWorkflowNames = [],
+) {
+  const selectedIds = workflowIdsForNames(workflowOptions, selectedWorkflowNames);
+  if (!Array.isArray(selectedWorkflowNames) || selectedWorkflowNames.includes('all')) {
+    return [];
+  }
+
+  const existingIds = normalizeWorkflowIds(existingWorkflowIds);
+  if (existingIds.length === 0) {
+    return [];
+  }
+
+  return normalizeWorkflowIds([...existingIds, ...selectedIds]);
+}
+
+export function workflowNamesForIds(workflowOptions = [], workflowIds = []) {
+  const ids = normalizeWorkflowIds(workflowIds);
+  if (ids.length === 0) {
+    return ['all'];
+  }
+
+  const workflowsById = new Map(
+    workflowOptions.map(workflow => [Number(workflow?.id), workflow?.name]).filter(([id, name]) => (
+      Number.isInteger(id) && id > 0 && Boolean(name)
+    ))
+  );
+
+  return ids.map(id => workflowsById.get(id)).filter(Boolean);
+}
+
 function formatToday() {
   const today = new Date();
   const year = today.getFullYear();

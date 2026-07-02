@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
-import { buildDashboardCollectionFilters, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForNames } from '../scopeFilters.mjs';
+import { buildDashboardCollectionFilters, extendWorkflowScopeForSelection, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowNamesForIds } from '../scopeFilters.mjs';
 
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -1237,6 +1237,7 @@ export default function Dashboard() {
 
   // Load data (only when dates change)
   const loadDashboardData = async (collectMore = false, options = {}) => {
+    const localFilters = options.localFilters || {};
     const fallbackCollectionScope = getCollectionScopeForRequest(Boolean(collectMore));
     const draftCollectionScope = normalizeCollectionScope({
       ...fallbackCollectionScope,
@@ -1385,7 +1386,7 @@ export default function Dashboard() {
 
         // Get the latest filter values from ref (including date range)
         const latestFilters = {
-          workflow: filters.workflow,
+          workflow: localFilters.workflow || filters.workflow,
           branch: filters.branch,
           actor: filters.actor,
           start: dateFiltersRef.current.start,
@@ -2267,12 +2268,24 @@ export default function Dashboard() {
   // ============================================
 
   const collectMoreDataFromDashboardFilters = () => {
-    const workflowIds = workflowIdsForNames(workflowOptions, filters.workflow);
+    const workflowIds = extendWorkflowScopeForSelection(
+      workflowOptions,
+      getAppliedCollectionScope().workflowIds,
+      filters.workflow,
+    );
+    const workflowFilter = workflowNamesForIds(workflowOptions, workflowIds);
     setError(null);
     setCollectionScopeWorkflowIds(workflowIds.length > 0 ? workflowIds : ['all']);
+    setFilters(prev => ({
+      ...prev,
+      workflow: workflowFilter,
+    }));
     loadDashboardData(true, {
       collectionScope: {
         workflowIds,
+      },
+      localFilters: {
+        workflow: workflowFilter,
       },
     });
   };

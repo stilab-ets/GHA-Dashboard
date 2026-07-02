@@ -3,10 +3,12 @@ import test from 'node:test';
 
 import {
   buildDashboardCollectionFilters,
+  extendWorkflowScopeForSelection,
   filterRunsForScope,
   mergeWorkflowNames,
   normalizeWorkflowIds,
   sameWorkflowScope,
+  workflowNamesForIds,
   workflowIdsForNames,
 } from '../src/scopeFilters.mjs';
 
@@ -48,6 +50,38 @@ test('resolves selected dashboard workflow names to collection workflow ids', ()
 
   assert.deepEqual(
     workflowIdsForNames([{ id: 101, name: 'Automatically fix typos' }], ['all']),
+    [],
+  );
+});
+
+test('extends an existing workflow scope with selected dashboard workflows', () => {
+  const workflowOptions = [
+    { id: 101, name: 'Check Code with Prettier' },
+    { id: 202, name: 'Publish to Image Registry' },
+    { id: 303, name: 'AI Unit Tests & Type Check' },
+  ];
+
+  const nextWorkflowIds = extendWorkflowScopeForSelection(
+    workflowOptions,
+    [101, 202],
+    ['AI Unit Tests & Type Check'],
+  );
+
+  assert.deepEqual(nextWorkflowIds, [101, 202, 303]);
+  assert.deepEqual(workflowNamesForIds(workflowOptions, nextWorkflowIds), [
+    'Check Code with Prettier',
+    'Publish to Image Registry',
+    'AI Unit Tests & Type Check',
+  ]);
+});
+
+test('keeps repo-wide workflow scope repo-wide when collecting more', () => {
+  assert.deepEqual(
+    extendWorkflowScopeForSelection(
+      [{ id: 303, name: 'AI Unit Tests & Type Check' }],
+      [],
+      ['AI Unit Tests & Type Check'],
+    ),
     [],
   );
 });
