@@ -117,12 +117,26 @@ def _run_workflow_in_filter(run: dict, filters: AggregationFilters) -> bool:
 
 def _attach_persisted_jobs_to_runs(repo: str, runs: list[dict], persistence: Any) -> list[dict]:
     hydrated_runs = []
+    run_ids = [
+        str(run.get("id"))
+        for run in runs
+        if run.get("id") is not None
+    ]
+    bulk_jobs_by_run = {}
+    bulk_lookup_available = hasattr(persistence, "get_jobs_for_runs")
+
+    if bulk_lookup_available:
+        bulk_jobs_by_run = persistence.get_jobs_for_runs(repo, run_ids)
 
     for run in runs:
         hydrated_run = run.copy()
         run_id = hydrated_run.get("id")
         if run_id is not None:
-            jobs = persistence.get_jobs_for_run(repo, str(run_id))
+            run_id_str = str(run_id)
+            if bulk_lookup_available:
+                jobs = bulk_jobs_by_run.get(run_id_str)
+            else:
+                jobs = persistence.get_jobs_for_run(repo, run_id_str)
             if jobs is not None:
                 hydrated_run["jobs"] = jobs
         hydrated_runs.append(hydrated_run)

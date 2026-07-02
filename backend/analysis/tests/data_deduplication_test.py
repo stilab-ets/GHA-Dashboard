@@ -21,6 +21,23 @@ def test_save_runs_batch_de_duplicates_existing_runs_by_id(tmp_path):
     assert len(runs) == 2
 
 
+def test_jobs_can_be_saved_and_loaded_in_bulk(tmp_path):
+    persistence = DataPersistence(data_dir=str(tmp_path))
+    repo = "owner/repo"
+
+    persistence.save_jobs_batch(repo, {
+        "101": [{"name": "build", "conclusion": "success"}],
+        102: [{"name": "test", "conclusion": "failure"}],
+    })
+
+    jobs_by_run = persistence.get_jobs_for_runs(repo, ["101", "102", "999"])
+
+    assert jobs_by_run == {
+        "101": [{"name": "build", "conclusion": "success"}],
+        "102": [{"name": "test", "conclusion": "failure"}],
+    }
+
+
 def test_data_manager_filters_previously_collected_runs(tmp_path):
     persistence = DataPersistence(data_dir=str(tmp_path))
     repo = "owner/repo"
