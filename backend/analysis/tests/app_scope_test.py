@@ -89,3 +89,17 @@ def test_attach_persisted_jobs_to_runs_keeps_cached_websocket_jobs(monkeypatch):
     assert hydrated[0]["jobs"] == [{"name": "build", "conclusion": "success"}]
     assert hydrated[1]["jobs"] == []
     assert "jobs" not in runs[0]
+
+
+def test_send_ws_json_treats_closed_client_as_disconnect():
+    from analysis import endpoint as endpoint_module
+
+    class ConnectionClosed(Exception):
+        pass
+
+    class ClosedWebSocket:
+        def send(self, payload):
+            raise ConnectionClosed("Connection closed: 1005")
+
+    with pytest.raises(endpoint_module.WebSocketClientDisconnected):
+        endpoint_module._send_ws_json(ClosedWebSocket(), {"type": "runs"})

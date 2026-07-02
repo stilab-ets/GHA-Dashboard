@@ -590,8 +590,24 @@ export default function Dashboard() {
   const hasIncompleteDateRange = (scope = {}) =>
     Boolean(scope.start) !== Boolean(scope.end);
 
+  const getWorkflowFilterForScope = (scope = {}) => {
+    const workflowIds = normalizeWorkflowIds(scope.workflowIds);
+    if (workflowIds.length === 0) {
+      return ['all'];
+    }
+
+    const workflowNames = workflowNamesForIds(workflowOptions, workflowIds);
+    return workflowNames.length === workflowIds.length ? workflowNames : null;
+  };
+
+  const sameWorkflowFilter = (left = [], right = []) => (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+
   const applyCollectionScope = (scope) => {
     const normalizedScope = normalizeCollectionScope(scope);
+    const workflowFilter = getWorkflowFilterForScope(normalizedScope);
     appliedCollectionScopeRef.current = normalizedScope;
     setAppliedCollectionScope(normalizedScope);
     setCollectionDateRange({
@@ -609,12 +625,24 @@ export default function Dashboard() {
     setFilters(prev => ({
       ...prev,
       start: normalizedScope.start,
-      end: normalizedScope.end
+      end: normalizedScope.end,
+      ...(workflowFilter ? { workflow: workflowFilter } : {})
     }));
     return normalizedScope;
   };
 
   const getAppliedCollectionScope = () => appliedCollectionScopeRef.current;
+
+  useEffect(() => {
+    const workflowFilter = getWorkflowFilterForScope(getAppliedCollectionScope());
+    if (!workflowFilter) return;
+
+    setFilters(prev => (
+      sameWorkflowFilter(prev.workflow, workflowFilter)
+        ? prev
+        : { ...prev, workflow: workflowFilter }
+    ));
+  }, [workflowOptions, appliedCollectionScope.workflowIds]);
 
   const getCollectionScopeForRequest = (collectMore = false) => {
     if (collectMore || data) {

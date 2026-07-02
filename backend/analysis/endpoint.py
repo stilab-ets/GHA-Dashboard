@@ -32,6 +32,11 @@ if backend_path not in sys.path:
 from ghaminer_stream import stream_workflow_runs_phase1, stream_job_details_phase2, load_config
 import time
 
+try:
+    from simple_websocket.errors import ConnectionClosed as SimpleWebSocketConnectionClosed
+except ImportError:
+    SimpleWebSocketConnectionClosed = None
+
 # Try to import performance logger
 try:
     from core.utils.logger import setup_performance_logger
@@ -61,6 +66,26 @@ def json_default(o: Any):
         return o.isoformat()
     else:
         return str(o)
+
+
+class WebSocketClientDisconnected(Exception):
+    """Raised when the dashboard client has already closed the WebSocket."""
+
+
+def _is_websocket_closed_error(exc: Exception) -> bool:
+    if SimpleWebSocketConnectionClosed and isinstance(exc, SimpleWebSocketConnectionClosed):
+        return True
+
+    return exc.__class__.__name__ == "ConnectionClosed"
+
+
+def _send_ws_json(ws: Any, msg: dict):
+    try:
+        ws.send(json.dumps(msg, default=json_default))
+    except Exception as exc:
+        if _is_websocket_closed_error(exc):
+            raise WebSocketClientDisconnected(str(exc)) from exc
+        raise
 
 
 def _run_date_in_filter(run: dict, filters: AggregationFilters) -> bool:
@@ -127,7 +152,7 @@ def _send_keepalive_periodic(ws: Any, stop_flag: list):
                 "type": "keepalive",
                 "message": "Connection alive - waiting for API rate limit..."
             }
-            ws.send(json.dumps(keepalive_msg, default=json_default))
+            _send_ws_json(ws, keepalive_msg)
         except Exception:
             # Connection might be closed, stop
             break
@@ -156,8 +181,14 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             "type": "error",
             "message": "GitHub token required. Please configure it in the Chrome extension popup."
         }
-        ws.send(json.dumps(error_msg))
-        ws.close()
+        try:
+            _send_ws_json(ws, error_msg)
+        except WebSocketClientDisconnected as e:
+            print(f"[WebSocket] Client disconnected before token error could be sent: {e}")
+        try:
+            ws.close()
+        except Exception:
+            pass
         return
     
     # Start background keepalive task to prevent timeout during rate limit waits
@@ -217,7 +248,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     batch_size = 100
                     for i in range(0, len(existing_runs_list), batch_size):
                         cached_batch = existing_runs_list[i:i + batch_size]
-                        ws.send(json.dumps({
+                        _send_ws_json(ws, {
                             "type": "runs",
                             "data": cached_batch,
                             "page": (i // batch_size) + 1,
@@ -228,9 +259,9 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                             "existingRuns": len(existing_runs_list),
                             "elapsed_time": 0,
                             "eta_seconds": None
-                        }, default=json_default))
+                        })
 
-                    ws.send(json.dumps({
+                    _send_ws_json(ws, {
                         "type": "complete",
                         "phase": "workflow_runs",
                         "totalRuns": len(existing_runs_list),
@@ -238,14 +269,14 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                         "existingRuns": len(existing_runs_list),
                         "totalJobs": 0,
                         "elapsed_time": 0
-                    }, default=json_default))
+                    })
                     return
                 elif existing_runs_list:
                     print("[WebSocket] Seeding frontend with cached runs before GitHub refresh")
                     batch_size = 100
                     for i in range(0, len(existing_runs_list), batch_size):
                         cached_batch = existing_runs_list[i:i + batch_size]
-                        ws.send(json.dumps({
+                        _send_ws_json(ws, {
                             "type": "runs",
                             "data": cached_batch,
                             "page": (i // batch_size) + 1,
@@ -256,7 +287,9 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                             "existingRuns": len(existing_runs_list),
                             "elapsed_time": 0,
                             "eta_seconds": None
-                        }, default=json_default))
+                        })
+        except WebSocketClientDisconnected:
+            raise
         except Exception as e:
             print(f"[WebSocket] Could not check existing data: {e}")
         
@@ -302,7 +335,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     "elapsed_time": elapsed_time,
                     "eta_seconds": eta_seconds
                 }
-                ws.send(json.dumps(msg, default=json_default))
+                _send_ws_json(ws, msg)
                 print(f"[WebSocket] Sent batch: {len(batch)} runs (total: {total_runs}/{estimated_total} runs, new: {new_runs_count}, existing: {existing_runs_count})")
                 batch.clear()
                 last_keepalive = total_runs
@@ -314,8 +347,10 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     "message": f"Phase 1: Still collecting... {total_runs} runs processed so far"
                 }
                 try:
-                    ws.send(json.dumps(keepalive_msg, default=json_default))
+                    _send_ws_json(ws, keepalive_msg)
                     last_keepalive = total_runs
+                except WebSocketClientDisconnected:
+                    raise
                 except:
                     pass
         
@@ -334,7 +369,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                 "elapsed_time": elapsed_time,
                 "eta_seconds": None
             }
-            ws.send(json.dumps(msg, default=json_default))
+            _send_ws_json(ws, msg)
             print(f"[WebSocket] Sent final Phase 1 batch: {len(batch)} runs")
         
         # Send Phase 1 completion message
@@ -348,7 +383,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             "elapsed_time": phase1_elapsed
         }
         if config.get("fetch_job_details", False):
-            ws.send(json.dumps(phase1_complete_msg, default=json_default))
+            _send_ws_json(ws, phase1_complete_msg)
         print(f"[WebSocket] Phase 1 complete: {total_runs} total runs ({new_runs_count} new, {existing_runs_count} existing) in {phase1_elapsed:.2f} seconds")
         
         # ========================================
@@ -404,7 +439,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                             "elapsed_time": elapsed_time,
                             "eta_seconds": eta_seconds
                         }
-                        ws.send(json.dumps(msg, default=json_default))
+                        _send_ws_json(ws, msg)
                         print(f"[WebSocket] Sent batch: {len(batch)} runs (total: {current_count}/{total_runs_count} runs, {jobs_collected} jobs)")
                         batch.clear()
                         last_keepalive = current_count
@@ -420,7 +455,9 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                             "eta_seconds": eta_seconds
                         }
                         try:
-                            ws.send(json.dumps(job_progress_msg, default=json_default))
+                            _send_ws_json(ws, job_progress_msg)
+                        except WebSocketClientDisconnected:
+                            raise
                         except:
                             pass
                     
@@ -431,8 +468,10 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                             "message": f"Phase 2: Still collecting job details... {current_count}/{total_runs_count} runs processed"
                         }
                         try:
-                            ws.send(json.dumps(keepalive_msg, default=json_default))
+                            _send_ws_json(ws, keepalive_msg)
                             last_keepalive = current_count
+                        except WebSocketClientDisconnected:
+                            raise
                         except:
                             pass
                 
@@ -449,7 +488,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                         "elapsed_time": elapsed_time,
                         "eta_seconds": None
                     }
-                    ws.send(json.dumps(msg, default=json_default))
+                    _send_ws_json(ws, msg)
                     print(f"[WebSocket] Sent final Phase 2 batch: {len(batch)} runs")
                 
                 phase2_elapsed = time.time() - phase2_start_time
@@ -473,7 +512,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                             "elapsed_time": phase2_elapsed,
                             "eta_seconds": None
                         }
-                        ws.send(json.dumps(msg, default=json_default))
+                        _send_ws_json(ws, msg)
             else:
                 phase2_elapsed = 0
                 total_jobs = 0
@@ -491,7 +530,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             "totalJobs": total_jobs,
             "elapsed_time": phase1_elapsed + phase2_elapsed
         }
-        ws.send(json.dumps(complete_msg, default=json_default))
+        _send_ws_json(ws, complete_msg)
         
         print(f"[WebSocket] ========================================")
         print(f"[WebSocket] Collection complete!")
@@ -502,13 +541,15 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
         print(f"[WebSocket] Total time: {phase1_elapsed + phase2_elapsed:.2f} seconds")
         print(f"[WebSocket] ========================================")
         
+    except WebSocketClientDisconnected as e:
+        print(f"[WebSocket] Client disconnected: {e}")
     except Exception as e:
         print(f"[WebSocket] ERROR: {e}")
         import traceback
         traceback.print_exc()
         try:
             error_msg = {"type": "error", "message": str(e)}
-            ws.send(json.dumps(error_msg, default=json_default))
+            _send_ws_json(ws, error_msg)
         except:
             print("[WebSocket] Failed to send error message")
     
@@ -519,4 +560,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             if keepalive_thread.is_alive():
                 keepalive_thread.join(timeout=1.0)
         print(f"[WebSocket] Closing connection")
-        ws.close()
+        try:
+            ws.close()
+        except Exception:
+            pass
