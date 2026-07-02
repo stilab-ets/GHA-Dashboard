@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
 import { buildDashboardCollectionFilters, filterRunsForScope, normalizeWorkflowIds } from '../scopeFilters.mjs';
+import { shouldShowCollectionSetup } from '../dashboardState.mjs';
 
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -571,6 +572,7 @@ export default function Dashboard() {
   const [workflowOptions, setWorkflowOptions] = useState([]);
   const [workflowOptionsLoading, setWorkflowOptionsLoading] = useState(false);
   const [workflowOptionsError, setWorkflowOptionsError] = useState(null);
+  const [configuringCollection, setConfiguringCollection] = useState(false);
 
   const getActiveDateRange = () => ({
     start: filters.start || '',
@@ -1255,6 +1257,7 @@ export default function Dashboard() {
       end: collectionScope.end
     };
     const preserveStreamingCache = !!options.preserveStreamingCache;
+    setConfiguringCollection(false);
     setCollectionStarted(true);
     setLoading(true);
     setError(null);
@@ -1452,6 +1455,7 @@ export default function Dashboard() {
         }));
         setDataLoaded(!!data);
         setCollectionStarted(!!data);
+        setConfiguringCollection(true);
         await refreshPersistedRunCount(currentRepo, 500);
         return;
       }
@@ -1475,6 +1479,7 @@ export default function Dashboard() {
       }));
       setDataLoaded(!!data);
       setCollectionStarted(!!data);
+      setConfiguringCollection(true);
       await refreshPersistedRunCount(currentRepo, 500);
     } catch (err) {
       console.error('[Dashboard] Error cancelling collection:', err);
@@ -2018,7 +2023,7 @@ export default function Dashboard() {
     );
   };
 
-  const renderCollectionScopePanel = () => {
+  const renderCollectionScopePanel = ({ collectMore = false } = {}) => {
     const selectedWorkflowLabels = getSelectedCollectionWorkflowLabels();
 
     return (
@@ -2147,11 +2152,11 @@ export default function Dashboard() {
         <div className="collection-start-actions">
           <button
             className="primary-action primary-action-large"
-            onClick={() => loadDashboardData(false)}
+            onClick={() => loadDashboardData(collectMore)}
             type="button"
             disabled={workflowOptionsLoading}
           >
-            Start Data Collection
+            {collectMore ? 'Collect More Data' : 'Start Data Collection'}
           </button>
         </div>
       </section>
@@ -2161,7 +2166,14 @@ export default function Dashboard() {
   // in the single useEffect above to avoid duplicate filtering
 
   // Show start collection button if collection hasn't started yet
-  if (!collectionStarted && !loading && !data) {
+  const showCollectionSetup = shouldShowCollectionSetup({
+    collectionStarted,
+    loading,
+    hasData: Boolean(data),
+    configuringCollection,
+  });
+
+  if (showCollectionSetup && !data) {
     return (
       <div className={`dashboard ${dashboardTheme} container collection-setup-dashboard`}>
         {renderCollectionScopePanel()}
@@ -3039,6 +3051,8 @@ export default function Dashboard() {
           </div>
         </header>
 
+        {showCollectionSetup && renderCollectionScopePanel({ collectMore: true })}
+
         {/* Filter Panel */}
         <div className="filter-panel card">
           <div className="filter-row">
@@ -3584,7 +3598,11 @@ export default function Dashboard() {
                     <span>Data</span>
 
                     <button
-                      onClick={() => loadDashboardData(true)}
+                      onClick={() => {
+                        setError(null);
+                        setConfiguringCollection(true);
+                        setCollectionWorkflowDropdownOpen(true);
+                      }}
                       className="primary-action"
                       type="button"
                     >
