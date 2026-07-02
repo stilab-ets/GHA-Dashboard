@@ -52,6 +52,13 @@ export function buildExtractionFilters({
   return filters;
 }
 
+export function buildDashboardCollectionFilters(options = {}) {
+  return buildExtractionFilters({
+    ...options,
+    fetchJobDetails: true,
+  });
+}
+
 function runDateInScope(run, start, end) {
   if (!run?.created_at) return false;
 
