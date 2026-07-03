@@ -1,4 +1,4 @@
-const { test, expect } = require('./fixtures');
+const { test, expect } = require('../fixtures');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -14,9 +14,28 @@ test('service worker exists', async ({ context }) => {
 });
 
 test('background normalizes run ids before cache merge', async () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'background.js'), 'utf8');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', '..', 'src', 'background.js'), 'utf8');
+  const browser = {
+    runtime: { onMessage: { addListener: () => {} } },
+    tabs: {
+      onRemoved: { addListener: () => {} },
+      onUpdated: { addListener: () => {} },
+    },
+    storage: {
+      local: {
+        set: () => {},
+        remove: () => {},
+      },
+      session: {
+        get: () => {},
+      },
+    },
+  };
+
   const sandbox = {
     console,
+    browser,
+    window: { browser },
     WebSocket: function WebSocket() {},
     chrome: {
       runtime: { onMessage: { addListener: () => {} } },

@@ -5,17 +5,19 @@
 GHA Dashboard analyzes GitHub Actions workflow runs for a GitHub repository.
 
 It includes:
-- a Chrome extension that displays the dashboard inside GitHub
+- a Browser extension for Chromium and Firefox that displays the dashboard inside GitHub
 - a local Flask backend that serves API and WebSocket endpoints
 - local JSON persistence for cached workflow data
 
-The intended flow is: start the Flask server locally, load the Chrome extension, then let the extension send the GitHub token to the backend when collecting data.
+The intended flow is: start the Flask server locally, load the extension, then let the extension send the GitHub token to the backend when collecting data.
 
 ## 1. Prerequisites
 
 - Python
-- Google Chrome
-- Optional: a GitHub OAuth app, or a GitHub Personal Access Token with `repo` or `public_repo` permission
+- Any supported Browser
+  - Chromium (Google Chrome, Brave, etc...)
+  - Firefox
+- Optional: a GitHub Personal Access Token with `repo` or `public_repo` permission if you do not wish to use the Github OAuth App
 
 ## 2. Backend Setup
 
@@ -56,19 +58,24 @@ Two authentication modes are supported:
 
 The token is sent to the local backend only when the extension starts data collection.
 
-## 4. Installing the Chrome Extension
+## 4. Installing the Extension
 
-Build or prepare the extension, then open Chrome at:
+#### Option #1: Chromium
 
-```text
-chrome://extensions
-```
+1. Go to the extension folder via `cd extension` 
+2. Execute `npm run pack` or `npm run pack chromium`
+3. Open Chrome/Brave/etc.. and go to `chrome://extensions/`
+4. Enable **Developer mode** (top right)
+5. Click **Load unpacked**
+6. Select the folder: `GHA-Dashboard/extension/build/`
 
-Enable Developer Mode, click **Load unpacked**, and select:
+#### Option #2: Firefox
 
-```text
-GHA-Dashboard/extension/build
-```
+1. Go to the extension folder via `cd extension` 
+2. Execute `npm run pack firefox`
+3. Open Firefox and go to `about:debugging#/runtime/this-firefox`
+4. Click **Load Temporary Add-on...**
+5. Select the manifest: `GHA-Dashboard/extension/build/manifest.json`
 
 ## 5. Using the Dashboard
 

@@ -6,7 +6,7 @@ import {
   buildExtractionFilters,
   filterRunsForScope,
   normalizeWorkflowIds,
-} from '../src/scopeFilters.mjs';
+} from '../../src/scopeFilters.mjs';
 
 test('buildExtractionFilters includes dates and selected workflow IDs', () => {
   const filters = buildExtractionFilters({
