@@ -332,6 +332,31 @@
     padding: 8px 10px;
 }
 
+.dashboard-error-card {
+    margin-top: 16px;
+    padding: 16px 20px !important;
+    border-left: 4px solid var(--danger) !important;
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--danger-soft) 82%, var(--card-bg)),
+        color-mix(in srgb, var(--danger-soft) 38%, var(--card-bg))
+    ) !important;
+}
+
+.dashboard-error-title {
+    margin: 0 0 8px;
+    color: var(--danger);
+}
+
+.dashboard-error-message {
+    margin: 0;
+    color: var(--text);
+}
+
+.dashboard-error-actions {
+    margin-top: 12px;
+}
+
 .collection-start-actions {
     display: grid;
     justify-items: end;
@@ -349,6 +374,10 @@
 
 .dashboard.collection-setup-dashboard {
     padding-bottom: 24px;
+}
+
+.dashboard.collection-setup-dashboard.workflow-dropdown-active {
+    padding-bottom: 160px;
 }
 
 .collection-scope-panel::before {
@@ -618,11 +647,13 @@
 }
 
 .collection-workflow-menu {
-    position: static;
-    margin-top: 8px;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
     width: 100%;
-    z-index: 1200;
+    z-index: 3000;
     padding: 8px;
+    box-sizing: border-box;
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -917,10 +948,14 @@
 }
 
 .chart-wheel-area-large,
-.time-to-fix-chart,
 .failure-worsening-body {
     height: 320px;
     min-height: 320px;
+}
+
+.time-to-fix-chart {
+    height: 420px;
+    min-height: 420px;
 }
 
 .dashboard-chart-popup-layer {
@@ -1305,7 +1340,7 @@ body.dashboard-chart-fullscreen-active {
 }
 
 html, body {
-    background: #0f1720;
+    background: #0d1117;
     color: var(--text, #e6eef6);
     margin: 0;
     padding: 0;
@@ -1317,6 +1352,18 @@ html, body {
     max-width: 100%;
 }
 
+html:has(.dashboard.light),
+body:has(.dashboard.light) {
+    background: #f5f7fb;
+    color: #172033;
+}
+
+html:has(.dashboard.dark),
+body:has(.dashboard.dark) {
+    background: #0d1117;
+    color: #c9d1d9;
+}
+
 #root {
     overflow-x: hidden !important;
     overflow-x: clip !important;
@@ -1325,7 +1372,7 @@ html, body {
     min-height: 0;
     width: 100% !important;
     max-width: 100%;
-    background: #0f1720;
+    background: inherit;
 }
 
 /* UC-02: Filter Panel */

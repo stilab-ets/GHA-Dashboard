@@ -2178,7 +2178,7 @@ export default function Dashboard() {
   // Show start collection button if collection hasn't started yet
   if (!collectionStarted && !loading && !data) {
     return (
-      <div className={`dashboard ${dashboardTheme} container collection-setup-dashboard`}>
+      <div className={`dashboard ${dashboardTheme} container collection-setup-dashboard ${collectionWorkflowDropdownOpen ? 'workflow-dropdown-active' : ''}`}>
         {renderCollectionScopePanel()}
       </div>
     );
@@ -2205,17 +2205,12 @@ export default function Dashboard() {
 
   if (error) return (
     <div className={`dashboard ${dashboardTheme} container`}>
-      <div className="card" style={{
-        borderLeft: '4px solid #f44336',
-        background: 'linear-gradient(90deg, rgba(244,67,54,0.1) 0%, rgba(244,67,54,0.05) 100%)',
-        padding: '16px 20px',
-        marginTop: '16px'
-      }}>
-        <h3 style={{ margin: '0 0 8px 0', color: '#ff867c' }}>Connection Error</h3>
-        <p style={{ margin: 0, color: '#ffd0cc' }}>
+      <div className="card dashboard-error-card">
+        <h3 className="dashboard-error-title">Connection Error</h3>
+        <p className="dashboard-error-message">
           {error}
         </p>
-        <div style={{ marginTop: '12px' }}>
+        <div className="dashboard-error-actions">
           <button className="primary-action" onClick={() => loadDashboardData(false)} type="button">Retry</button>
         </div>
       </div>
@@ -2955,6 +2950,8 @@ export default function Dashboard() {
   const filteredRunsDetailNote = excludedOutlierRuns > 0
     ? `${filteredRunsNote}; ${excludedOutlierRuns} duration outliers excluded from stats`
     : filteredRunsNote;
+  const chartAxisColor = dashboardTheme === 'light' ? '#667085' : '#bcd';
+  const chartGridColor = dashboardTheme === 'light' ? '#98a2b3' : '#122';
 
   return (
     <div className={`dashboard ${dashboardTheme}`}>
@@ -4259,9 +4256,9 @@ export default function Dashboard() {
                   data={visibleRunsOverTime}
                   margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis dataKey="date" stroke="#bcd" />
-                  <YAxis stroke="#bcd" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                  <XAxis dataKey="date" stroke={chartAxisColor} />
+                  <YAxis stroke={chartAxisColor} />
                   <Tooltip />
                   <Legend />
                   <Bar dataKey="successes" stackId="a" fill="#4caf50" name="Successes" />
@@ -4312,10 +4309,10 @@ export default function Dashboard() {
                   data={visibleDurationVariability}
                   margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis dataKey="date" stroke="#bcd" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                  <XAxis dataKey="date" stroke={chartAxisColor} />
                   <YAxis
-                    stroke="#bcd"
+                    stroke={chartAxisColor}
                     label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }}
                   />
                   <Tooltip />
@@ -4401,10 +4398,10 @@ export default function Dashboard() {
                     data={visibleCumulativeFailure}
                     margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                    <XAxis dataKey="date" stroke="#bcd" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                    <XAxis dataKey="date" stroke={chartAxisColor} />
                     <YAxis
-                      stroke="#bcd"
+                      stroke={chartAxisColor}
                       label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }}
                     />
                     <Tooltip />
@@ -4491,11 +4488,11 @@ export default function Dashboard() {
                     <div style={{ color: '#4caf50', fontWeight: 'bold', marginTop: '5px' }}>Mean: {formatTimeForTooltip(tooltipData.mean)}</div>
                   </div>
                 )}
-                <svg width="100%" height="100%" viewBox="0 0 900 320" preserveAspectRatio="xMidYMid meet" style={{ overflow: 'visible' }}>
+                <svg width="100%" height="100%" viewBox="0 0 700 460" preserveAspectRatio="xMidYMid meet" style={{ overflow: 'visible' }}>
                   {(() => {
-                    const chartWidth = 900;
-                    const chartHeight = 320;
-                    const margin = { top: 20, right: 30, bottom: 60, left: 120 };
+                    const chartWidth = 700;
+                    const chartHeight = 460;
+                    const margin = { top: 36, right: 34, bottom: 86, left: 136 };
                     const plotWidth = chartWidth - margin.left - margin.right;
                     const plotHeight = chartHeight - margin.top - margin.bottom;
 
@@ -4513,7 +4510,7 @@ export default function Dashboard() {
 
                     const xScale = reasonableMax > 0 ? plotWidth / reasonableMax : 1;
                     const boxSpacing = plotHeight / (visibleTimeToFix.length + 1);
-                    const boxHeight = Math.min(boxSpacing * 0.6, 40);
+                    const boxHeight = Math.min(boxSpacing * 0.62, 52);
 
                     return (
                       <g transform={`translate(${margin.left}, ${margin.top})`}>
@@ -4523,7 +4520,7 @@ export default function Dashboard() {
                           y1={0}
                           x2={0}
                           y2={plotHeight}
-                          stroke="#bcd"
+                          stroke={chartAxisColor}
                           strokeWidth={1.5}
                         />
 
@@ -4533,7 +4530,7 @@ export default function Dashboard() {
                           y1={plotHeight}
                           x2={plotWidth}
                           y2={plotHeight}
-                          stroke="#bcd"
+                          stroke={chartAxisColor}
                           strokeWidth={1.5}
                         />
 
@@ -4549,15 +4546,15 @@ export default function Dashboard() {
                                 y1={0}
                                 x2={xPos}
                                 y2={plotHeight}
-                                stroke="#122"
+                                stroke={chartGridColor}
                                 strokeDasharray="3 3"
                                 opacity={0.3}
                               />
                               <text
                                 x={xPos}
                                 y={plotHeight + 20}
-                                fill="#bcd"
-                                fontSize="11"
+                                fill={chartAxisColor}
+                                fontSize="17"
                                 textAnchor="middle"
                               >
                                 {displayValue < 10 ? displayValue.toFixed(1) : Math.round(displayValue)}{timeUnit.label}
@@ -4574,8 +4571,8 @@ export default function Dashboard() {
                               key={`y-label-${index}`}
                               x={-10}
                               y={yPos + 5}
-                              fill="#bcd"
-                              fontSize="11"
+                              fill={chartAxisColor}
+                              fontSize="17"
                               textAnchor="end"
                             >
                               {item.workflow.length > 15 ? item.workflow.substring(0, 12) + '...' : item.workflow}
@@ -4638,7 +4635,7 @@ export default function Dashboard() {
                                     x={plotWidth + 5}
                                     y={yPos + 4}
                                     fill="#ff9800"
-                                    fontSize="9"
+                                    fontSize="15"
                                     textAnchor="start"
                                   >
                                     {formatWithUnit(item.max, timeUnit.divisor, timeUnit.label)}
@@ -4685,8 +4682,8 @@ export default function Dashboard() {
                         <text
                           x={plotWidth / 2}
                           y={plotHeight + 45}
-                          fill="#bcd"
-                          fontSize="12"
+                          fill={chartAxisColor}
+                          fontSize="18"
                           textAnchor="middle"
                           fontWeight="bold"
                         >
@@ -4695,12 +4692,12 @@ export default function Dashboard() {
 
                         {/* Y-axis label */}
                         <text
-                          x={-60}
+                          x={-76}
                           y={plotHeight / 2}
-                          fill="#bcd"
-                          fontSize="12"
+                          fill={chartAxisColor}
+                          fontSize="18"
                           textAnchor="middle"
-                          transform={`rotate(-90, -60, ${plotHeight / 2})`}
+                          transform={`rotate(-90, -76, ${plotHeight / 2})`}
                           fontWeight="bold"
                         >
                           Workflow
@@ -4769,9 +4766,9 @@ export default function Dashboard() {
                     data={visibleDurationExplosion}
                     margin={{ top: 10, right: 30, left: 0, bottom: 20 }}
                   >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis dataKey="date" stroke="#bcd" angle={-45} textAnchor="end" height={80} />
-                  <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                  <XAxis dataKey="date" stroke={chartAxisColor} angle={-45} textAnchor="end" height={80} />
+                  <YAxis stroke={chartAxisColor} label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
                   <Tooltip
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
@@ -4790,7 +4787,7 @@ export default function Dashboard() {
                                   Next median: {data.worseningPoint.nextMedian.toFixed(1)}s
                                 </p>
                                 {data.worseningPoint.commitSha && (
-                                  <p style={{ color: '#bcd', margin: '3px 0', fontSize: '10px', fontFamily: 'monospace' }}>
+                                  <p style={{ color: chartAxisColor, margin: '3px 0', fontSize: '10px', fontFamily: 'monospace' }}>
                                     Commit: {data.worseningPoint.commitSha.substring(0, 7)}
                                   </p>
                                 )}
@@ -4933,11 +4930,11 @@ export default function Dashboard() {
                     data={visibleFailureWorsening}
                     margin={{ top: 10, right: 28, left: 42, bottom: 36 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
 
                     <XAxis
                       dataKey="date"
-                      stroke="#bcd"
+                      stroke={chartAxisColor}
                       angle={-45}
                       textAnchor="end"
                       height={92}
@@ -4948,7 +4945,7 @@ export default function Dashboard() {
                     />
 
                     <YAxis
-                      stroke="#bcd"
+                      stroke={chartAxisColor}
                       width={82}
                       domain={[0, 100]}
                       tickMargin={8}
@@ -4957,7 +4954,7 @@ export default function Dashboard() {
                         angle: -90,
                         position: 'insideLeft',
                         offset: -2,
-                        fill: '#bcd'
+                        fill: chartAxisColor
                       }}
                     />
 
@@ -5001,7 +4998,7 @@ export default function Dashboard() {
 
                                   {data.worseningPoint.commitSha && (
                                     <p style={{
-                                      color: '#bcd',
+                                      color: chartAxisColor,
                                       margin: '3px 0',
                                       fontSize: '10px',
                                       fontFamily: 'monospace'
