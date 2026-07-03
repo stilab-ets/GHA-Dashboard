@@ -1,3 +1,5 @@
+import browser from "webextension-polyfill";
+
 // ============================================
 // WebSocket Client
 // ============================================
@@ -41,8 +43,8 @@ function createCancellationError() {
   return error;
 }
 
-if (typeof chrome !== 'undefined' && chrome.storage) {
-  chrome.storage.onChanged.addListener((changes, areaName) => {
+if (typeof chrome !== 'undefined' && browser.storage) {
+  browser.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
     
     // Runs change
@@ -52,22 +54,22 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
       // When runs change, also read wsStatus to know for which repo the
       // background script is currently streaming. This ensures we store
       // the data under the correct repository key.
-      chrome.storage.local.get(['wsStatus'], (state) => {
-        const status = state.wsStatus || {};
-        const repo = status.repo;
-        if (!repo) return;
+      (async () => {
+          const state = await browser.storage.local.get("wsStatus");
 
-        _runsByRepo.set(repo, newRuns);
+          const status = state.wsStatus || {};
+          const repo = status.repo;
+          if (!repo) return;
 
-        // If a dashboard is actively waiting on progress, it will have
-        // registered its own callback via fetchDashboardDataViaWebSocket.
-        if (_progressCallbacks.has(repo)) {
-          const cb = _progressCallbacks.get(repo);
-          const activeFilters = _activeFiltersByRepo.get(repo) || null;
-          const dashboardData = convertRunsToDashboard(newRuns, repo, activeFilters);
-          cb(dashboardData, Boolean(status.isComplete));
-        }
-      });
+          _runsByRepo.set(repo, newRuns);
+
+          if (_progressCallbacks.has(repo)) {
+              const cb = _progressCallbacks.get(repo);
+              const activeFilters = _activeFiltersByRepo.get(repo) || null;
+              const dashboardData = convertRunsToDashboard(newRuns, repo, activeFilters);
+              cb(dashboardData, Boolean(status.isComplete));
+          }
+      })();
     }
     
     // Status change
@@ -84,30 +86,31 @@ if (typeof chrome !== 'undefined' && chrome.storage) {
           _timeoutIds.delete(repo);
         }
         
-        chrome.storage.local.get(['wsRuns'], (result) => {
-          const finalRuns = result.wsRuns || [];
-          _runsByRepo.set(repo, finalRuns);
-          
-          const activeFilters = _activeFiltersByRepo.get(repo) || null;
-          const dashboardData = convertRunsToDashboard(finalRuns, repo, activeFilters);
-          
-          const cb = _progressCallbacks.get(repo);
-          if (cb) {
-            cb(dashboardData, true);
-          }
-          
-          // Petite pause pour s'assurer que le callback a le temps de se déclencher
-          setTimeout(() => {
-            const resolver = _pendingResolves.get(repo);
-            if (resolver) {
-              resolver(dashboardData);
+        (async () => {
+            const result = await browser.storage.local.get("wsRuns");
+
+            const finalRuns = result.wsRuns || [];
+            _runsByRepo.set(repo, finalRuns);
+
+            const activeFilters = _activeFiltersByRepo.get(repo) || null;
+            const dashboardData = convertRunsToDashboard(finalRuns, repo, activeFilters);
+
+            const cb = _progressCallbacks.get(repo);
+            if (cb) {
+                cb(dashboardData, true);
             }
-            _pendingResolves.delete(repo);
-            _pendingRejects.delete(repo);
-            _progressCallbacks.delete(repo);
-            console.log(`[WebSocket] Promise resolved for ${repo}`);
-          }, 50);
-        });
+
+            setTimeout(() => {
+                const resolver = _pendingResolves.get(repo);
+                if (resolver) {
+                    resolver(dashboardData);
+                }
+                _pendingResolves.delete(repo);
+                _pendingRejects.delete(repo);
+                _progressCallbacks.delete(repo);
+                console.log(`[WebSocket] Promise resolved for ${repo}`);
+            }, 50);
+        })();
       }
       
       if (status.error && _pendingRejects.has(repo)) {
@@ -138,7 +141,7 @@ export function filterRunsLocally(filters, repoOverride = null) {
   // repository seen in wsStatus so filtering still works from
   // Dashboard without needing to thread the repo everywhere.
   let repo = repoOverride;
-  if (!repo && typeof chrome !== 'undefined' && chrome.storage) {
+  if (!repo && typeof chrome !== 'undefined' && browser.storage) {
     // NOTE: we cannot do async storage reads here because callers
     // expect a synchronous return, so we rely on the in-memory
     // cache, which is already keyed by repo in the storage listener.
@@ -881,126 +884,127 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
       refreshWorkflowIds: normalizeWorkflowIds(filters.refreshWorkflowIds)
     });
     _runsByRepo.set(repo, []);
-    chrome.runtime.sendMessage({
-      action: 'startWebSocketExtraction',
-      repo: repo,
-      filters: {
-        start: filters.start,
-        end: filters.end,
-        workflowIds: normalizeWorkflowIds(filters.workflowIds),
-        refreshWorkflowIds: normalizeWorkflowIds(filters.refreshWorkflowIds),
-        fetchJobDetails: Boolean(filters.fetchJobDetails),
-        forceRefresh: Boolean(filters.forceRefresh)
-      }
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('[WebSocket] Error:', chrome.runtime.lastError);
-        reject(new Error(chrome.runtime.lastError.message));
-        clearPendingCollection(repo);
-        return;
-      }
-
-      // If background reports that another repo is already streaming
-      if (response && response.busy) {
-        const message = response.error || `Another repository (${response.currentRepo}) is currently streaming. Please wait until it finishes before starting a new extraction.`;
-        reject(new Error(message));
-        clearPendingCollection(repo);
-        return;
-      }
-
-      if (response?.cached) {
-        cacheRunsForRepo(repo, response.data);
-        const dashboardData = convertRunsToDashboard(response.data, repo, filters);
-        if (onProgressCallback) {
-          onProgressCallback(dashboardData, true);
-        }
-        resolve(dashboardData);
-        clearPendingCollection(repo);
-      } else {
-        // Extended timeout for GHAminer collection (30 minutes)
-        // GHAminer can take a long time for large repositories
-        const timeoutId = setTimeout(() => {
-          if (_pendingResolves.has(repo)) {
-            chrome.storage.local.get(['wsRuns', 'wsStatus'], (result) => {
-              const data = result.wsRuns || [];
-              const status = result.wsStatus || {};
-              
-              // Only timeout if collection is complete
-              if (status.isComplete) {
-                if (data.length > 0) {
-                  const dashboardData = convertRunsToDashboard(data, repo, filters);
-                  resolve(dashboardData);
-                } else {
-                  // Collection completed but no data
-                  const dashboardData = convertRunsToDashboard([], repo, filters);
-                  resolve(dashboardData);
-                }
-                clearPendingCollection(repo);
-              } else {
-                // Still collecting, don't timeout yet
-                console.log('[WebSocket] Collection still in progress, not timing out yet...');
-                // Keep the timeout active, it will be cleared when complete
-              }
-            });
+    (async () => {
+      try {
+        const response = await browser.runtime.sendMessage({
+          action: 'startWebSocketExtraction',
+          repo,
+          filters: {
+            start: filters.start,
+            end: filters.end,
+            workflowIds: normalizeWorkflowIds(filters.workflowIds),
+            refreshWorkflowIds: normalizeWorkflowIds(filters.refreshWorkflowIds),
+            fetchJobDetails: Boolean(filters.fetchJobDetails),
+            forceRefresh: Boolean(filters.forceRefresh)
           }
-        }, 1800000); // 30 minutes
-        
-        _timeoutIds.set(repo, timeoutId);
-      }
-    });
-  });
-}
-
-export function cancelWebSocketCollection(repo = null) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({
-      action: 'cancelWebSocketExtraction',
-      repo: repo
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-
-      if (repo) {
-        const rejector = _pendingRejects.get(repo);
-        if (rejector) {
-          rejector(createCancellationError());
+        });
+        // If background reports that another repo is already streaming
+        if (response && response.busy) {
+          const message = response.error || `Another repository (${response.currentRepo}) is currently streaming. Please wait until it finishes before starting a new extraction.`;
+          reject(new Error(message));
+          clearPendingCollection(repo);
+          return;
         }
+
+        if (response?.cached) {
+          cacheRunsForRepo(repo, response.data);
+          const dashboardData = convertRunsToDashboard(response.data, repo, filters);
+          if (onProgressCallback) {
+            onProgressCallback(dashboardData, true);
+          }
+          resolve(dashboardData);
+          clearPendingCollection(repo);
+        } else {
+          // Extended timeout for GHAminer collection (30 minutes)
+          // GHAminer can take a long time for large repositories
+          const timeoutId = setTimeout(async () => {
+            if (_pendingResolves.has(repo)) {
+              try {
+                const result = await browser.storage.local.get(['wsRuns', 'wsStatus']);
+                const data = result.wsRuns || [];
+                const status = result.wsStatus || {};
+
+                // Only timeout if collection is complete
+                if (status.isComplete) {
+                  if (data.length > 0) {
+                    const dashboardData = convertRunsToDashboard(data, repo, filters);
+                    resolve(dashboardData);
+                  } else {
+                    // Collection completed but no data
+                    const dashboardData = convertRunsToDashboard([], repo, filters);
+                    resolve(dashboardData);
+                  }
+                  clearPendingCollection(repo);
+                } else {
+                  // Still collecting, don't timeout yet
+                  console.log('[WebSocket] Collection still in progress, not timing out yet...');
+                  // Keep the timeout active, it will be cleared when complete
+                }
+              } catch (error) {
+                console.error('[WebSocket] Timeout storage read failed:', error);
+                reject(error);
+                clearPendingCollection(repo);
+              }
+            }
+          }, 1800000); // 30 minutes
+
+          _timeoutIds.set(repo, timeoutId);
+        }
+      } catch (error) {
+        console.error('[WebSocket] Error:', error);
+        reject(error);
         clearPendingCollection(repo);
       }
-
-      if (response && response.success === false) {
-        reject(new Error(response.error || 'Unable to cancel collection'));
-        return;
-      }
-
-      resolve(response || { success: true });
-    });
+    })();
   });
 }
 
-export function getWebSocketCacheStatus(repo) {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({
-      action: 'getWebSocketCacheStatus',
-      repo: repo
-    }, (response) => {
-      resolve(response || { hasCache: false, itemCount: 0, isComplete: false });
+export async function cancelWebSocketCollection(repo) {
+  try {
+    const response = await browser.runtime.sendMessage({
+      action: 'cancelWebSocketExtraction',
+      repo
     });
-  });
+
+    if (repo) {
+      const rejector = _pendingRejects.get(repo);
+      if (rejector) {
+        rejector(createCancellationError());
+      }
+      clearPendingCollection(repo);
+    }
+
+    if (response && response.success === false) {
+      throw new Error(response.error || 'Unable to cancel collection');
+    }
+
+    return response || { success: true };
+  } catch (error) {
+    throw error;
+  }
+}
+
+export async function getWebSocketCacheStatus(repo) {
+  try {
+    return await browser.runtime.sendMessage({
+      action: 'getWebSocketCacheStatus',
+      repo
+    });
+  } catch {
+    return {
+      hasCache: false,
+      itemCount: 0,
+      isComplete: false
+    };
+  }
 }
 
 export function clearWebSocketCache(repo = null) {
-  const runtimeClear = new Promise((resolve) => {
-    chrome.runtime.sendMessage({
-      action: 'clearWebSocketCache',
-      repo: repo
-    }, () => resolve());
+  const runtimeClear = browser.runtime.sendMessage({
+    action: 'clearWebSocketCache',
+    repo
   });
-  const storageClear = new Promise((resolve) => {
-    chrome.storage.local.remove(['wsRuns', 'wsStatus'], () => resolve());
-  });
+  const storageClear = browser.storage.local.remove(['wsRuns', 'wsStatus']);
   if (repo) {
     _runsByRepo.delete(repo);
   } else {

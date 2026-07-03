@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
 import { buildDashboardCollectionFilters, extendWorkflowScopeForSelection, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForSelectionDelta, workflowNamesForIds } from '../scopeFilters.mjs';
-
+import browser from "webextension-polyfill";
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
 import '../styles/dashboardStyles.css';
@@ -671,49 +671,61 @@ export default function Dashboard() {
   const prevDatesRef = useRef({ start: defaultStart, end: defaultEnd });
 
   useEffect(() => {
+    let mediaQuery = null;
+    let syncSystemTheme = null;
+
     const applyTheme = (theme) => {
-      if (theme === 'light' || theme === 'dark') {
+      if (theme === "light" || theme === "dark") {
         setDashboardTheme(theme);
       }
     };
 
-    applyTheme(new URLSearchParams(window.location.search).get('theme'));
-
     const handleMessage = (event) => {
-      if (event.data?.type === 'GHA_DASHBOARD_THEME') {
+      if (event.data?.type === "GHA_DASHBOARD_THEME") {
         applyTheme(event.data.theme);
       }
     };
 
-    window.addEventListener('message', handleMessage);
+    const run = async () => {
+      if (browser.storage && browser.tabs) {
+        const tabs = await browser.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
 
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.tabs) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const activeTab = tabs && tabs[0];
-        if (activeTab && typeof activeTab.id === 'number') {
+        const activeTab = tabs[0];
+
+        if (activeTab && typeof activeTab.id === "number") {
           const key = `githubTheme_${activeTab.id}`;
-          chrome.storage.local.get([key, 'githubTheme'], (result) => {
-            applyTheme(result[key] || result.githubTheme);
-          });
+          const result = await browser.storage.local.get([key, "githubTheme"]);
+          applyTheme(result[key] || result.githubTheme);
         } else {
-          chrome.storage.local.get(['githubTheme'], (result) => {
-            applyTheme(result.githubTheme);
-          });
+          const result = await browser.storage.local.get(["githubTheme"]);
+          applyTheme(result.githubTheme);
         }
-      });
-    } else if (window.matchMedia) {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
-      const syncSystemTheme = () => setDashboardTheme(mediaQuery.matches ? 'light' : 'dark');
-      syncSystemTheme();
-      mediaQuery.addEventListener('change', syncSystemTheme);
-      return () => {
-        window.removeEventListener('message', handleMessage);
-        mediaQuery.removeEventListener('change', syncSystemTheme);
-      };
-    }
+      } else if (window.matchMedia) {
+        mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
+
+        syncSystemTheme = () =>
+          setDashboardTheme(mediaQuery.matches ? "light" : "dark");
+
+        syncSystemTheme();
+        mediaQuery.addEventListener("change", syncSystemTheme);
+      }
+    };
+
+    applyTheme(new URLSearchParams(window.location.search).get("theme"));
+
+    window.addEventListener("message", handleMessage);
+
+    run();
 
     return () => {
-      window.removeEventListener('message', handleMessage);
+      window.removeEventListener("message", handleMessage);
+
+      if (mediaQuery && syncSystemTheme) {
+        mediaQuery.removeEventListener("change", syncSystemTheme);
+      }
     };
   }, []);
 
@@ -766,14 +778,15 @@ export default function Dashboard() {
   const collectionDatePickerRef = useRef(null);
   const collectionWorkflowPickerRef = useRef(null);
 
+  const animationFrameId = useRef(null);
+  const lastHeightSent = useRef(0);
+
   // ============================================
   // Effects
   // ============================================
 
   useEffect(() => {
     if (!window.parent || window.parent === window) return undefined;
-
-    let animationFrameId = null;
 
     const getDashboardHeight = () => {
       const root = document.getElementById('root');
@@ -811,19 +824,19 @@ export default function Dashboard() {
       return Math.ceil(Math.max(360, contentBottom - dashboardTop + paddingBottom));
     };
 
-    const postDashboardHeight = () => {
-      animationFrameId = null;
-      window.parent.postMessage({
-        type: 'GHA_DASHBOARD_HEIGHT',
-        height: getDashboardHeight()
-      }, '*');
-    };
-
     const scheduleHeightPost = () => {
-      if (animationFrameId !== null) {
-        window.cancelAnimationFrame(animationFrameId);
+      if (animationFrameId.current !== null) {
+        window.cancelAnimationFrame(animationFrameId.current);
       }
-      animationFrameId = window.requestAnimationFrame(postDashboardHeight);
+
+      animationFrameId.current = window.requestAnimationFrame(() => {
+        const newHeight = getDashboardHeight();
+
+        if (Math.abs(newHeight - lastHeightSent.current) > 10) {
+          lastHeightSent.current = newHeight;
+          window.parent.postMessage({ type: 'GHA_DASHBOARD_HEIGHT', height: newHeight }, '*');
+        }
+      });
     };
 
     scheduleHeightPost();
@@ -850,8 +863,8 @@ export default function Dashboard() {
     const intervalId = window.setInterval(scheduleHeightPost, 1000);
 
     return () => {
-      if (animationFrameId !== null) {
-        window.cancelAnimationFrame(animationFrameId);
+      if (animationFrameId.current !== null) {
+        window.cancelAnimationFrame(animationFrameId.current);
       }
       if (resizeObserver) resizeObserver.disconnect();
       mutationObserver.disconnect();
@@ -964,31 +977,27 @@ export default function Dashboard() {
         console.log('[Dashboard] Cannot access parent URL, using storage fallback');
       }
 
-      // Fallback to Chrome storage if parent URL extraction failed
-      if (!repo && typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          const activeTab = tabs && tabs[0];
-          if (activeTab && typeof activeTab.id === 'number' && chrome.storage) {
-            const key = `currentRepo_${activeTab.id}`;
-            chrome.storage.local.get([key], (result) => {
-              if (result[key]) {
-                setCurrentRepo(result[key]);
-              }
-            });
-          } else if (chrome.storage) {
-            chrome.storage.local.get(['currentRepo'], (result) => {
-              if (result.currentRepo) {
-                setCurrentRepo(result.currentRepo);
-              }
-            });
+      // Fallback to Browser storage if parent URL extraction failed
+      if (!repo && browser.tabs && browser.runtime) {
+        const tabs = await browser.tabs.query({active: true, currentWindow: true});
+        const activeTab = tabs[0];
+        if (activeTab && typeof activeTab.id === 'number' && browser.storage) {
+          const key = `currentRepo_${activeTab.id}`;
+          const result = await browser.storage.local.get([key]);
+          if (result[key]) {
+            setCurrentRepo(result[key]);
           }
-        });
-      } else if (!repo && typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.get(['currentRepo'], (result) => {
+        } else if (browser.storage) {
+          const result = await browser.storage.local.get(['currentRepo']);
           if (result.currentRepo) {
             setCurrentRepo(result.currentRepo);
           }
-        });
+        }
+      } else if (!repo && browser.storage) {
+        const result = await browser.storage.local.get(['currentRepo']);
+        if (result.currentRepo) {
+          setCurrentRepo(result.currentRepo);
+        }
       }
     };
 
@@ -1001,13 +1010,13 @@ export default function Dashboard() {
     workflowIds: normalizeWorkflowIds(collectionScopeWorkflowIds)
   });
 
-  const getGithubToken = () => new Promise((resolve) => {
-    if (typeof chrome !== 'undefined' && chrome.storage?.session) {
-      chrome.storage.session.get(['githubToken'], (result) => resolve(result.githubToken || null));
-    } else {
-      resolve(null);
-    }
-  });
+  async function getGithubToken() {
+    const result = await browser.runtime.sendMessage({
+      action: "getGithubToken"
+    });
+
+    return result.githubToken ?? null;
+  }
 
   const buildScopedQuery = (scope = getCollectionScope()) => {
     const params = new URLSearchParams();
@@ -1160,7 +1169,7 @@ export default function Dashboard() {
         if (result.runs && result.runs.length > 0) {
           console.log(`[Dashboard] Loaded ${result.runs.length} runs from API`);
 
-          // Store runs in Chrome storage - this triggers the storage listener in websocket.js
+          // Store runs in Browser storage - this triggers the storage listener in websocket.js
           // if (typeof chrome !== 'undefined' && chrome.storage) {
           //   await new Promise((resolve) => {
           //     chrome.storage.local.set({
@@ -1180,7 +1189,7 @@ export default function Dashboard() {
 
           // Now process the runs into dashboard format
           // Use convertRunsToDashboard directly (no dependency on _runsByRepo)
-          const processedData = processRunsToDashboardFormat(result.runs, repo, scope);
+          const processedData = await processRunsToDashboardFormat(result.runs, repo, scope);
 
           if (processedData) {
             console.log('[Dashboard] Processed data successfully:', processedData.totalRuns, 'runs');
@@ -1205,7 +1214,7 @@ export default function Dashboard() {
   };
 
   // Process runs into dashboard format using convertRunsToDashboard directly
-  const processRunsToDashboardFormat = (runs, repo = null, scope = getCollectionScope()) => {
+  const processRunsToDashboardFormat = async (runs, repo = null, scope = getCollectionScope()) => {
     if (!runs || runs.length === 0) {
       console.log('[Dashboard] processRunsToDashboardFormat: No runs provided');
       return null;
@@ -1222,10 +1231,10 @@ export default function Dashboard() {
     console.log(`[Dashboard] Processing ${scopedRuns.length} scoped runs for repo: ${repoToUse}`);
     cacheRunsForRepo(repoToUse, scopedRuns);
 
-    // Store runs in Chrome storage - this will trigger the storage listener in websocket.js
+    // Store runs in Browser storage - this will trigger the storage listener in websocket.js
     // which will populate _runsByRepo for future use
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({
+    if (browser.storage) {
+      await browser.storage.local.set({
         wsRuns: scopedRuns,
         wsStatus: {
           isStreaming: false,
@@ -1330,32 +1339,30 @@ export default function Dashboard() {
         console.log('[Dashboard] Cannot access parent URL, using storage fallback');
       }
 
-      // Fallback to Chrome storage if parent URL extraction failed
+      // Fallback to Browser storage if parent URL extraction failed
       if (!repo) {
-        repo = await new Promise((resolve) => {
-          if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
+        const getRepo = async () => {
+          if (browser.tabs && browser.runtime) {
             // Get the active tab and use its per-tab repo key
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-              const activeTab = tabs && tabs[0];
-              if (activeTab && typeof activeTab.id === 'number' && chrome.storage) {
-                const key = `currentRepo_${activeTab.id}`;
-                chrome.storage.local.get([key], (result) => {
-                  resolve(result[key]);
-                });
-              } else {
-                chrome.storage.local.get(['currentRepo'], (result) => {
-                  resolve(result.currentRepo);
-                });
-              }
-            });
-          } else if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['currentRepo'], (result) => {
-              resolve(result.currentRepo);
-            });
+            const tabs = await browser.tabs.query({active: true, currentWindow: true});
+            const activeTab = tabs[0];
+            if (activeTab && typeof activeTab.id === 'number' && browser.storage) {
+              const key = `currentRepo_${activeTab.id}`;
+              const result = await browser.storage.local.get([key]);
+              return result[key];
+            } else {
+              const result = await browser.storage.local.get(['currentRepo']);
+              return result.currentRepo;
+            }
+          } else if (browser.storage) {
+            const result = await browser.storage.local.get(['currentRepo']);
+            return result.currentRepo;
           } else {
-            resolve(null);
+            return null;
           }
-        });
+        };
+
+        repo = await getRepo();
       }
 
       if (!repo) {
@@ -1577,7 +1584,7 @@ export default function Dashboard() {
 
   // Monitor storage changes and trigger data refresh when runs (with jobs) are updated
   useEffect(() => {
-    if (typeof chrome === 'undefined' || !chrome.storage) return;
+    if (!browser.storage) return;
 
     const handleStorageChange = (changes, areaName) => {
       if (areaName !== 'local') return;
@@ -1696,23 +1703,31 @@ export default function Dashboard() {
       }
     };
 
-    chrome.storage.onChanged.addListener(handleStorageChange);
+    browser.storage.onChanged.addListener(handleStorageChange);
 
-    // Check initial state
-    chrome.storage.local.get(['wsStatus'], (result) => {
+    const run = async () => {
+      // Check initial state
+      const result = await browser.storage.local.get(['wsStatus']);
       const status = result.wsStatus || {};
+
       if (status) {
         if (status.totalRuns) {
           lastKnownTotalRunsRef.current = status.totalRuns;
         }
+
         setProgress({
-          items: (status.collectedRuns !== undefined && status.collectedRuns !== null)
-            ? status.collectedRuns
-            : 0, // Current collected count
+          items:
+            status.collectedRuns !== undefined &&
+            status.collectedRuns !== null
+              ? status.collectedRuns
+              : 0,
           complete: status.isComplete || false,
           isStreaming: status.isStreaming || false,
           phase: status.phase || 'workflow_runs',
-          totalRuns: status.totalRuns || lastKnownTotalRunsRef.current || 0, // Total count from API
+          totalRuns:
+            status.totalRuns ||
+            lastKnownTotalRunsRef.current ||
+            0,
           elapsed_time: status.elapsed_time || null,
           eta_seconds: status.eta_seconds || null,
           phase1_elapsed: status.phase1_elapsed || null,
@@ -1720,12 +1735,12 @@ export default function Dashboard() {
           phase2_eta: status.phase2_eta || null
         });
       }
-    });
+    };
+
+    run();
 
     return () => {
-      if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.onChanged.removeListener(handleStorageChange);
-      }
+      browser.storage.onChanged.removeListener(handleStorageChange);
     };
   }, [currentRepo, filters, availableFilters, appliedCollectionScope]);
 

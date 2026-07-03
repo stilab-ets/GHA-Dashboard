@@ -1,4 +1,4 @@
-const { test, expect } = require('./fixtures');
+const { test, expect } = require('../fixtures');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -15,10 +15,29 @@ test('service worker exists', async ({ context }) => {
 
 test('background normalizes run ids before cache merge', async () => {
   const source = fs
-    .readFileSync(path.resolve(__dirname, '..', 'src', 'background.js'), 'utf8')
+    .readFileSync(path.resolve(__dirname, '..', '..', 'src', 'background.js'), 'utf8')
     .replace(/^import .*scopeFilters\.mjs";\r?\n/m, '');
+  const browser = {
+    runtime: { onMessage: { addListener: () => {} } },
+    tabs: {
+      onRemoved: { addListener: () => {} },
+      onUpdated: { addListener: () => {} },
+    },
+    storage: {
+      local: {
+        set: () => {},
+        remove: () => {},
+      },
+      session: {
+        get: () => {},
+      },
+    },
+  };
+
   const sandbox = {
     console,
+    browser,
+    window: { browser },
     normalizeWorkflowIds: workflowIds => {
       if (!Array.isArray(workflowIds)) return [];
       return Array.from(new Set(

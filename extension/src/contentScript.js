@@ -1,6 +1,8 @@
 (function () {
   'use strict';
 
+  const browser = globalThis.browser || window.browser;
+
   /* ---------------------------------------------------------
    * FIX 1: Always define extractRepoFromURL before usage
    * --------------------------------------------------------- */
@@ -41,9 +43,9 @@
     const repo = extractRepoFromURL(location.href);
     const theme = detectGitHubTheme();
 
-    if (repo && chrome.runtime) {
+    if (repo && browser.runtime) {
       try {
-        chrome.runtime.sendMessage({ type: "UPDATE_REPO", repo, theme });
+        browser.runtime.sendMessage({ type: "UPDATE_REPO", repo, theme });
       } catch (e) {
         reloadAfterExtensionContextInvalidated();
       }
@@ -360,7 +362,7 @@
       width: 100%;
       max-width: 100%;
       min-width: 0;
-      min-height: 900px;
+      min-height: 360px;
       margin: 0;
       padding: 0;
       box-sizing: border-box;
@@ -374,8 +376,8 @@
       width: 100%;
       max-width: 100%;
       min-width: 0;
-      height: 900px;
-      min-height: 900px;
+      height: 360px;
+      min-height: 360px;
       border: none;
       display: block;
       margin: 0;
@@ -410,7 +412,7 @@
     
     let dashboardUrl;
     try {
-      dashboardUrl = chrome.runtime.getURL('src/dashboard/dashboard.html');
+      dashboardUrl = browser.runtime.getURL('src/dashboard/dashboard.html');
     } catch (e) {
       reloadAfterExtensionContextInvalidated();
       return;
