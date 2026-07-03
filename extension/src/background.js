@@ -1,6 +1,4 @@
 // Background Service Worker - WebSocket Manager with GitHub Token
-import { CONFIG } from "./config.js";
-
 const browser = globalThis.browser || window.browser;
 const wsCache = new Map();
 let activeWebSocket = null;
@@ -11,6 +9,7 @@ const SOCKET_CLOSING = 2;
 const SOCKET_CLOSED = 3;
 const WS_CONNECT_MAX_ATTEMPTS = 3;
 const WS_CONNECT_RETRY_DELAY_MS = 1000;
+const BACKEND_URL = "http://127.0.0.1:3000";
 
 function isSocketActive(socket) {
   return socket && socket.readyState !== SOCKET_CLOSING && socket.readyState !== SOCKET_CLOSED;
@@ -246,7 +245,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleAuthentication() {
   try {
     const redirectUri = browser.identity.getRedirectURL();
-    const authUrl = `${CONFIG.BACKEND_URL}/auth/login?extension_redirect_uri=${encodeURIComponent(redirectUri)}`;
+    const authUrl = `${BACKEND_URL}/auth/login?extension_redirect_uri=${encodeURIComponent(redirectUri)}`;
 
     console.log("Launching WebAuthFlow to:", authUrl);
     

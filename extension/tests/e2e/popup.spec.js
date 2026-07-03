@@ -1,4 +1,4 @@
-const { test, expect } = require('./fixtures');
+const { test, expect } = require('../fixtures');
 
 test('extension loads', async ({ extensionId }) => {
   expect(extensionId).toBeTruthy();
@@ -61,28 +61,24 @@ test('save token in chrome.storage.local via popup (direct token access)', async
   expect(stored).toBeTruthy();
 });
 
-test('save token in chrome.storage.local via popup (oauth flow access)', async ({ context, extensionId }) => {
+test('popup delegates OAuth auth to background via popup', async ({ context, extensionId }) => {
   const page = await context.newPage();
 
-  // Mock the chrome.identity API for OAuth flow
   await page.addInitScript(() => {
-    window.crypto.randomUUID = () => "fixed-state";
-    window.fetch = async () => ({
-      ok: true,
-      json: async () => ({
-        token: "mock_token",
-        username: "mock-user"
-      })
-    });
-    window.chrome = window.chrome || {};
-
-    window.chrome.identity = {
-      getRedirectURL: () => "https://callback",
-      launchWebAuthFlow: (options, callback) => {
-        setTimeout(() => {
-          callback("https://callback?code=mock_code&state=fixed-state");
-        }, 10);
+    chrome.runtime.sendMessage = (message) => {
+      if (message?.action === 'authenticate') {
+        return new Promise((resolve) => {
+          chrome.storage.session.set(
+            {
+              githubToken: 'mock_token',
+              githubUsername: 'mock-user',
+            },
+            () => resolve({ success: true, username: 'mock-user' })
+          );
+        });
       }
+
+      return Promise.resolve({ success: false, error: 'Unexpected action' });
     };
   });
 
@@ -90,7 +86,7 @@ test('save token in chrome.storage.local via popup (oauth flow access)', async (
 
   await page.evaluate(() => {
     return new Promise(resolve => {
-      chrome.storage.session.remove(['githubToken'], () => resolve());
+      chrome.storage.session.remove(['githubToken', 'githubUsername'], () => resolve());
     });
   });
 
@@ -104,15 +100,19 @@ test('save token in chrome.storage.local via popup (oauth flow access)', async (
 
   await page.click('#auth-token');
 
-  await expect(page.locator('#token-status')).toHaveText(/Logged in as .+/);
+  await expect(page.locator('#token-status')).toHaveText('Logged in as mock-user');
 
   const stored = await page.evaluate(() => {
     return new Promise(resolve => {
-      chrome.storage.session.get(['githubToken'], res => {
-        resolve(res.githubToken);
+      chrome.storage.session.get(['githubToken', 'githubUsername'], res => {
+        resolve({
+          token: res.githubToken,
+          username: res.githubUsername,
+        });
       });
     });
   });
 
-  expect(stored).toBeTruthy();
+  expect(stored.token).toBeTruthy();
+  expect(stored.username).toBe('mock-user');
 });

@@ -247,21 +247,17 @@ def health():
 
 @app.get("/auth/login")
 def github_login():
-    print("ici")
     ext_uri = request.args.get("extension_redirect_uri")
     if not ext_uri:
-        print("ici1")
         return jsonify({"error": "Missing extension_redirect_uri"}), 400
 
     if E2E_MODE:
-        print("ici2")
         dummy_token = os.getenv("TEST_GITHUB_TOKEN", "dummy_token")
         dummy_user = os.getenv("TEST_GITHUB_USERNAME", "e2e_user")
         return redirect(f"{ext_uri}?token={dummy_token}&username={dummy_user}")
 
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
-        print("ici3")
         return jsonify({"error": "Missing GITHUB_CLIENT_ID on backend"}), 500
 
     # Encode the URL of the extension in a state tu get it in the callback
@@ -274,13 +270,11 @@ def github_login():
         f"&scope=repo%20workflow%20read:user"
         f"&state={state}"
     )
-    print("ici4")
     return redirect(github_auth_url)
 
 
 @app.get("/auth/callback")
 def github_callback():
-    print("iciCallback")
     code = request.args.get("code")
     state = request.args.get("state")
     error = request.args.get("error")
@@ -289,16 +283,12 @@ def github_callback():
     try:
         state_data = json.loads(base64.urlsafe_b64decode(state.encode()).decode())
         ext_uri = state_data.get("ext_uri")
-        print("iciCallback1")
     except Exception:
-        print("iciCallback2")
         return jsonify({"error": "Invalid or missing state"}), 400
 
     if error:
-        print("iciCallback3")
         return redirect(f"{ext_uri}?error={urllib.parse.quote(error)}")
     if not code:
-        print("iciCallback4")
         return redirect(f"{ext_uri}?error=Missing+code")
 
     client_id = os.getenv("GITHUB_CLIENT_ID")
@@ -306,7 +296,6 @@ def github_callback():
 
     # 1. Exchange the code for an access token
     try:
-        print("iciCallback5")
         response = requests.post(
             "https://github.com/login/oauth/access_token",
             headers={"Accept": "application/json"},
@@ -319,19 +308,15 @@ def github_callback():
         )
         token_data = response.json()
         access_token = token_data.get("access_token")
-        print("iciCallback6")
     except requests.RequestException:
-        print("iciCallback7")
         return redirect(f"{ext_uri}?error=Network+error+reaching+GitHub")
 
     if not access_token:
-        print("iciCallback8")
         err_desc = token_data.get("error_description", "OAuth exchange failed")
         return redirect(f"{ext_uri}?error={urllib.parse.quote(err_desc)}")
 
     # 2. Retrieve the username with the token
     try:
-        print("iciCallback9")
         user_response = requests.get(
             "https://api.github.com/user",
             headers={
@@ -342,13 +327,10 @@ def github_callback():
         )
         username = user_response.json().get("login", "")
     except requests.RequestException:
-        print("iciCallback10")
         username = "Unknown"
 
     # 3. Final redirection to the extension with the data
-    print("iciCallback11")
     final_url = f"{ext_uri}?token={access_token}&username={urllib.parse.quote(username)}"
-    print(final_url)
     return redirect(final_url)
 
 # ============================================

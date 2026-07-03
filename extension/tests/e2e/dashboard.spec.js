@@ -1,4 +1,4 @@
-const { test, expect } = require('./fixtures');
+const { test, expect } = require('../fixtures');
 
 const REPOSITORY_URL = 'https://github.com/AUTOMATIC1111/stable-diffusion-webui';
 
@@ -145,4 +145,5 @@ test('dashboard collection scope sends dates and selected workflows', async ({ c
   expect(extractionPayload.filters.start).toBe('2026-06-01');
   expect(extractionPayload.filters.end).toBe('2026-06-30');
   expect(extractionPayload.filters.workflowIds).toEqual([101, 202]);
+  expect(extractionPayload.filters.fetchJobDetails).toBe(true);
 });
