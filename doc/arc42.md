@@ -63,78 +63,99 @@ L'objectif de ce document est de définir l'architecture du **tableau de bord in
 
 ### Analyse des cas d'utilisation (CU)
 
-#### UC-01 : Consulter le tableau de bord
+### UC-01 : Configurer l’accès à GitHub avec OAuth App
+
+**Préconditions :**
+- L’extension est installée dans le navigateur
+- L’utilisateur dispose d’un compte GitHub valide
+
+**Postconditions :**
+- Le token de l'utilisateur est enregistré par l'extension
+
+**Scénario principal (succès) :**
+1. L’utilisateur ouvre la popup de l’extension
+2. L'utilisateur clique sur le bouton "Authenticate with GitHub"
+3. Le système recupère un token temporaire de l'utilisateur via GitHub OAuth App
+4. L’extension enregistre le token
+
+**Scénario alternatif :**
+3.a Si l'authentification est refusée, l’extension affiche un message d’erreur.
+
+---
+
+### UC-02 : Configurer l’accès à GitHub avec PAT
+
+**Préconditions :**
+- L’extension est installée dans le navigateur
+- L’utilisateur dispose d’un token GitHub valide (PAT)
+
+**Postconditions :**
+- Le token de l'utilisateur est enregistré par l'extension
+
+**Scénario principal (succès) :**
+1. L’utilisateur ouvre la popup de l’extension
+2. L'utilisateur rentre son token dans la boîte d'entrée 
+3. L'utilisateur clique sur le bouton "Save"
+4. L’extension enregistre le token
+
+**Scénario alternatif :**
+4.a Si le token entrée ne respecte pas le format, l'extension affiche un message d'erreur. 
+
+---
+
+### UC-03 : Consulter le tableau de bord
 
 Affiche le tableau de bord intégré à GitHub Actions avec métriques globales des workflows.
 
 **Préconditions :**
-- L'extension doit être installée;
-- L'utilisateur est connecté à GitHub.
-
-**Scénario principal (succès) :**
-1. L'utilisateur accède à un dépôt GitHub.
-2. L'utilisateur s'authentifie à l'extension dans le popup.
-3. Il ouvre l'onglet "GHA-Dashboard".
-4. L'utilisateur démarre la collecte des données.
-5. Le tableau de bord affiche les métriques globales (nombre d'exécutions, taux de réussite/échec, durée moyenne).
+- UC-01 ou UC-02 complété
 
 **Postconditions :**
-- Les métriques du dépôt sont affichées dans le tableau de bord.
+- Le tableau de bord affiche les statistiques principales du dépôt
 
-**Hypothèses :**
-- L'utilisateur a les permissions nécessaires pour accéder au dépôt
-- L'API GitHub Actions est accessible.
+**Scénario principal (succès) :**
+1. L’utilisateur ouvre un dépôt GitHub
+2. L'utilisateur clique sur le bouton "GHA-Dashboard"
+3. L'utilisateur entre les conditions de recherche (date de début, date de fin et workflow)
+4. L'utilisateur clique sur le bouton "Start Data Collection"
+5. L'extension affiche le tableau de bord
 
 ---
 
-#### UC-02 : Filtrer les métriques
+### UC-04 : Filtrer les métriques
 
 Permet de filtrer les résultats par workflow, auteur, branche ou période.
 
 **Préconditions :**
-- UC-01 complété.
-
-**Scénario principal (succès) :**
-1. L'utilisateur ouvre le panneau de filtrage.
-2. Il sélectionne les critères souhaités (workflow, branche, acteur, période).
-3. Le tableau de bord met à jour les données dynamiquement.
-
+- UC-03 complété.
+  
 **Postconditions :**
 - Les métriques affichées reflètent les filtres choisis.
 
-#### UC-03 : Analyser les échecs au fil du temps
+**Scénario principal (succès) :**
+1. L'utilisateur ouvre le panneau de filtrage.
+2. L'utilisateur sélectionne les critères souhaités (workflow, branche, acteur, période).
+3. L'extension met à jour les données dynamiquement.
+
+---
+
+### UC-05 : Analyser les échecs au fil du temps
 
 Observe l'évolution du taux d'échec des workflows pour identifier les périodes instables.
 
 **Préconditions :**
-- UC-01 complété.
-
-**Scénario principal (succès) :**
-1. L'utilisateur sélectionne une période d'analyse (jour, semaine, mois).
-2. Il applique des filtres si nécessaire (workflow, acteur, branche).
-3. Le système affiche un graphique linéaire illustrant le pourcentage d'échec au fil du temps.
-4. L'utilisateur compare les résultats selon différentes périodes.
+- UC-03 complété.
 
 **Postconditions :**
 - Les métriques affichées reflètent les taux d'échec pour la période sélectionnée.
 
----
-
-#### UC-04 : Analyser la variabilité des durées
-
-Évaluer la dispersion des temps d'exécution pour évaluer la stabilité des workflows.
-
-**Préconditions :**
-- UC-01 complété.
-
 **Scénario principal (succès) :**
-1. L'utilisateur choisit la période d'analyse.
-2. Le système génère un graphique de dispersion (moyenne, médiane, écart-type).
-3. L'utilisateur compare les valeurs métriques.
-4. Il ajuste les filtres pour observer d'autres workflows.
+1. L'utilisateur sélectionne une période d'analyse (jour, semaine, mois).
+2. L'utilisateur applique des filtres si nécessaire (workflow, acteur, branche).
+3. Le système affiche un graphique linéaire illustrant le pourcentage d'échec au fil du temps.
+4. L'utilisateur compare les résultats selon différentes périodes.
 
-**Postconditions :**
-- Les graphiques affichent la dispersion selon les filtres.
+---
 
 > [!WARNING]
 > TODO : completer le reste des CUs une fois que le projet est rendu à la dernière itération
