@@ -959,6 +959,10 @@ export async function cancelWebSocketCollection(repo) {
       repo
     });
 
+    if (response && response.success === false) {
+      throw new Error(response.error || 'Unable to cancel collection');
+    }
+
     if (repo) {
       const rejector = _pendingRejects.get(repo);
       if (rejector) {
@@ -967,14 +971,9 @@ export async function cancelWebSocketCollection(repo) {
       clearPendingCollection(repo);
     }
 
-    if (response && response.success === false) {
-      reject(new Error(response.error || 'Unable to cancel collection'));
-      return;
-    }
-
-    resolve(response || { success: true });
+    return response || { success: true };
   } catch (error) {
-    reject(error);
+    throw error;
   }
 };
 
