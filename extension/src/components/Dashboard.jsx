@@ -264,8 +264,8 @@ function InfoIcon({ explanation, id }) {
     const rect = iconRef.current.getBoundingClientRect();
     const popupRect = popupRef.current?.getBoundingClientRect();
     const viewportPadding = 12;
-    const popupWidth = Math.min(popupRect?.width || 320, window.innerWidth - viewportPadding * 2);
-    const popupHeight = Math.min(popupRect?.height || 220, window.innerHeight - viewportPadding * 2);
+    const popupWidth = Math.min(popupRect?.width || 460, window.innerWidth - viewportPadding * 2);
+    const popupHeight = Math.min(popupRect?.height || 360, window.innerHeight - viewportPadding * 2);
     const gap = 10;
     const left = Math.min(
       Math.max(rect.left, viewportPadding),
@@ -324,33 +324,10 @@ function InfoIcon({ explanation, id }) {
     <div style={{ position: 'relative', display: 'inline-block', marginLeft: '8px' }}>
       <button
         ref={iconRef}
+        className="info-icon-button"
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
-        }}
-        style={{
-          width: '20px',
-          height: '20px',
-          borderRadius: '50%',
-          border: '1px solid #666',
-          background: '#333',
-          color: '#fff',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '12px',
-          padding: 0,
-          lineHeight: 1,
-          transition: 'all 0.2s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.target.style.background = '#444';
-          e.target.style.borderColor = '#888';
-        }}
-        onMouseLeave={(e) => {
-          e.target.style.background = '#333';
-          e.target.style.borderColor = '#666';
         }}
         aria-label="Show explanation"
       >
@@ -364,7 +341,7 @@ function InfoIcon({ explanation, id }) {
             data-placement={popupPlacement}
             style={popupStyle || undefined}
           >
-            <div style={{ marginBottom: '8px', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>
+            <div className="info-icon-popup-title">
               {explanation.title || 'Information'}
             </div>
             <div>{explanation.text}</div>
@@ -373,29 +350,8 @@ function InfoIcon({ explanation, id }) {
                 e.stopPropagation();
                 setIsOpen(false);
               }}
-              style={{
-                position: 'absolute',
-                top: '8px',
-                right: '8px',
-                background: 'transparent',
-                border: 'none',
-                color: '#888',
-                cursor: 'pointer',
-                fontSize: '18px',
-                lineHeight: 1,
-                padding: 0,
-                width: '20px',
-                height: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.color = '#fff';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.color = '#888';
-              }}
+              className="info-icon-popup-close"
+              aria-label="Close explanation"
             >
               ×
             </button>
@@ -3416,9 +3372,9 @@ export default function Dashboard() {
                             }}
                             style={{
                               background: 'transparent',
-                              border: '1px solid #444',
+                              border: '1px solid var(--border)',
                               borderRadius: '6px',
-                              color: '#fff',
+                              color: 'var(--text)',
                               cursor: 'pointer',
                               padding: '6px 12px',
                               fontSize: '14px'
@@ -3429,7 +3385,7 @@ export default function Dashboard() {
 
                           <div
                             style={{
-                              color: '#fff',
+                              color: 'var(--text)',
                               fontSize: '16px',
                               fontWeight: '600'
                             }}
@@ -3451,9 +3407,9 @@ export default function Dashboard() {
                             }}
                             style={{
                               background: 'transparent',
-                              border: '1px solid #444',
+                              border: '1px solid var(--border)',
                               borderRadius: '6px',
-                              color: '#fff',
+                              color: 'var(--text)',
                               cursor: 'pointer',
                               padding: '6px 12px',
                               fontSize: '14px'
@@ -3478,7 +3434,7 @@ export default function Dashboard() {
                                 key={day}
                                 style={{
                                   textAlign: 'center',
-                                  color: '#888',
+                                  color: 'var(--muted)',
                                   fontSize: '12px',
                                   fontWeight: '600',
                                   padding: '8px 0'
@@ -3520,17 +3476,17 @@ export default function Dashboard() {
                                   }}
                                   style={{
                                     height: '36px',
-                                    border: isToday ? '1px solid #2196f3' : '1px solid transparent',
+                                    border: isToday ? '1px solid var(--info)' : '1px solid transparent',
                                     borderRadius: '6px',
-                                    color: '#fff',
+                                    color: isStart || isEnd ? '#fff' : 'var(--text)',
                                     cursor: 'pointer',
                                     fontSize: '13px',
                                     fontWeight: isStart || isEnd ? '700' : '400',
                                     background:
                                       isStart || isEnd
-                                        ? '#2196f3'
+                                        ? 'var(--info)'
                                         : isInRange
-                                          ? 'rgba(33, 150, 243, 0.25)'
+                                          ? 'color-mix(in srgb, var(--info) 18%, transparent)'
                                           : 'transparent'
                                   }}
                                 >
@@ -3545,11 +3501,12 @@ export default function Dashboard() {
                         <div
                           style={{
                             padding: '12px',
-                            background: '#222',
+                            background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
+                            border: '1px solid var(--border)',
                             borderRadius: '6px',
                             marginBottom: '15px',
                             fontSize: '13px',
-                            color: '#ccc'
+                            color: 'var(--text)'
                           }}
                         >
                           <div>
@@ -3573,10 +3530,10 @@ export default function Dashboard() {
                             }}
                             style={{
                               padding: '8px 20px',
-                              background: '#333',
-                              border: '1px solid #555',
+                              background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
+                              border: '1px solid var(--border)',
                               borderRadius: '6px',
-                              color: '#fff',
+                              color: 'var(--text)',
                               cursor: 'pointer',
                               fontSize: '13px',
                               fontWeight: '500'
@@ -3807,7 +3764,7 @@ export default function Dashboard() {
                               <div style={{
                                 flex: 1,
                                 height: '20px',
-                                background: '#333',
+                                background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                 borderRadius: '4px',
                                 overflow: 'hidden',
                                 display: 'flex'
@@ -3849,24 +3806,24 @@ export default function Dashboard() {
                     <div style={{
                       padding: '15px',
                       marginBottom: jobStats.length > 0 ? '15px' : '0',
-                      background: '#2a2a2a',
+                      background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
                       borderRadius: '6px',
-                      border: '1px solid #444',
+                      border: '1px solid var(--border)',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '15px'
                     }}>
                       <div className="spinner"></div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ color: '#fff', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
+                        <div style={{ color: 'var(--text)', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
                           Collecting job data...
                         </div>
-                        <div style={{ color: '#aaa', fontSize: '12px', marginBottom: '8px' }}>
+                        <div style={{ color: 'var(--muted)', fontSize: '12px', marginBottom: '8px' }}>
                           {jobProgress.runs_processed} / {jobProgress.total_runs} runs processed ({jobProgress.jobs_collected} jobs collected)
                         </div>
                         <div style={{
                           height: '4px',
-                          background: '#333',
+                          background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                           borderRadius: '2px',
                           overflow: 'hidden'
                         }}>
@@ -3885,7 +3842,7 @@ export default function Dashboard() {
                     <div style={{
                       padding: '40px',
                       textAlign: 'center',
-                      color: '#999'
+                      color: 'var(--muted)'
                     }}>
                       No job data available. Start data collection to see job statistics.
                     </div>
@@ -3914,7 +3871,7 @@ export default function Dashboard() {
                           return (
                             <tr key={j.name}>
                               <td className="branch-name">{j.name}</td>
-                              <td style={{ color: '#bbb', fontSize: '13px' }}>{j.workflowName || 'unknown'}</td>
+                              <td style={{ color: 'var(--muted)', fontSize: '13px' }}>{j.workflowName || 'unknown'}</td>
                               <td>{j.totalRuns}</td>
                               <td>{j.failures}</td>
                               <td>{j.skipped}</td>
@@ -3930,7 +3887,7 @@ export default function Dashboard() {
                                   <div style={{
                                     flex: 1,
                                     height: '20px',
-                                    background: '#333',
+                                    background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                     borderRadius: '4px',
                                     overflow: 'hidden',
                                     display: 'flex'
@@ -4026,7 +3983,7 @@ export default function Dashboard() {
                                 <div style={{
                                   flex: 1,
                                   height: '20px',
-                                  background: '#333',
+                                  background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                   borderRadius: '4px',
                                   overflow: 'hidden',
                                   display: 'flex'
@@ -4100,7 +4057,7 @@ export default function Dashboard() {
                               <div style={{
                                 flex: 1,
                                 height: '20px',
-                                background: '#333',
+                                background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                 borderRadius: '4px',
                                 overflow: 'hidden',
                                 display: 'flex'
@@ -4141,10 +4098,10 @@ export default function Dashboard() {
                     style={{
                       width: '100%',
                       padding: '10px 15px',
-                      background: '#222',
-                      border: '1px solid #444',
+                      background: 'var(--card-bg)',
+                      border: '1px solid var(--border)',
                       borderRadius: '4px',
-                      color: '#fff',
+                      color: 'var(--text)',
                       fontSize: '14px',
                       boxSizing: 'border-box',
                       display: 'block'
@@ -4189,7 +4146,7 @@ export default function Dashboard() {
                                   <div style={{
                                     flex: 1,
                                     height: '20px',
-                                    background: '#333',
+                                    background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                     borderRadius: '4px',
                                     overflow: 'hidden',
                                     display: 'flex'
