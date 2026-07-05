@@ -880,21 +880,23 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
     _pendingRejects.set(repo, reject);
     _activeFiltersByRepo.set(repo, {
       ...filters,
-      workflowIds: normalizeWorkflowIds(filters.workflowIds)
+      workflowIds: normalizeWorkflowIds(filters.workflowIds),
+      refreshWorkflowIds: normalizeWorkflowIds(filters.refreshWorkflowIds)
     });
     _runsByRepo.set(repo, []);
     (async () => {
       try {
         const response = await browser.runtime.sendMessage({
-            action: 'startWebSocketExtraction',
-            repo,
-            filters: {
-                start: filters.start,
-                end: filters.end,
-                workflowIds: normalizeWorkflowIds(filters.workflowIds),
-                fetchJobDetails: Boolean(filters.fetchJobDetails),
-                forceRefresh: Boolean(filters.forceRefresh)
-            }
+          action: 'startWebSocketExtraction',
+          repo,
+          filters: {
+            start: filters.start,
+            end: filters.end,
+            workflowIds: normalizeWorkflowIds(filters.workflowIds),
+            refreshWorkflowIds: normalizeWorkflowIds(filters.refreshWorkflowIds),
+            fetchJobDetails: Boolean(filters.fetchJobDetails),
+            forceRefresh: Boolean(filters.forceRefresh)
+          }
         });
         // If background reports that another repo is already streaming
         if (response && response.busy) {
@@ -915,12 +917,13 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
         } else {
           // Extended timeout for GHAminer collection (30 minutes)
           // GHAminer can take a long time for large repositories
-          const timeoutId = setTimeout(() => {
+          const timeoutId = setTimeout(async () => {
             if (_pendingResolves.has(repo)) {
-              browser.storage.local.get(['wsRuns', 'wsStatus'], (result) => {
+              try {
+                const result = await browser.storage.local.get(['wsRuns', 'wsStatus']);
                 const data = result.wsRuns || [];
                 const status = result.wsStatus || {};
-                
+
                 // Only timeout if collection is complete
                 if (status.isComplete) {
                   if (data.length > 0) {
@@ -937,10 +940,14 @@ export async function fetchDashboardDataViaWebSocket(repo, filters = {}, onProgr
                   console.log('[WebSocket] Collection still in progress, not timing out yet...');
                   // Keep the timeout active, it will be cleared when complete
                 }
-              });
+              } catch (error) {
+                console.error('[WebSocket] Timeout storage read failed:', error);
+                reject(error);
+                clearPendingCollection(repo);
+              }
             }
           }, 1800000); // 30 minutes
-          
+
           _timeoutIds.set(repo, timeoutId);
         }
       } catch (error) {
@@ -975,7 +982,7 @@ export async function cancelWebSocketCollection(repo) {
   } catch (error) {
     throw error;
   }
-};
+}
 
 export async function getWebSocketCacheStatus(repo) {
   try {

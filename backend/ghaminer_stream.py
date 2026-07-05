@@ -642,6 +642,23 @@ def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, An
     
     phase2_start_time = time.time()
     all_runs = dedupe_runs_by_id(all_runs)
+    job_workflow_ids = {
+        int(workflow_id)
+        for workflow_id in config.get("job_workflow_ids", [])
+        if str(workflow_id).isdigit()
+    }
+    if job_workflow_ids:
+        def _run_matches_job_workflow_scope(run):
+            try:
+                return int(run.get("workflow_id")) in job_workflow_ids
+            except (TypeError, ValueError):
+                return False
+
+        all_runs = [
+            run for run in all_runs
+            if _run_matches_job_workflow_scope(run)
+        ]
+        print(f"[GHAminer Stream] Phase 2: Limited job collection to {len(job_workflow_ids)} refreshed workflows")
     
     # Initialize data persistence and manager
     persistence = None
@@ -661,6 +678,27 @@ def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, An
     
     total_runs = len(all_runs)
     print(f"[GHAminer Stream] Phase 2: Starting job details collection for {total_runs} runs")
+
+    pending_job_saves: Dict[str, List[Dict[str, Any]]] = {}
+
+    def flush_pending_job_saves():
+        if not persistence or not pending_job_saves:
+            return
+
+        jobs_to_save = dict(pending_job_saves)
+        try:
+            if hasattr(persistence, "save_jobs_batch"):
+                persistence.save_jobs_batch(repo, jobs_to_save)
+            else:
+                for pending_run_id, pending_jobs in jobs_to_save.items():
+                    persistence.save_jobs_for_run(repo, pending_run_id, pending_jobs)
+
+            if data_manager:
+                for pending_run_id, pending_jobs in jobs_to_save.items():
+                    data_manager.update_cache_after_save(run_id=pending_run_id, jobs=pending_jobs)
+            pending_job_saves.clear()
+        except Exception as e:
+            print(f"[GHAminer Stream] Warning: Failed to save jobs batch: {e}")
     
     if PERFORMANCE_LOGGING:
         try:
@@ -669,87 +707,88 @@ def stream_job_details_phase2(repo: str, token: str, all_runs: List[Dict[str, An
         except:
             pass
     
-    for idx, dashboard_run in enumerate(all_runs):
-        # Dashboard dicts use 'id' field
-        run_id = dashboard_run.get('id')
-        
-        if not run_id:
-            continue
-        
-        # Check if jobs already collected (double-check)
-        if data_manager and data_manager.should_skip_jobs_for_run(str(run_id)):
-            # Jobs already exist, try to load them
-            existing_jobs = persistence.get_jobs_for_run(repo, str(run_id)) if persistence else None
-            if existing_jobs:
-                dashboard_run['jobs'] = existing_jobs
-                current_count = idx + 1
-                yield (dashboard_run, current_count, total_runs)
+    try:
+        for idx, dashboard_run in enumerate(all_runs):
+            # Dashboard dicts use 'id' field
+            run_id = dashboard_run.get('id')
+
+            if not run_id:
                 continue
-        
-        try:
-            # Fetch job details from GitHub API
-            jobs_ids, job_details, job_count = get_jobs_for_run(repo, int(run_id), token)
-            
-            # Convert job details to dashboard format (list of job objects)
-            jobs_list = []
-            if job_details:
-                for job in job_details:
-                    if isinstance(job, dict):
-                        job_name = job.get('job_name', 'Unknown')
-                        job_result = job.get('job_result', 'unknown')
-                        job_start = job.get('job_start')
-                        job_end = job.get('job_end')
-                        job_duration = job.get('job_duration', 0)
-                        
-                        # Convert duration if it's a string
-                        if isinstance(job_duration, str) and job_duration != "N/A":
-                            try:
-                                job_duration = float(job_duration)
-                            except:
+
+            # Check if jobs already collected (double-check)
+            if data_manager and data_manager.should_skip_jobs_for_run(str(run_id)):
+                # Jobs already exist, try to load them
+                existing_jobs = persistence.get_jobs_for_run(repo, str(run_id)) if persistence else None
+                if existing_jobs:
+                    dashboard_run['jobs'] = existing_jobs
+                    current_count = idx + 1
+                    yield (dashboard_run, current_count, total_runs)
+                    continue
+
+            try:
+                # Fetch job details from GitHub API
+                jobs_ids, job_details, job_count = get_jobs_for_run(repo, int(run_id), token)
+
+                # Convert job details to dashboard format (list of job objects)
+                jobs_list = []
+                if job_details:
+                    for job in job_details:
+                        if isinstance(job, dict):
+                            job_name = job.get('job_name', 'Unknown')
+                            job_result = job.get('job_result', 'unknown')
+                            job_start = job.get('job_start')
+                            job_end = job.get('job_end')
+                            job_duration = job.get('job_duration', 0)
+
+                            # Convert duration if it's a string
+                            if isinstance(job_duration, str) and job_duration != "N/A":
+                                try:
+                                    job_duration = float(job_duration)
+                                except:
+                                    job_duration = 0
+                            elif job_duration == "N/A":
                                 job_duration = 0
-                        elif job_duration == "N/A":
-                            job_duration = 0
-                        
-                        # If duration is 0, try to calculate from start/end times
-                        if job_duration == 0 and job_start and job_end:
-                            try:
-                                start_dt = datetime.strptime(job_start, "%Y-%m-%dT%H:%M:%SZ")
-                                end_dt = datetime.strptime(job_end, "%Y-%m-%dT%H:%M:%SZ")
-                                job_duration = (end_dt - start_dt).total_seconds()
-                            except:
-                                pass
-                        
-                        jobs_list.append({
-                            'id': None,  # Job ID not available in this format
-                            'name': job_name,
-                            'status': 'completed' if job_result in ['success', 'failure', 'cancelled', 'skipped', 'timed_out'] else 'in_progress',
-                            'conclusion': job_result,
-                            'duration': job_duration,
-                            'started_at': job_start,
-                            'completed_at': job_end
-                        })
-            
-            # Update the dashboard dict directly with jobs
-            dashboard_run['jobs'] = jobs_list
-            
-            # Save jobs to persistence
-            if persistence:
-                try:
-                    persistence.save_jobs_for_run(repo, str(run_id), jobs_list)
-                    data_manager.update_cache_after_save(run_id=str(run_id), jobs=jobs_list)
-                except Exception as e:
-                    print(f"[GHAminer Stream] Warning: Failed to save jobs for run {run_id}: {e}")
-            
-            current_count = idx + 1
-            
-            yield (dashboard_run, current_count, total_runs)
-            
-        except Exception as e:
-            print(f"[GHAminer Stream] Error fetching jobs for run {run_id}: {e}")
-            # Keep the run without job details (jobs list should already be empty)
-            if 'jobs' not in dashboard_run:
-                dashboard_run['jobs'] = []
-            yield (dashboard_run, idx + 1, total_runs)
+
+                            # If duration is 0, try to calculate from start/end times
+                            if job_duration == 0 and job_start and job_end:
+                                try:
+                                    start_dt = datetime.strptime(job_start, "%Y-%m-%dT%H:%M:%SZ")
+                                    end_dt = datetime.strptime(job_end, "%Y-%m-%dT%H:%M:%SZ")
+                                    job_duration = (end_dt - start_dt).total_seconds()
+                                except:
+                                    pass
+
+                            jobs_list.append({
+                                'id': None,  # Job ID not available in this format
+                                'name': job_name,
+                                'status': 'completed' if job_result in ['success', 'failure', 'cancelled', 'skipped', 'timed_out'] else 'in_progress',
+                                'conclusion': job_result,
+                                'duration': job_duration,
+                                'started_at': job_start,
+                                'completed_at': job_end
+                            })
+
+                # Update the dashboard dict directly with jobs
+                dashboard_run['jobs'] = jobs_list
+
+                # Save jobs to persistence in batches to avoid rewriting the storage file per run.
+                if persistence:
+                    pending_job_saves[str(run_id)] = jobs_list
+                    if len(pending_job_saves) >= 25:
+                        flush_pending_job_saves()
+
+                current_count = idx + 1
+
+                yield (dashboard_run, current_count, total_runs)
+
+            except Exception as e:
+                print(f"[GHAminer Stream] Error fetching jobs for run {run_id}: {e}")
+                # Keep the run without job details (jobs list should already be empty)
+                if 'jobs' not in dashboard_run:
+                    dashboard_run['jobs'] = []
+                yield (dashboard_run, idx + 1, total_runs)
+    finally:
+        flush_pending_job_saves()
     
     phase2_duration = time.time() - phase2_start_time
     print(f"[GHAminer Stream] Phase 2 complete: Job details collected for {total_runs} runs")

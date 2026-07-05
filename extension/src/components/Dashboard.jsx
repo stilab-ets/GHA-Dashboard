@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
-import { buildDashboardCollectionFilters, filterRunsForScope, normalizeWorkflowIds } from '../scopeFilters.mjs';
+import { buildDashboardCollectionFilters, extendWorkflowScopeForSelection, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForSelectionDelta, workflowNamesForIds } from '../scopeFilters.mjs';
 import browser from "webextension-polyfill";
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -546,8 +546,24 @@ export default function Dashboard() {
   const hasIncompleteDateRange = (scope = {}) =>
     Boolean(scope.start) !== Boolean(scope.end);
 
+  const getWorkflowFilterForScope = (scope = {}) => {
+    const workflowIds = normalizeWorkflowIds(scope.workflowIds);
+    if (workflowIds.length === 0) {
+      return ['all'];
+    }
+
+    const workflowNames = workflowNamesForIds(workflowOptions, workflowIds);
+    return workflowNames.length === workflowIds.length ? workflowNames : null;
+  };
+
+  const sameWorkflowFilter = (left = [], right = []) => (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+
   const applyCollectionScope = (scope) => {
     const normalizedScope = normalizeCollectionScope(scope);
+    const workflowFilter = getWorkflowFilterForScope(normalizedScope);
     appliedCollectionScopeRef.current = normalizedScope;
     setAppliedCollectionScope(normalizedScope);
     setCollectionDateRange({
@@ -565,12 +581,24 @@ export default function Dashboard() {
     setFilters(prev => ({
       ...prev,
       start: normalizedScope.start,
-      end: normalizedScope.end
+      end: normalizedScope.end,
+      ...(workflowFilter ? { workflow: workflowFilter } : {})
     }));
     return normalizedScope;
   };
 
   const getAppliedCollectionScope = () => appliedCollectionScopeRef.current;
+
+  useEffect(() => {
+    const workflowFilter = getWorkflowFilterForScope(getAppliedCollectionScope());
+    if (!workflowFilter) return;
+
+    setFilters(prev => (
+      sameWorkflowFilter(prev.workflow, workflowFilter)
+        ? prev
+        : { ...prev, workflow: workflowFilter }
+    ));
+  }, [workflowOptions, appliedCollectionScope.workflowIds]);
 
   const getCollectionScopeForRequest = (collectMore = false) => {
     if (collectMore || data) {
@@ -1202,6 +1230,7 @@ export default function Dashboard() {
 
   // Load data (only when dates change)
   const loadDashboardData = async (collectMore = false, options = {}) => {
+    const localFilters = options.localFilters || {};
     const fallbackCollectionScope = getCollectionScopeForRequest(Boolean(collectMore));
     const draftCollectionScope = normalizeCollectionScope({
       ...fallbackCollectionScope,
@@ -1299,7 +1328,7 @@ export default function Dashboard() {
       setCurrentRepo(repo);
       console.log('[Dashboard] Using repo:', repo);
 
-      let shouldRefreshAfterCache = Boolean(collectMore || options.forceRefresh);
+      let shouldRefreshAfterCache = Boolean(options.forceRefresh ?? collectMore);
 
       // Preserve existing date filters when starting new collection
       // Only initialize defaults if filters haven't been set yet
@@ -1348,7 +1377,7 @@ export default function Dashboard() {
 
         // Get the latest filter values from ref (including date range)
         const latestFilters = {
-          workflow: filters.workflow,
+          workflow: localFilters.workflow || filters.workflow,
           branch: filters.branch,
           actor: filters.actor,
           start: dateFiltersRef.current.start,
@@ -1390,6 +1419,7 @@ export default function Dashboard() {
         start: activeDateRange.start,
         end: activeDateRange.end,
         workflowIds: collectionScope.workflowIds,
+        refreshWorkflowIds: options.refreshWorkflowIds,
         forceRefresh: shouldRefreshAfterCache
       });
 
@@ -1668,7 +1698,7 @@ export default function Dashboard() {
     return () => {
       browser.storage.onChanged.removeListener(handleStorageChange);
     };
-  }, [currentRepo, filters, availableFilters, appliedCollectionScope]);  
+  }, [currentRepo, filters, availableFilters, appliedCollectionScope]);
 
   // Real-time elapsed time counter (updates every second)
   useEffect(() => {
@@ -2220,6 +2250,7 @@ export default function Dashboard() {
   } = data;
 
   const { workflows, branches, actors } = availableFilters;
+  const dashboardWorkflowNames = mergeWorkflowNames(workflows, workflowOptions);
 
   const totalStatus = statusBreakdown.reduce((sum, s) => sum + (s.value || 0), 0);
   const statusData = statusBreakdown.map(s => ({
@@ -2230,6 +2261,37 @@ export default function Dashboard() {
   // ============================================
   // Event Handlers
   // ============================================
+
+  const collectMoreDataFromDashboardFilters = () => {
+    const existingWorkflowIds = getAppliedCollectionScope().workflowIds;
+    const workflowIds = extendWorkflowScopeForSelection(
+      workflowOptions,
+      existingWorkflowIds,
+      filters.workflow,
+    );
+    const refreshWorkflowIds = workflowIdsForSelectionDelta(
+      workflowOptions,
+      existingWorkflowIds,
+      filters.workflow,
+    );
+    const workflowFilter = workflowNamesForIds(workflowOptions, workflowIds);
+    setError(null);
+    setCollectionScopeWorkflowIds(workflowIds.length > 0 ? workflowIds : ['all']);
+    setFilters(prev => ({
+      ...prev,
+      workflow: workflowFilter,
+    }));
+    loadDashboardData(true, {
+      collectionScope: {
+        workflowIds,
+      },
+      refreshWorkflowIds,
+      forceRefresh: refreshWorkflowIds.length > 0,
+      localFilters: {
+        workflow: workflowFilter,
+      },
+    });
+  };
 
   const handleFilterChange = (filterType, value) => {
     if (filterType === 'start' || filterType === 'end') {
@@ -3046,7 +3108,7 @@ export default function Dashboard() {
                           <span>All workflows</span>
                         </label>
 
-                        {workflows.filter(w => w !== 'all').map(w => (
+                        {dashboardWorkflowNames.filter(w => w !== 'all').map(w => (
                           <label key={w} className="dropdown-item">
                             <input
                               type="checkbox"
@@ -3553,7 +3615,7 @@ export default function Dashboard() {
                     <span>Data</span>
 
                     <button
-                      onClick={() => loadDashboardData(true)}
+                      onClick={collectMoreDataFromDashboardFilters}
                       className="primary-action"
                       type="button"
                     >

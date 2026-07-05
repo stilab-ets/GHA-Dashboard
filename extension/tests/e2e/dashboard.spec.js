@@ -145,5 +145,6 @@ test('dashboard collection scope sends dates and selected workflows', async ({ c
   expect(extractionPayload.filters.start).toBe('2026-06-01');
   expect(extractionPayload.filters.end).toBe('2026-06-30');
   expect(extractionPayload.filters.workflowIds).toEqual([101, 202]);
+  expect(extractionPayload.filters.refreshWorkflowIds).toEqual([]);
   expect(extractionPayload.filters.fetchJobDetails).toBe(true);
 });

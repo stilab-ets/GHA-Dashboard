@@ -1,5 +1,7 @@
 // Background Service Worker - WebSocket Manager with GitHub Token
-const browser = globalThis.browser || window.browser;
+import { normalizeWorkflowIds, sameWorkflowScope } from "./scopeFilters.mjs";
+
+const browser = globalThis.browser || globalThis.chrome;
 const wsCache = new Map();
 let activeWebSocket = null;
 let currentRepo = null;
@@ -13,29 +15,6 @@ const BACKEND_URL = "http://127.0.0.1:3000";
 
 function isSocketActive(socket) {
   return socket && socket.readyState !== SOCKET_CLOSING && socket.readyState !== SOCKET_CLOSED;
-}
-
-function normalizeWorkflowIds(workflowIds) {
-  if (!Array.isArray(workflowIds)) {
-    return [];
-  }
-
-  return Array.from(
-    new Set(
-      workflowIds
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0),
-    ),
-  );
-}
-
-function sameWorkflowScope(left = [], right = []) {
-  const leftIds = normalizeWorkflowIds(left);
-  const rightIds = normalizeWorkflowIds(right);
-  return (
-    leftIds.length === rightIds.length &&
-    leftIds.every((value, index) => value === rightIds[index])
-  );
 }
 
 function getRunId(run) {
@@ -232,7 +211,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "authenticate") {
     console.log("[Background] Starting authentication flow");
     handleAuthentication().then(sendResponse);
-    return true; 
+    return true;
   }
 
   if (request.action === "getGithubToken") {
@@ -248,7 +227,7 @@ async function handleAuthentication() {
     const authUrl = `${BACKEND_URL}/auth/login?extension_redirect_uri=${encodeURIComponent(redirectUri)}`;
 
     console.log("Launching WebAuthFlow to:", authUrl);
-    
+
     const finalUrl = await browser.identity.launchWebAuthFlow({
       url: authUrl,
       interactive: true,
@@ -269,7 +248,7 @@ async function handleAuthentication() {
       githubToken: token,
       githubUsername: username || "User",
     });
-    
+
     // Cleanup
     await browser.storage.local.remove(["githubToken"]);
 

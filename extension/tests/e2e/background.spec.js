@@ -14,7 +14,9 @@ test('service worker exists', async ({ context }) => {
 });
 
 test('background normalizes run ids before cache merge', async () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '..', '..', 'src', 'background.js'), 'utf8');
+  const source = fs
+    .readFileSync(path.resolve(__dirname, '..', '..', 'src', 'background.js'), 'utf8')
+    .replace(/^import .*scopeFilters\.mjs";\r?\n/m, '');
   const browser = {
     runtime: { onMessage: { addListener: () => {} } },
     tabs: {
@@ -36,6 +38,15 @@ test('background normalizes run ids before cache merge', async () => {
     console,
     browser,
     window: { browser },
+    normalizeWorkflowIds: workflowIds => {
+      if (!Array.isArray(workflowIds)) return [];
+      return Array.from(new Set(
+        workflowIds
+          .map(value => Number(value))
+          .filter(value => Number.isInteger(value) && value > 0)
+      ));
+    },
+    sameWorkflowScope: () => true,
     WebSocket: function WebSocket() {},
     chrome: {
       runtime: { onMessage: { addListener: () => {} } },
