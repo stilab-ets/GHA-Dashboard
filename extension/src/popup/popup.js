@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const oauthAuthSection = document.getElementById("oauth-auth-section");
   const authenticatedSection = document.getElementById("authenticated-section");
   const statusSpan = document.getElementById("token-status");
+  const popupContainer = document.querySelector(".popup-container");
 
   // Don't show token, only say if it's available or not
   (async () => {
@@ -54,12 +55,27 @@ document.addEventListener("DOMContentLoaded", () => {
         ? `Logged in as ${username}`
         : "Token available for this browser session";
       statusSpan.className = "status-message success";
+      resizePopupToContent();
       return;
     }
 
     tokenInput.value = "";
     statusSpan.textContent = "No GitHub token configured";
     statusSpan.className = "status-message info";
+    resizePopupToContent();
+  }
+
+  function resizePopupToContent() {
+    requestAnimationFrame(() => {
+      if (!popupContainer) return;
+
+      const width = popupContainer.offsetWidth + 16;
+      const height = popupContainer.offsetHeight + 16;
+      document.documentElement.style.width = `${width}px`;
+      document.body.style.width = `${width}px`;
+      document.documentElement.style.height = `${height}px`;
+      document.body.style.height = `${height}px`;
+    });
   }
 
   async function clearToken() {

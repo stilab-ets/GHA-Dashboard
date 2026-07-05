@@ -966,16 +966,16 @@ export async function cancelWebSocketCollection(repo) {
       repo
     });
 
+    if (response && response.success === false) {
+      throw new Error(response.error || 'Unable to cancel collection');
+    }
+
     if (repo) {
       const rejector = _pendingRejects.get(repo);
       if (rejector) {
         rejector(createCancellationError());
       }
       clearPendingCollection(repo);
-    }
-
-    if (response && response.success === false) {
-      throw new Error(response.error || 'Unable to cancel collection');
     }
 
     return response || { success: true };
