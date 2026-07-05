@@ -2353,9 +2353,9 @@ export default function Dashboard() {
   const getDurationExplosionData = (workflowName) => {
     if (!rawRuns || rawRuns.length === 0) return [];
 
-    let filteredRuns = rawRuns;
+    let filteredRuns = rawRuns.filter(run => (run.duration || 0) > 0 && !run.durationExcludedFromStats);
     if (workflowName !== 'all') {
-      filteredRuns = rawRuns.filter(r => r.workflow_name === workflowName);
+      filteredRuns = filteredRuns.filter(r => r.workflow_name === workflowName);
     }
 
     // Sort runs by created_at to ensure chronological order
@@ -2432,7 +2432,9 @@ export default function Dashboard() {
           worseningPoint: null
         };
       }
-      byDate[currentDate].durations.push(currentRun.duration || 0);
+      if ((currentRun.duration || 0) > 0) {
+        byDate[currentDate].durations.push(currentRun.duration);
+      }
       byDate[currentDate].runs.push(currentRun);
     }
 
@@ -2966,7 +2968,7 @@ export default function Dashboard() {
     ? `${rawRunsInCache} raw runs cached`
     : 'Runs after active filters';
   const filteredRunsDetailNote = excludedOutlierRuns > 0
-    ? `${filteredRunsNote}; ${excludedOutlierRuns} duration outliers excluded from stats`
+    ? `${filteredRunsNote}; ${excludedOutlierRuns} duration outliers excluded from duration KPIs`
     : filteredRunsNote;
   const chartAxisColor = dashboardTheme === 'light' ? '#667085' : '#bcd';
   const chartGridColor = dashboardTheme === 'light' ? '#98a2b3' : '#122';

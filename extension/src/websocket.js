@@ -5,6 +5,11 @@ import browser from "webextension-polyfill";
 // ============================================
 
 import { normalizeWorkflowIds } from './scopeFilters.mjs';
+import {
+  countRunDurationOutliers,
+  getValidRunDuration,
+  sanitizeRunDurationForDashboard
+} from './durationFilters.mjs';
 
 function formatTodayForFilter() {
   const today = new Date();
@@ -192,7 +197,7 @@ function calculateRunStats(filteredRuns) {
  * Calculate duration statistics with MAD (Median Absolute Deviation)
  */
 function calculateDurationStats(filteredRuns) {
-  const durations = filteredRuns.map(r => r.duration || 0).filter(d => d > 0);
+  const durations = filteredRuns.map(getValidRunDuration).filter(d => d !== null);
   const sortedDurations = [...durations].sort((a, b) => a - b);
 
   const medianDuration = sortedDurations.length > 0
@@ -231,8 +236,9 @@ function aggregateRunsByDate(filteredRuns) {
     else if (run.conclusion === 'failure') runsByDate[date].failures++;
     else if (run.conclusion === 'cancelled') runsByDate[date].cancelled++;
 
-    if (run.duration > 0) {
-      runsByDate[date].durations.push(run.duration);
+    const duration = getValidRunDuration(run);
+    if (duration !== null) {
+      runsByDate[date].durations.push(duration);
     }
   });
 
@@ -270,7 +276,8 @@ function calculateBranchStats(filteredRuns) {
     branchStats[branch].totalRuns++;
     if (run.conclusion === 'success') branchStats[branch].successes++;
     else if (run.conclusion === 'failure') branchStats[branch].failures++;
-    if (run.duration > 0) branchStats[branch].durations.push(run.duration);
+    const duration = getValidRunDuration(run);
+    if (duration !== null) branchStats[branch].durations.push(duration);
   });
 
   return Object.entries(branchStats)
@@ -312,7 +319,8 @@ function calculateWorkflowStats(filteredRuns) {
     else if (run.conclusion === 'skipped') workflowStats[wf].skipped++;
     else if (run.conclusion === 'cancelled') workflowStats[wf].cancelled++;
     else if (run.conclusion === 'timed_out') workflowStats[wf].timeout++;
-    if (run.duration > 0) workflowStats[wf].durations.push(run.duration);
+    const duration = getValidRunDuration(run);
+    if (duration !== null) workflowStats[wf].durations.push(duration);
   });
 
   return Object.entries(workflowStats).map(([name, stats]) => {
@@ -460,7 +468,8 @@ function calculateBranchStatsGrouped(filteredRuns) {
     else if (run.conclusion === 'skipped') branchGroups[group].skipped++;
     else if (run.conclusion === 'cancelled') branchGroups[group].cancelled++;
     else if (run.conclusion === 'timed_out') branchGroups[group].timeout++;
-    if (run.duration > 0) branchGroups[group].durations.push(run.duration);
+    const duration = getValidRunDuration(run);
+    if (duration !== null) branchGroups[group].durations.push(duration);
   });
 
   return Object.entries(branchGroups).map(([name, stats]) => {
@@ -504,7 +513,8 @@ function calculateEventStats(filteredRuns) {
     else if (run.conclusion === 'skipped') eventStats[event].skipped++;
     else if (run.conclusion === 'cancelled') eventStats[event].cancelled++;
     else if (run.conclusion === 'timed_out') eventStats[event].timeout++;
-    if (run.duration > 0) eventStats[event].durations.push(run.duration);
+    const duration = getValidRunDuration(run);
+    if (duration !== null) eventStats[event].durations.push(duration);
   });
 
   return Object.entries(eventStats).map(([name, stats]) => {
@@ -548,7 +558,8 @@ function calculateContributorStats(filteredRuns) {
     else if (run.conclusion === 'skipped') contributorStats[actor].skipped++;
     else if (run.conclusion === 'cancelled') contributorStats[actor].cancelled++;
     else if (run.conclusion === 'timed_out') contributorStats[actor].timeout++;
-    if (run.duration > 0) contributorStats[actor].durations.push(run.duration);
+    const duration = getValidRunDuration(run);
+    if (duration !== null) contributorStats[actor].durations.push(duration);
   });
 
   return Object.entries(contributorStats).map(([name, stats]) => {
@@ -773,27 +784,22 @@ export function convertRunsToDashboard(runs, repo, filters) {
 
   const filteredTotalRuns = filteredRuns.length;
 
-  // Filter out runs with duration > 30 million seconds (347 days) for charts/stats.
-  // Keep the raw and filtered counts separate so the KPI can explain both numbers.
-  const MAX_DURATION_SECONDS = 30000000;
-  const runsForStats = filteredRuns.filter(run => {
-    const duration = run.duration || 0;
-    return duration <= MAX_DURATION_SECONDS;
-  });
-  const excludedDurationOutlierRuns = filteredTotalRuns - runsForStats.length;
+  const excludedDurationOutlierRuns = countRunDurationOutliers(filteredRuns);
+  const rawRunsForDashboard = filteredRuns.map(sanitizeRunDurationForDashboard);
 
-  // Calculate statistics using helper functions (using filtered runs without long durations)
-  const { totalRuns, successRuns, failureRuns, cancelledRuns, successRate } = calculateRunStats(runsForStats);
-  const { medianDuration, avgDuration, mad } = calculateDurationStats(runsForStats);
+  // Calculate status/count statistics from all filtered runs. Duration helpers
+  // ignore invalid run durations locally so only duration-based KPI are affected.
+  const { totalRuns, successRuns, failureRuns, cancelledRuns, successRate } = calculateRunStats(filteredRuns);
+  const { medianDuration, avgDuration, mad } = calculateDurationStats(filteredRuns);
 
-  const runsOverTime = aggregateRunsByDate(runsForStats);
-  const branchComparison = calculateBranchStats(runsForStats);
-  const workflowStats = calculateWorkflowStats(runsForStats);
-  const jobStats = calculateJobStats(runsForStats);
-  const branchStatsGrouped = calculateBranchStatsGrouped(runsForStats);
-  const eventStats = calculateEventStats(runsForStats);
-  const contributorStats = calculateContributorStats(runsForStats);
-  const timeToFix = calculateTimeToFix(runsForStats);
+  const runsOverTime = aggregateRunsByDate(filteredRuns);
+  const branchComparison = calculateBranchStats(filteredRuns);
+  const workflowStats = calculateWorkflowStats(filteredRuns);
+  const jobStats = calculateJobStats(filteredRuns);
+  const branchStatsGrouped = calculateBranchStatsGrouped(filteredRuns);
+  const eventStats = calculateEventStats(filteredRuns);
+  const contributorStats = calculateContributorStats(filteredRuns);
+  const timeToFix = calculateTimeToFix(filteredRuns);
 
   // Status breakdown
   const statusBreakdown = [
@@ -803,7 +809,7 @@ export function convertRunsToDashboard(runs, repo, filters) {
   ];
 
   // Top failed jobs
-  const failedRuns = runsForStats.filter(r => r.conclusion === 'failure');
+  const failedRuns = filteredRuns.filter(r => r.conclusion === 'failure');
   const failedByWorkflow = {};
   failedRuns.forEach(run => {
     const wf = run.workflow_name || 'unknown';
@@ -821,10 +827,13 @@ export function convertRunsToDashboard(runs, repo, filters) {
   // Cumulative duration of failures
   let cumulativeFailureDuration = 0;
   const failureDurationOverTime = runsOverTime.map(day => {
-    const dayFailures = runsForStats.filter(r => 
+    const dayFailures = filteredRuns.filter(r =>
       r.created_at?.startsWith(day.date) && r.conclusion === 'failure'
     );
-    const dayFailureDuration = dayFailures.reduce((sum, r) => sum + (r.duration || 0), 0);
+    const dayFailureDuration = dayFailures.reduce((sum, r) => {
+      const duration = getValidRunDuration(r);
+      return sum + (duration || 0);
+    }, 0);
     cumulativeFailureDuration += dayFailureDuration;
     return {
       date: day.date,
@@ -835,10 +844,10 @@ export function convertRunsToDashboard(runs, repo, filters) {
 
   return {
     repo,
-    totalRuns, // Filtered count (without long-duration runs) for stats
+    totalRuns,
     originalTotalRuns,
     filteredTotalRuns,
-    runsUsedForStats: totalRuns,
+    runsUsedForStats: Math.max(0, filteredTotalRuns - excludedDurationOutlierRuns),
     excludedDurationOutlierRuns,
     successRate,
     failureRate: totalRuns > 0 ? failureRuns / totalRuns : 0,
@@ -856,7 +865,7 @@ export function convertRunsToDashboard(runs, repo, filters) {
     timeToFix: timeToFix,
     topFailedWorkflows,
     failureDurationOverTime,
-    rawRuns: runsForStats, // For charts that need individual data (filtered out long durations)
+    rawRuns: rawRunsForDashboard,
     workflows: ['all', ...Array.from(allWorkflows).sort()],
     branches: ['all', ...Array.from(allBranches).sort()],
     actors: ['all', ...Array.from(allActors).sort()]
