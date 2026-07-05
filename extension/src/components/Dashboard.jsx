@@ -2908,6 +2908,9 @@ export default function Dashboard() {
     : filteredRunsNote;
   const chartAxisColor = dashboardTheme === 'light' ? '#667085' : '#bcd';
   const chartGridColor = dashboardTheme === 'light' ? '#98a2b3' : '#122';
+  const maxDurationColor = dashboardTheme === 'light' ? '#d97706' : '#ffd54a';
+  const maxDurationFill = dashboardTheme === 'light' ? '#d977060d' : '#ffd54a18';
+  const minDurationColor = dashboardTheme === 'light' ? '#15803d' : '#4caf50';
 
   return (
     <div className={`dashboard ${dashboardTheme}`}>
@@ -4278,8 +4281,9 @@ export default function Dashboard() {
                   <Area
                     type="monotone"
                     dataKey="maxDuration"
-                    fill="#ff980030"
-                    stroke="#ff9800"
+                    fill={maxDurationFill}
+                    stroke={maxDurationColor}
+                    strokeWidth={2}
                     name="Max"
                   />
 
@@ -4287,7 +4291,8 @@ export default function Dashboard() {
                     type="monotone"
                     dataKey="minDuration"
                     fill="#4caf5030"
-                    stroke="#4caf50"
+                    stroke={minDurationColor}
+                    strokeWidth={2}
                     name="Min"
                   />
 
