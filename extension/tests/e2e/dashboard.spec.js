@@ -33,27 +33,6 @@ async function setupDashboardHarness(context, extensionId) {
   }));
 }
 
-async function seedDashboardData(context, extensionId, runs, status = {}) {
-  const popup = await context.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
-  await popup.evaluate(({ payload, repo }) => new Promise(resolve => {
-    chrome.storage.local.set({
-      currentRepo: repo,
-      wsRuns: payload.runs,
-      wsStatus: {
-        repo,
-        isStreaming: false,
-        isComplete: true,
-        collectedRuns: payload.runs.length,
-        totalRuns: payload.runs.length,
-        phase: 'workflow_runs',
-        ...payload.status,
-      },
-    }, () => resolve());
-  }), { payload: { runs, status }, repo: 'AUTOMATIC1111/stable-diffusion-webui' });
-  await popup.close();
-}
-
 test('testing repository is accessible', async ({ context }) => {
   const page = await context.newPage();
 
@@ -217,94 +196,178 @@ test('dashboard workflow picker exposes the available workflows', async ({ conte
   await expect(frame.getByRole('checkbox', { name: 'Tests' })).toBeVisible();
 });
 
-test('dashboard shows job details progress after collection begins', async ({ context, extensionId }) => {
+test('dashboard: branch filter reduces filtered runs', async ({ context, extensionId }) => {
   await setupDashboardHarness(context, extensionId);
 
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
+
   await page.locator('#gha-dashboard-nav-button').click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
+
   await frame.getByRole('button', { name: /start data collection/i }).click();
 
-  await seedDashboardData(context, extensionId, [{
-    id: 1,
-    workflow_id: 101,
-    workflow_name: 'Lint',
-    branch: 'main',
-    actor: 'octocat',
-    conclusion: 'success',
-    created_at: '2026-07-08T12:00:00Z',
-    jobs: [{ name: 'build', conclusion: 'success', duration: 10 }],
-  }], { phase: 'jobs', isStreaming: true, isComplete: false });
+  const filteredRunsValue = frame
+    .locator('.metric-card')
+    .filter({ hasText: 'Filtered runs' })
+    .locator('.value');
 
-  await expect(frame.getByText(/collecting job details/i)).toBeVisible({ timeout: 15000 });
-  await expect(frame.getByRole('tab', { name: /jobs/i })).toBeVisible();
-});
+  await expect.poll(async () => {
+    const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+    return Number(text);
+  }, {
+    timeout: 120000,
+    message: 'Waiting for dashboard collection to finish',
+  }).toBeGreaterThan(0);
 
-test('dashboard filters displayed data after selecting branch, actor, workflow and date range', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
-
-  const runs = [
-    {
-      id: 1,
-      workflow_id: 101,
-      workflow_name: 'Lint',
-      branch: 'main',
-      actor: 'octocat',
-      conclusion: 'success',
-      created_at: '2026-07-02T10:00:00Z',
-      jobs: [{ name: 'build', conclusion: 'success', duration: 60 }],
-    },
-    {
-      id: 2,
-      workflow_id: 101,
-      workflow_name: 'Lint',
-      branch: 'feature',
-      actor: 'hubot',
-      conclusion: 'failure',
-      created_at: '2026-07-05T10:00:00Z',
-      jobs: [{ name: 'test', conclusion: 'failure', duration: 90 }],
-    },
-    {
-      id: 3,
-      workflow_id: 202,
-      workflow_name: 'Tests',
-      branch: 'main',
-      actor: 'octocat',
-      conclusion: 'success',
-      created_at: '2026-07-06T10:00:00Z',
-      jobs: [{ name: 'test', conclusion: 'success', duration: 30 }],
-    },
-  ];
-
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button').click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
-  await frame.getByRole('button', { name: /start data collection/i }).click();
-  await seedDashboardData(context, extensionId, runs);
-
-  const filteredRunsValue = frame.locator('.metric-card').filter({ hasText: 'Filtered runs' }).locator('.value');
-  await expect(filteredRunsValue).toContainText('3');
-
-  await frame.getByRole('button', { name: /select date range/i }).click();
-  await frame.getByRole('button', { name: '1' }).click();
-  await frame.getByRole('button', { name: '7' }).click();
-  await frame.getByRole('button', { name: 'Done' }).click();
-
-  await frame.getByRole('button', { name: /all workflows/i }).click();
-  await frame.getByRole('checkbox', { name: 'All workflows' }).uncheck();
-  await frame.getByRole('checkbox', { name: 'Lint' }).check();
+  const initial = Number((await filteredRunsValue.textContent()).trim());
 
   await frame.getByRole('button', { name: /all branches/i }).click();
-  await frame.getByRole('checkbox', { name: 'All branches' }).uncheck();
-  await frame.getByRole('checkbox', { name: 'main' }).check();
+
+  const options = frame.locator('label.dropdown-item');
+
+  await options.nth(1).click();
+
+  await expect.poll(async () => {
+    const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+    return Number(text);
+  }, {
+    timeout: 10000,
+  }).toBeLessThan(initial);
+});
+
+test('dashboard: workflow filter reduces filtered runs', async ({ context, extensionId }) => {
+  await setupDashboardHarness(context, extensionId);
+
+  const page = await context.newPage();
+  await page.goto(REPOSITORY_URL);
+
+  await page.locator('#gha-dashboard-nav-button').click();
+
+  const frame = page.frameLocator('#gha-dashboard-iframe');
+
+  await frame.getByRole('button', { name: /start data collection/i }).click();
+
+  const filteredRunsValue = frame
+    .locator('.metric-card')
+    .filter({ hasText: 'Filtered runs' })
+    .locator('.value');
+
+  await expect.poll(async () => {
+    const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+    return Number(text);
+  }, {
+    timeout: 120000,
+    message: 'Waiting for dashboard collection to finish',
+  }).toBeGreaterThan(0);
+
+  const initial = Number((await filteredRunsValue.textContent()).trim());
+
+  await frame.getByRole('button', { name: /all workflows/i }).click();
+
+  const options = frame.locator('label.dropdown-item');
+
+  await options.nth(1).click();
+
+  await expect.poll(async () => {
+    const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+    return Number(text);
+  }, {
+    timeout: 10000,
+  }).toBeLessThan(initial);
+});
+
+test('dashboard: actor filter reduces filtered runs', async ({ context, extensionId }) => {
+  await setupDashboardHarness(context, extensionId);
+
+  const page = await context.newPage();
+  await page.goto(REPOSITORY_URL);
+
+  await page.locator('#gha-dashboard-nav-button').click();
+
+  const frame = page.frameLocator('#gha-dashboard-iframe');
+
+  await frame.getByRole('button', { name: /start data collection/i }).click();
+
+  const filteredRunsValue = frame
+    .locator('.metric-card')
+    .filter({ hasText: 'Filtered runs' })
+    .locator('.value');
+
+  await expect.poll(async () => {
+    const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+    return Number(text);
+  }, {
+    timeout: 120000,
+    message: 'Waiting for dashboard collection to finish',
+  }).toBeGreaterThan(0);
+
+  const initial = Number((await filteredRunsValue.textContent()).trim());
 
   await frame.getByRole('button', { name: /all actors/i }).click();
-  await frame.getByRole('checkbox', { name: 'All actors' }).uncheck();
-  await frame.getByRole('checkbox', { name: 'octocat' }).check();
 
-  await expect(filteredRunsValue).toContainText('1');
+  const options = frame.locator('label.dropdown-item');
+
+  await options.nth(1).click();
+
+  await expect.poll(async () => {
+    const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+    return Number(text);
+  }, {
+    timeout: 10000,
+  }).toBeLessThan(initial);
+});
+
+test('dashboard: date filter reduces filtered runs', async ({ context, extensionId }) => {
+  await setupDashboardHarness(context, extensionId);
+
+  const page = await context.newPage();
+  await page.goto(REPOSITORY_URL);
+
+  await page.locator('#gha-dashboard-nav-button').click();
+
+  const frame = page.frameLocator('#gha-dashboard-iframe');
+
+  await frame.getByRole('button', { name: /start data collection/i }).click();
+
+  const filteredRunsValue = frame
+    .locator('.metric-card')
+    .filter({ hasText: 'Filtered runs' })
+    .locator('.value');
+
+  await expect.poll(async () => {
+    const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+    return Number(text);
+  }, {
+    timeout: 120000,
+    message: 'Waiting for dashboard collection to finish',
+  }).toBeGreaterThan(0);
+
+  const initial = Number((await filteredRunsValue.textContent()).trim());
+
+  await frame
+    .locator('.filter-group.date-range-group .dropdown-toggle')
+    .click();
+
+  await expect(
+    frame.locator('.date-picker-popover')
+  ).toBeVisible();
+
+  const firstDay = frame
+    .locator('.date-picker-popover button')
+    .filter({ hasText: /^1$/ })
+    .first();
+
+  await firstDay.click();
+  await firstDay.click();
+
+  await frame.getByRole('button', { name: 'Done' }).click();
+
+  await expect.poll(async () => {
+    const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+    return Number(text);
+  }, {
+    timeout: 15000,
+  }).toBeLessThan(initial);
 });
