@@ -517,7 +517,6 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
 
                 // Use phase1_elapsed from memory cache (NO race condition!)
                 browser.storage.local.set({
-                  wsRuns: [...cache.runs], // Trigger update
                   wsStatus: {
                     isStreaming: true,
                     isComplete: false,

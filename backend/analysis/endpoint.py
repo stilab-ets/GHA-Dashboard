@@ -261,8 +261,15 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                 }
                 all_runs_list = list(existing_runs_by_id.values())
                 print(f"[WebSocket] Found {existing_runs_count} existing runs in cache")
+                cached_runs_missing_commit_sha = any(
+                    not (run.get("commit_sha") or run.get("head_sha"))
+                    for run in existing_runs_list
+                )
 
-                if existing_runs_list and not getattr(filters, "forceRefresh", False):
+                if (
+                    existing_runs_list
+                    and not getattr(filters, "forceRefresh", False)
+                ):
                     print("[WebSocket] Serving cached runs without GitHub refresh")
                     batch_size = 100
                     for i in range(0, len(existing_runs_list), batch_size):
@@ -291,7 +298,10 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     })
                     return
                 elif existing_runs_list:
-                    print("[WebSocket] Seeding frontend with cached runs before GitHub refresh")
+                    if cached_runs_missing_commit_sha and config.get("fetch_job_details", False):
+                        print("[WebSocket] Cached job data is missing commit SHAs; refreshing to backfill flaky detection keys")
+                    else:
+                        print("[WebSocket] Seeding frontend with cached runs before GitHub refresh")
                     batch_size = 100
                     for i in range(0, len(existing_runs_list), batch_size):
                         cached_batch = existing_runs_list[i:i + batch_size]
