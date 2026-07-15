@@ -1,25 +1,36 @@
-# ADR-003 : Extension Chrome plutôt qu'application web standalone
+# ADR-005 : Utilisation conjointe de l'authentification OAuth et des Personal Access Tokens
 
-- **Statut** : Acceptée
+- **Statut** : Accepté
+- **Date** : 2026-07-15
 
 ## Contexte
 
-Le tableau de bord doit être accessible facilement par les développeurs lors de leur consultation de GitHub.
+L'application doit accéder aux API GitHub afin de récupérer les données nécessaires au fonctionnement du tableau de bord.
+
+L'authentification OAuth représente la solution retenue pour les utilisateurs finaux puisqu'elle respecte les bonnes pratiques de GitHub.
+
+Toutefois, durant le développement, effectuer un cycle OAuth complet à chaque exécution ralentit les tests et le débogage. Les développeurs disposent déjà de Personal Access Tokens (PAT) permettant un accès rapide aux API.
 
 ## Décision
 
-Développer une extension Chrome qui s'intègre directement dans l'interface GitHub.
+Supporter deux modes d'authentification :
+
+OAuth pour l'utilisation normale de l'application ;
+Personal Access Token (PAT) pour faciliter le développement et les tests.
+
+Les deux mécanismes utilisent ensuite les mêmes services d'accès à l'API GitHub.
 
 ## Conséquences
 
-### Positives
-- Intégration native dans le workflow GitHub existant
-- Pas besoin de changer d'onglet ou d'application
-- Accès direct aux informations du dépôt en cours de consultation
-- Expérience utilisateur fluide et cohérente
+### Avantages
 
-### Négatives
-- Limité au navigateur Chrome (pas Firefox, Safari, Edge)
-- Dépendance aux API de Chrome Extension
-- Nécessite l'installation d'une extension
-- Moins de contrôle sur l'environnement d'exécution
+- Développement plus rapide grâce aux PAT.
+- Respect des bonnes pratiques en production avec OAuth.
+- Réduction du temps nécessaire aux tests manuels.
+- Flexibilité selon le contexte d'utilisation.
+
+### Inconvénients
+
+- Deux mécanismes d'authentification doivent être maintenus.
+- Documentation plus importante.
+- Complexité légèrement supérieure dans la configuration.

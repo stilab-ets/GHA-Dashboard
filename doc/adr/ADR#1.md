@@ -1,6 +1,7 @@
 # ADR-001 : Séparation des fichiers Manifest par navigateur
 
 - **Statut** : Accepté
+- **Date** : 2026-07-04
 
 ## Contexte
 

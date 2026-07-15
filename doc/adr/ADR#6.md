@@ -1,25 +1,33 @@
-# ADR-004 : Conteneurisation avec Docker
+# ADR-006 : Conservation d'une logique centralisée dans background.js
 
-- **Statut** : Acceptée
+- **Statut** : Accepté
+- **Date** : 2026-07-15
 
 ## Contexte
 
-Le système doit être facilement déployable sur différentes machines de développement et de production.
+Le script `background.js` constitue le point d'entrée principal de l'extension et regroupe la majorité de la logique métier.
+
+Une architecture plus modulaire, répartissant les fonctionnalités dans plusieurs fichiers, a été envisagée afin d'améliorer la séparation des responsabilités.
+
+Cependant, cette approche aurait nécessité une adaptation importante de la configuration de construction de l'extension ainsi que la gestion de nombreuses dépendances entre les modules. Étant donné la taille du projet et les contraintes de temps, cette réorganisation n'apportait pas de bénéfice suffisant.
 
 ## Décision
 
-Conteneuriser tous les services backend (Flask, PostgreSQL) avec Docker et orchestrer avec docker-compose.
+Conserver une logique principalement centralisée dans le fichier `background.js`.
+
+Les fonctionnalités restent organisées par sections logiques à l'intérieur du fichier afin de préserver la lisibilité sans complexifier la configuration du projet.
 
 ## Conséquences
 
-### Positives
-- Portabilité garantie sur toutes les plateformes
-- Isolation des dépendances
-- Facilite le setup pour les nouveaux développeurs
-- Environnement de développement identique à la production
-- Versioning de l'infrastructure
+### Avantages
 
-### Négatives
-- Courbe d'apprentissage pour Docker
-- Overhead de ressources (CPU, mémoire)
-- Complexité de debug dans les conteneurs
+- Configuration de construction plus simple.
+- Réduction de la complexité liée à l'assemblage de nombreux modules.
+- Développement plus rapide.
+- Limitation des risques d'erreurs de configuration.
+
+### Inconvénients
+
+- Fichier de grande taille.
+- Lisibilité qui peut diminuer avec l'évolution du projet.
+- Séparation des responsabilités moins marquée qu'une architecture modulaire.

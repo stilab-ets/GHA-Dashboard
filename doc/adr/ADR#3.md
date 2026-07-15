@@ -1,27 +1,37 @@
-# ADR-001 : Architecture en trois couches (Chrome + Flask (analyse) + Flask (extraction))
+# ADR-003 : Utilisation du format JSON pour le stockage local
 
-- **Statut** : Acceptée
+- **Statut** : Accepté
+- **Date** : 2026-07-15
 
 ## Contexte
 
-Le système doit séparer les responsabilités : extraction des données, analyse/traitement, et visualisation.
+L'extension conserve localement certaines données générées lors de l'analyse des dépôts GitHub. Une réflexion a été menée afin de déterminer le format de stockage le plus approprié.
+
+Plusieurs solutions ont été envisagées :
+
+-des fichiers CSV ;
+-une base de données SQL embarquée ;
+-des fichiers JSON.
+
+Le projet disposait déjà d'un mécanisme de lecture et d'écriture des données au format JSON utilisé par le backend. Modifier cette couche de persistance aurait nécessité de réécrire une partie importante du code existant sans apporter de bénéfice fonctionnel significatif.
 
 ## Décision
 
-Adopter une architecture en trois couches :
-- **Flask** : Couche d'extraction (interface avec GHAminer et GitHub API), couche d'analyse et couche d'agrégation
-- **Extension Chrome** : Couche de présentation et visualisation
+Conserver le stockage local au format JSON.
+
+Les données sont enregistrées et relues directement sous forme de fichiers JSON, en réutilisant l'implémentation existante.*
 
 ## Conséquences
 
-### Positives
-- Séparation claire des responsabilités
-- Scalabilité : chaque couche peut évoluer indépendamment
-- Facilite les tests unitaires par composant
-- Réutilisabilité : Flask peut servir d'autres clients que Chrome
-- Spécialisation technologique (Python pour extraction et analyse)
+### Avantages
 
-### Négatives
-- Complexité accrue du déploiement (3 services)
-- Latence potentielle due aux multiples appels HTTP
-- Nécessité de gérer la synchronisation entre services
+- Réutilisation complète du mécanisme de lecture et d'écriture existant.
+- Réduction de l'effort de développement.
+- Limitation des risques de régression.
+- Format simple à manipuler et à déboguer.
+
+### Inconvénients
+
+- Les performances sont moins bonnes qu'une base de données pour de très grands volumes de données.
+- Le format est moins adapté aux requêtes complexes.
+- Les fichiers peuvent devenir volumineux avec l'augmentation des données stockées.
