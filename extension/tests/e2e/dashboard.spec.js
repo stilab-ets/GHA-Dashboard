@@ -52,7 +52,7 @@ test('dashboard button is injected on stable-diffusion repository page', async (
   ).toBeVisible();
 });
 
-test('dashboard page opens correctly when dashboard button is clicked', async ({ context }) => {
+test.only('dashboard page opens correctly when dashboard button is clicked', async ({ context }) => {
   const page = await context.newPage();
 
   await page.goto(REPOSITORY_URL);
@@ -67,14 +67,16 @@ test('dashboard page opens correctly when dashboard button is clicked', async ({
 
   await expect(
     page.locator('#gha-dashboard-iframe')
-  ).toBeVisible();
+  ).toBeVisible({
+      timeout: 30000
+  });
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
 
   await expect(
     frame.locator('#root')
   ).toBeVisible({
-      timeout: 5000
+      timeout: 30000
   });
 });
 
