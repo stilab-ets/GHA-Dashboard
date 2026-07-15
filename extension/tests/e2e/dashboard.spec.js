@@ -256,6 +256,9 @@ test.only('dashboard: branch filter reduces filtered runs', async ({ context, ex
 
   await expect.poll(async () => {
     const text = (await filteredRunsValue.textContent())?.trim() ?? '';
+
+    console.log('Filtered runs value:', text);
+
     return Number(text);
   }, {
     timeout: 120000,
