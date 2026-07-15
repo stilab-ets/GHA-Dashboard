@@ -230,8 +230,6 @@ test('dashboard workflow picker exposes the available workflows', async ({ conte
 });
 
 test.only('dashboard: branch filter reduces filtered runs', async ({ context, extensionId }) => {
-  test.slow();
-  
   await setupDashboardHarness(context, extensionId);
 
   const page = await context.newPage();
@@ -247,26 +245,6 @@ test.only('dashboard: branch filter reduces filtered runs', async ({ context, ex
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
 
-  page.on('request', r => {
-    console.log('REQUEST', r.method(), r.url());
-  });
-
-  page.on('response', r => {
-    console.log('RESPONSE', r.status(), r.url());
-  });
-
-  page.on('websocket', ws => {
-    console.log('WS CREATED', ws.url());
-
-    ws.on('close', () => {
-      console.log('WS CLOSED');
-    });
-
-    ws.on('framereceived', data => {
-      console.log('WS FRAME', data.payload);
-    });
-  });
-
   await frame.getByRole('button', { name: /start data collection/i }).click();
 
   const filteredRunsValue = frame
@@ -274,35 +252,13 @@ test.only('dashboard: branch filter reduces filtered runs', async ({ context, ex
     .filter({ hasText: 'Filtered runs' })
     .locator('.value');
 
-  /*await expect.poll(async () => {
+  await expect.poll(async () => {
     const text = (await filteredRunsValue.textContent())?.trim() ?? '';
-
-    console.log('Filtered runs value:', text);
-
     return Number(text);
   }, {
     timeout: 120000,
     message: 'Waiting for dashboard collection to finish',
-  }).toBeGreaterThan(0);*/
-
-  const start = Date.now();
-
-  while (Date.now() - start < 120_000) {
-    const value = Number((await filteredRunsValue.textContent())?.trim() ?? '0');
-
-    console.log(
-      `[${Math.round((Date.now() - start) / 1000)}s] Filtered runs = ${value}`
-    );
-
-    if (value > 0) {
-      break;
-    }
-
-    await page.waitForTimeout(10_000);
-  }
-
-  const finalValue = Number((await filteredRunsValue.textContent())?.trim() ?? '0');
-  expect(finalValue).toBeGreaterThan(0);
+  }).toBeGreaterThan(0);
 
   const initial = Number((await filteredRunsValue.textContent()).trim());
 

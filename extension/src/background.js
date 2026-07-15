@@ -384,10 +384,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         try {
           activeWebSocket = new WebSocket(wsUrl);
 
-          console.log("[Background] Connecting WS:", wsUrl);
-
           activeWebSocket.onopen = () => {
-            console.log("[Background] WS OPEN");
             hasOpened = true;
             browser.storage.local.set({
               wsStatus: {

@@ -48,7 +48,7 @@ jobs:
     - name: Start backend e2e
       run: |
         cd backend
-        python app.py --e2e > backend.log 2>&1 &
+        python app.py --e2e &
 
         # Wait for the backend to be ready before running tests
         backend_ready=false
@@ -76,8 +76,3 @@ jobs:
       run: |
         cd extension
         xvfb-run --server-args="-screen 0 1920x1080x24" -a npm run test:e2e
-
-    - name: Backend logs
-      if: always()
-      run: |
-        cat backend/backend.log

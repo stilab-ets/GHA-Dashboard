@@ -341,7 +341,6 @@ def github_callback():
 # ============================================
 @app.post("/api/extractions")
 def create_extraction():
-    print("POST /api/extractions", flush=True)
     auth_header = request.headers.get("Authorization", "")
 
     if not auth_header.startswith("Bearer "):
@@ -398,7 +397,6 @@ def create_extraction():
 # ============================================
 @sock.route("/data/<path:extractionId>")
 def websocket_data(ws, extractionId: str):
-    print("WebSocket connected", flush=True)
     """
     WebSocket endpoint for streaming GitHub Actions data via GHAminer
     """
@@ -451,10 +449,7 @@ def websocket_data(ws, extractionId: str):
 
     try:
         # Stream data using GHAminer
-        print("Before send_data", flush=True)
-        start = time.time()
         send_data(ws, repo, filters, token)
-        print(f"After send_data : {time.time()-start:.1f}s", flush=True)
     finally:
         extractions.pop(extractionId, None)
 
