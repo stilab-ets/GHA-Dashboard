@@ -52,7 +52,7 @@ test('dashboard button is injected on stable-diffusion repository page', async (
   ).toBeVisible();
 });
 
-test.only('dashboard page opens correctly when dashboard button is clicked', async ({ context }) => {
+test('dashboard page opens correctly when dashboard button is clicked', async ({ context }) => {
   const page = await context.newPage();
 
   await page.goto(REPOSITORY_URL);
