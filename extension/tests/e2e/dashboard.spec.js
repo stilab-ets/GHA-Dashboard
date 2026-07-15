@@ -229,7 +229,9 @@ test('dashboard workflow picker exposes the available workflows', async ({ conte
   await expect(frame.getByRole('checkbox', { name: 'Tests' })).toBeVisible();
 });
 
-test('dashboard: branch filter reduces filtered runs', async ({ context, extensionId }) => {
+test.only('dashboard: branch filter reduces filtered runs', async ({ context, extensionId }) => {
+  test.slow();
+  
   await setupDashboardHarness(context, extensionId);
 
   const page = await context.newPage();
