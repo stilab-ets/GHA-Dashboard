@@ -255,6 +255,18 @@ test.only('dashboard: branch filter reduces filtered runs', async ({ context, ex
     console.log('RESPONSE', r.status(), r.url());
   });
 
+  page.on('websocket', ws => {
+    console.log('WS CREATED', ws.url());
+
+    ws.on('close', () => {
+      console.log('WS CLOSED');
+    });
+
+    ws.on('framereceived', data => {
+      console.log('WS FRAME', data.payload);
+    });
+  });
+
   await frame.getByRole('button', { name: /start data collection/i }).click();
 
   const filteredRunsValue = frame
