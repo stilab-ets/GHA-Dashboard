@@ -5,9 +5,19 @@ const REPOSITORY_URL = 'https://github.com/AUTOMATIC1111/stable-diffusion-webui'
 async function setupDashboardHarness(context, extensionId) {
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
-  await popup.evaluate(() => new Promise(resolve => {
-    chrome.storage.session.set({ githubToken: 'ghp_dashboard_test_token' }, () => resolve());
-  }));
+  await popup.locator('#auth-token').click();
+  await expect(popup.locator('#token-status')).toHaveText(/Logged in as/i, {
+    timeout: 30_000,
+  });
+
+  await expect.poll(() => popup.evaluate(() => new Promise(resolve => {
+    chrome.storage.session.get('githubToken', ({ githubToken }) => {
+      resolve(Boolean(githubToken));
+    });
+  })), {
+    timeout: 30_000,
+    message: 'Waiting for the E2E authentication token to be stored',
+  }).toBeTruthy();
   await popup.close();
 
   await context.route('**/api/workflows/**', route => route.fulfill({
@@ -18,17 +28,6 @@ async function setupDashboardHarness(context, extensionId) {
         { id: 101, name: 'Lint', path: '.github/workflows/lint.yml', state: 'active' },
         { id: 202, name: 'Tests', path: '.github/workflows/tests.yml', state: 'active' },
       ],
-    }),
-  }));
-
-  await context.route('**/api/data/check/**', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      exists: false,
-      totalRuns: 0,
-      runsWithJobs: 0,
-      lastUpdated: null,
     }),
   }));
 }
