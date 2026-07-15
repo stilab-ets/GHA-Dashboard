@@ -274,7 +274,7 @@ test.only('dashboard: branch filter reduces filtered runs', async ({ context, ex
     .filter({ hasText: 'Filtered runs' })
     .locator('.value');
 
-  await expect.poll(async () => {
+  /*await expect.poll(async () => {
     const text = (await filteredRunsValue.textContent())?.trim() ?? '';
 
     console.log('Filtered runs value:', text);
@@ -283,7 +283,26 @@ test.only('dashboard: branch filter reduces filtered runs', async ({ context, ex
   }, {
     timeout: 120000,
     message: 'Waiting for dashboard collection to finish',
-  }).toBeGreaterThan(0);
+  }).toBeGreaterThan(0);*/
+
+  const start = Date.now();
+
+  while (Date.now() - start < 120_000) {
+    const value = Number((await filteredRunsValue.textContent())?.trim() ?? '0');
+
+    console.log(
+      `[${Math.round((Date.now() - start) / 1000)}s] Filtered runs = ${value}`
+    );
+
+    if (value > 0) {
+      break;
+    }
+
+    await page.waitForTimeout(10_000);
+  }
+
+  const finalValue = Number((await filteredRunsValue.textContent())?.trim() ?? '0');
+  expect(finalValue).toBeGreaterThan(0);
 
   const initial = Number((await filteredRunsValue.textContent()).trim());
 
