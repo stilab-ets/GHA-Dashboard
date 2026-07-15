@@ -57,7 +57,13 @@ test('dashboard page opens correctly when dashboard button is clicked', async ({
 
   await page.goto(REPOSITORY_URL);
 
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   await expect(
     page.locator('#gha-dashboard-iframe')
@@ -67,7 +73,9 @@ test('dashboard page opens correctly when dashboard button is clicked', async ({
 
   await expect(
     frame.locator('#root')
-  ).toBeVisible();
+  ).toBeVisible({
+      timeout: 5000
+  });
 });
 
 test('dashboard collection scope sends dates and selected workflows', async ({ context, extensionId }) => {
@@ -86,7 +94,13 @@ test('dashboard collection scope sends dates and selected workflows', async ({ c
 
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
   const startDateButton = frame.getByRole('button', { name: /collection start date/i });
@@ -157,7 +171,13 @@ test('dashboard filters can narrow the workflow selection before collection star
 
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
   await frame.getByRole('button', { name: /workflows/i }).click();
@@ -173,7 +193,13 @@ test('dashboard allows cancelling an in-progress workflow collection', async ({ 
 
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
   await expect(frame.getByRole('button', { name: /start data collection/i })).toBeVisible();
@@ -185,7 +211,13 @@ test('dashboard workflow picker exposes the available workflows', async ({ conte
 
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
   await frame.getByRole('button', { name: /workflows/i }).click();
@@ -201,7 +233,13 @@ test('dashboard: branch filter reduces filtered runs', async ({ context, extensi
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
 
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
 
@@ -242,7 +280,13 @@ test('dashboard: workflow filter reduces filtered runs', async ({ context, exten
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
 
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
 
@@ -283,7 +327,13 @@ test('dashboard: actor filter reduces filtered runs', async ({ context, extensio
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
 
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
 
@@ -324,7 +374,13 @@ test('dashboard: date filter reduces filtered runs', async ({ context, extension
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
 
-  await page.locator('#gha-dashboard-nav-button').click();
+  const dashboardButton = page.locator('#gha-dashboard-nav-button');
+
+  await expect(dashboardButton).toBeVisible({
+      timeout: 30000
+  });
+
+  await dashboardButton.click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
 
