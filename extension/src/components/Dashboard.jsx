@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
 import { buildDashboardCollectionFilters, extendWorkflowScopeForSelection, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForSelectionDelta, workflowNamesForIds } from '../scopeFilters.mjs';
@@ -253,72 +253,51 @@ function MetricCard({ tone = 'info', icon, title, explanation, value, note, chil
 // InfoIcon component for displaying help tooltips
 function InfoIcon({ explanation, id }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [popupStyle, setPopupStyle] = useState(null);
-  const [popupPlacement, setPopupPlacement] = useState('above');
   const iconRef = useRef(null);
-  const popupRef = useRef(null);
+  const generatedId = useId();
+  const popupId = id || generatedId;
 
-  const updatePopupPosition = () => {
-    if (!iconRef.current) return;
+  const postHintMessage = (type) => {
+    if (!window.parent || window.parent === window) return;
 
-    const rect = iconRef.current.getBoundingClientRect();
-    const popupRect = popupRef.current?.getBoundingClientRect();
-    const viewportPadding = 12;
-    const popupWidth = Math.min(popupRect?.width || 460, window.innerWidth - viewportPadding * 2);
-    const popupHeight = Math.min(popupRect?.height || 360, window.innerHeight - viewportPadding * 2);
-    const gap = 10;
-    const left = Math.min(
-      Math.max(rect.left, viewportPadding),
-      window.innerWidth - viewportPadding - popupWidth
-    );
-    const spaceAbove = rect.top - viewportPadding;
-    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
-    const placeAbove = spaceAbove >= popupHeight + gap || spaceAbove >= spaceBelow;
-    const top = placeAbove
-      ? Math.max(viewportPadding, Math.min(rect.top - gap - popupHeight, window.innerHeight - viewportPadding - popupHeight))
-      : Math.max(viewportPadding, Math.min(rect.bottom + gap, window.innerHeight - viewportPadding - popupHeight));
-
-    setPopupPlacement(placeAbove ? 'above' : 'below');
-
-    setPopupStyle({
-      position: 'fixed',
-      left: `${left}px`,
-      top: `${top}px`,
-      transform: 'none',
-      width: `${popupWidth}px`,
-    });
+    const rect = iconRef.current?.getBoundingClientRect();
+    window.parent.postMessage({
+      type,
+      id: popupId,
+      explanation,
+      theme: document.querySelector('.dashboard.light') ? 'light' : 'dark',
+      anchor: rect ? {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom
+      } : null
+    }, '*');
   };
 
-  useLayoutEffect(() => {
-    if (isOpen) {
-      updatePopupPosition();
-    }
-  }, [isOpen]);
-
   useEffect(() => {
+    if (!isOpen) return undefined;
+
     const handleClickOutside = (event) => {
-      if (iconRef.current && popupRef.current &&
-        !iconRef.current.contains(event.target) &&
-        !popupRef.current.contains(event.target)) {
+      if (iconRef.current && !iconRef.current.contains(event.target)) {
+        postHintMessage('GHA_DASHBOARD_HINT_CLOSE');
+        setIsOpen(false);
+      }
+    };
+    const handleParentMessage = (event) => {
+      if (event.data?.type === 'GHA_DASHBOARD_HINT_CLOSED' && event.data.id === popupId) {
         setIsOpen(false);
       }
     };
 
-    if (isOpen) {
-      updatePopupPosition();
-      document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('message', handleParentMessage);
 
-      const handleReposition = () => updatePopupPosition();
-      window.addEventListener('resize', handleReposition);
-      window.addEventListener('scroll', handleReposition, true);
-
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-        window.removeEventListener('resize', handleReposition);
-        window.removeEventListener('scroll', handleReposition, true);
-      };
-    }
-  }, [isOpen]);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('message', handleParentMessage);
+    };
+  }, [isOpen, popupId]);
 
   return (
     <div style={{ position: 'relative', display: 'inline-block', marginLeft: '8px' }}>
@@ -327,38 +306,19 @@ function InfoIcon({ explanation, id }) {
         className="info-icon-button"
         onClick={(e) => {
           e.stopPropagation();
-          setIsOpen(!isOpen);
+          if (isOpen) {
+            postHintMessage('GHA_DASHBOARD_HINT_CLOSE');
+            setIsOpen(false);
+          } else {
+            postHintMessage('GHA_DASHBOARD_HINT_OPEN');
+            setIsOpen(true);
+          }
         }}
         aria-label="Show explanation"
+        aria-expanded={isOpen}
       >
         ?
       </button>
-      {isOpen && (
-        createPortal(
-          <div
-            ref={popupRef}
-            className="info-icon-popup"
-            data-placement={popupPlacement}
-            style={popupStyle || undefined}
-          >
-            <div className="info-icon-popup-title">
-              {explanation.title || 'Information'}
-            </div>
-            <div>{explanation.text}</div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
-              className="info-icon-popup-close"
-              aria-label="Close explanation"
-            >
-              ×
-            </button>
-          </div>,
-          document.body
-        )
-      )}
     </div>
   );
 }
@@ -854,11 +814,12 @@ export default function Dashboard() {
   useEffect(() => {
     if (!fullscreenPanelId) return undefined;
 
-    const requestViewportMetrics = () => {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'GHA_DASHBOARD_VIEWPORT_METRICS_REQUEST' }, '*');
-      }
-    };
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'GHA_DASHBOARD_FULLSCREEN',
+        active: true
+      }, '*');
+    }
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -866,16 +827,16 @@ export default function Dashboard() {
       }
     };
 
-    requestViewportMetrics();
-    const animationFrameId = window.requestAnimationFrame(requestViewportMetrics);
-    const timeoutId = window.setTimeout(requestViewportMetrics, 50);
-
     document.body.classList.add('dashboard-chart-fullscreen-active');
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId);
-      window.clearTimeout(timeoutId);
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'GHA_DASHBOARD_FULLSCREEN',
+          active: false
+        }, '*');
+      }
       document.body.classList.remove('dashboard-chart-fullscreen-active');
       document.removeEventListener('keydown', handleKeyDown);
     };
