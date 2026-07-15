@@ -247,6 +247,14 @@ test.only('dashboard: branch filter reduces filtered runs', async ({ context, ex
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
 
+  page.on('request', r => {
+    console.log('REQUEST', r.method(), r.url());
+  });
+
+  page.on('response', r => {
+    console.log('RESPONSE', r.status(), r.url());
+  });
+
   await frame.getByRole('button', { name: /start data collection/i }).click();
 
   const filteredRunsValue = frame

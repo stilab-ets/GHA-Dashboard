@@ -341,6 +341,7 @@ def github_callback():
 # ============================================
 @app.post("/api/extractions")
 def create_extraction():
+    print("POST /api/extractions", flush=True)
     auth_header = request.headers.get("Authorization", "")
 
     if not auth_header.startswith("Bearer "):
