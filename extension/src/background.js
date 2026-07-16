@@ -13,6 +13,43 @@ const WS_CONNECT_MAX_ATTEMPTS = 3;
 const WS_CONNECT_RETRY_DELAY_MS = 1000;
 const BACKEND_URL = "http://127.0.0.1:3000";
 
+function sanitizeUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return String(url).split("?")[0];
+  }
+}
+
+async function fetchWithDiagnostics(url, options = {}) {
+  const method = options.method || "GET";
+  const target = sanitizeUrl(url);
+  const startedAt = performance.now();
+
+  console.log("[Background][API] Request started", { method, url: target });
+
+  try {
+    const response = await fetch(url, options);
+    console.log("[Background][API] Response received", {
+      method,
+      url: target,
+      status: response.status,
+      ok: response.ok,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
+    return response;
+  } catch (error) {
+    console.error("[Background][API] Request failed", {
+      method,
+      url: target,
+      durationMs: Math.round(performance.now() - startedAt),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
 function isSocketActive(socket) {
   return socket && socket.readyState !== SOCKET_CLOSING && socket.readyState !== SOCKET_CLOSED;
 }
@@ -338,7 +375,7 @@ function startWebSocketExtraction(repo, filters = {}, tabId) {
         ...filters,
       };
 
-      const extractionResponse = await fetch(
+      const extractionResponse = await fetchWithDiagnostics(
         "http://127.0.0.1:3000/api/extractions",
         {
           method: "POST",
