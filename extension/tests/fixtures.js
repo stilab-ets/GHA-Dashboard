@@ -26,9 +26,21 @@ exports.test = base.extend({
     const pathToExtension = path.resolve(__dirname, '..', 'build');
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-'));
+    const videoDir = path.resolve(__dirname, '..', 'test-results', 'videos');
+    const recordVideo = process.env.PLAYWRIGHT_VIDEO === '1';
+
+    if (recordVideo) {
+      fs.mkdirSync(videoDir, { recursive: true });
+    }
 
     const context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
+      ...(recordVideo && {
+        recordVideo: {
+          dir: videoDir,
+          size: { width: 1920, height: 1080 },
+        },
+      }),
       viewport: {
         width: 1920,
         height: 1080,
