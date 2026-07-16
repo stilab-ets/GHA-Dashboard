@@ -44,6 +44,7 @@ jobs:
         cd backend
         echo "TEST_GITHUB_TOKEN=${{ secrets.TEST_GITHUB_TOKEN }}" >> .env
         echo "TEST_GITHUB_USERNAME=${{ secrets.TEST_GITHUB_USERNAME }}" >> .env
+        echo "CHROME_EXTENSION_ID=${{ secrets.CHROME_EXTENSION_ID }}" >> .env
 
     - name: Start backend e2e
       run: |
