@@ -229,7 +229,7 @@ test('dashboard workflow picker exposes the available workflows', async ({ conte
   await expect(frame.getByRole('checkbox', { name: 'Tests' })).toBeVisible();
 });
 
-test.only('dashboard: branch filter reduces filtered runs', async ({ context, extensionId }) => {
+test('dashboard: branch filter reduces filtered runs', async ({ context, extensionId }) => {
   await setupDashboardHarness(context, extensionId);
 
   const page = await context.newPage();
@@ -256,7 +256,7 @@ test.only('dashboard: branch filter reduces filtered runs', async ({ context, ex
     const text = (await filteredRunsValue.textContent())?.trim() ?? '';
     return Number(text);
   }, {
-    timeout: 120000,
+    timeout: 60000,
     message: 'Waiting for dashboard collection to finish',
   }).toBeGreaterThan(0);
 
@@ -303,7 +303,7 @@ test('dashboard: workflow filter reduces filtered runs', async ({ context, exten
     const text = (await filteredRunsValue.textContent())?.trim() ?? '';
     return Number(text);
   }, {
-    timeout: 120000,
+    timeout: 60000,
     message: 'Waiting for dashboard collection to finish',
   }).toBeGreaterThan(0);
 
@@ -350,7 +350,7 @@ test('dashboard: actor filter reduces filtered runs', async ({ context, extensio
     const text = (await filteredRunsValue.textContent())?.trim() ?? '';
     return Number(text);
   }, {
-    timeout: 120000,
+    timeout: 60000,
     message: 'Waiting for dashboard collection to finish',
   }).toBeGreaterThan(0);
 
@@ -397,7 +397,7 @@ test('dashboard: date filter reduces filtered runs', async ({ context, extension
     const text = (await filteredRunsValue.textContent())?.trim() ?? '';
     return Number(text);
   }, {
-    timeout: 120000,
+    timeout: 60000,
     message: 'Waiting for dashboard collection to finish',
   }).toBeGreaterThan(0);
 
