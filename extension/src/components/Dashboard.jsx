@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
 import { buildDashboardCollectionFilters, extendWorkflowScopeForSelection, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForSelectionDelta, workflowNamesForIds } from '../scopeFilters.mjs';
+import { isWorkflowYamlFile } from '../durationFilters.mjs';
 import browser from "webextension-polyfill";
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -42,6 +43,7 @@ function UIIcon({ name }) {
     pulse: <path d="M3 13h4l3-7 4 13 3-7h4" />,
     workflow: <><circle cx="6" cy="6" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><path d="M8 7.5 11 16M16 7.5 13 16" /></>,
     jobs: <><path d="M5 12c2.5-4 5.5-4 8 0s5.5 4 8 0" /><path d="M5 16c2.5-4 5.5-4 8 0s5.5 4 8 0" /></>,
+    degradations: <><path d="M12 3 2.8 20h18.4L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
     branch: <><circle cx="7" cy="5" r="2" /><circle cx="17" cy="12" r="2" /><circle cx="7" cy="19" r="2" /><path d="M7 7v10M9 6c4 0 8 2 8 6M9 18c4 0 8-2 8-6" /></>,
     events: <><path d="M4 13h3l2-5 4 10 2-5h5" /><path d="M4 7h4M16 7h4" /></>,
     contributors: <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M3.5 19c.8-3.6 3-5 5.5-5s4.7 1.4 5.5 5" /><path d="M13.5 15c1-.9 2.1-1.3 3.5-1.3 2.1 0 3.8 1.2 4.5 4.3" /></>
@@ -493,6 +495,9 @@ export default function Dashboard() {
   const [phase2StartTime, setPhase2StartTime] = useState(null);
   const elapsedIntervalRef = useRef(null);
   const [jobProgress, setJobProgress] = useState({ runs_processed: 0, total_runs: 0, jobs_collected: 0, isCollecting: false });
+  const [workflowDegradations, setWorkflowDegradations] = useState([]);
+  const [workflowDegradationsLoading, setWorkflowDegradationsLoading] = useState(false);
+  const commitFilesCacheRef = useRef(new Map());
   const [dashboardTheme, setDashboardTheme] = useState(getInitialTheme);
   const [collectionPaused, setCollectionPaused] = useState(false);
   // Filter states
@@ -973,6 +978,123 @@ export default function Dashboard() {
 
     return result.githubToken ?? null;
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    const runs = data?.rawRuns || [];
+
+    if (!currentRepo || runs.length === 0) {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(false);
+      return undefined;
+    }
+
+    const workflowNames = Array.from(new Set(
+      runs.map(run => run.workflow_name).filter(Boolean)
+    ));
+    const candidates = workflowNames.flatMap(workflowName => (
+      getDurationExplosionAnalysis(workflowName).worseningPoints
+    ));
+    const candidatesByCommit = new Map();
+    candidates.forEach(candidate => {
+      const run = candidate.firstAfterRun || candidate.run;
+      const commitSha = candidate.commitSha;
+      if (!commitSha || !run) return;
+
+      const key = `${candidate.workflowName}\u0000${candidate.branch}\u0000${commitSha}`;
+      if (!candidatesByCommit.has(key)) {
+        candidatesByCommit.set(key, candidate);
+      }
+    });
+    const uniqueCandidates = Array.from(candidatesByCommit.values());
+    const candidateCommitShas = Array.from(new Set(
+      uniqueCandidates.map(candidate => candidate.commitSha).filter(Boolean)
+    ));
+
+    if (candidateCommitShas.length === 0) {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(false);
+      return undefined;
+    }
+
+    const loadDegradations = async () => {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(true);
+
+      try {
+        const token = await getGithubToken();
+        if (!token || cancelled) return;
+
+        const [owner, repository] = currentRepo.split('/');
+        if (!owner || !repository) return;
+
+        const filesByCommit = new Map();
+        await Promise.all(candidateCommitShas.map(async commitSha => {
+          const cacheKey = `${currentRepo}:${commitSha}`;
+          let files = commitFilesCacheRef.current.get(cacheKey);
+
+          if (files === undefined) {
+            const url = `http://127.0.0.1:3000/api/commit-files/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${encodeURIComponent(commitSha)}`;
+            try {
+              const response = await fetch(url, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              if (!response.ok) {
+                console.warn(`[Dashboard] Unable to load files for commit ${commitSha} (${response.status})`);
+                return;
+              }
+
+              const result = await response.json();
+              files = Array.isArray(result.files) ? result.files : [];
+              commitFilesCacheRef.current.set(cacheKey, files);
+            } catch (error) {
+              console.warn(`[Dashboard] Unable to load files for commit ${commitSha}:`, error);
+              return;
+            }
+          }
+
+          filesByCommit.set(commitSha, files);
+        }));
+
+        if (!cancelled) {
+          const confirmedDegradations = uniqueCandidates
+            .map(candidate => {
+              const yamlFiles = Array.from(new Set(
+                (filesByCommit.get(candidate.commitSha) || []).filter(isWorkflowYamlFile)
+              ));
+              if (yamlFiles.length === 0) return null;
+
+              const firstAfterRun = candidate.firstAfterRun || candidate.run;
+              return {
+                id: `${candidate.workflowName}\u0000${candidate.branch}\u0000${candidate.commitSha}`,
+                workflowName: candidate.workflowName,
+                branch: candidate.branch,
+                shortSha: candidate.commitSha.slice(0, 7),
+                commitUrl: `https://github.com/${currentRepo}/commit/${candidate.commitSha}`,
+                runUrl: firstAfterRun.html_url || null,
+                changedFiles: yamlFiles,
+                detectedAt: firstAfterRun.created_at || firstAfterRun.updated_at || '',
+                previousMedian: candidate.previousMedian,
+                nextMedian: candidate.nextMedian,
+                increasePercent: candidate.severityScore * 100,
+              };
+            })
+            .filter(Boolean)
+            .sort((left, right) => right.increasePercent - left.increasePercent);
+
+          setWorkflowDegradations(confirmedDegradations);
+        }
+      } finally {
+        if (!cancelled) setWorkflowDegradationsLoading(false);
+      }
+    };
+
+    loadDegradations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRepo, data?.rawRuns]);
 
   const buildScopedQuery = (scope = getCollectionScope()) => {
     const params = new URLSearchParams();
@@ -2350,8 +2472,10 @@ export default function Dashboard() {
   };
 
   // Helper function for duration explosion chart
-  const getDurationExplosionData = (workflowName) => {
-    if (!rawRuns || rawRuns.length === 0) return [];
+  const getDurationExplosionAnalysis = (workflowName) => {
+    if (!rawRuns || rawRuns.length === 0) {
+      return { byDate: {}, selectedWorseningPoints: [], worseningPoints: [], overallMedian: 0 };
+    }
 
     let filteredRuns = rawRuns.filter(run => (run.duration || 0) > 0 && !run.durationExcludedFromStats);
     if (workflowName !== 'all') {
@@ -2393,19 +2517,20 @@ export default function Dashboard() {
         const severityScore = (nextMedian - previousMedian) / previousMedian;
         const dateTimestamp = new Date(currentDate).getTime();
 
-        // Store the worsening point with commit info
-        const commitSha = currentRun.commit_sha || currentRun.head_sha || null;
+        // Associate the worsening point with the first run after the change.
+        const firstAfterRun = nextRuns[0];
+        const commitSha = firstAfterRun.commit_sha || firstAfterRun.head_sha || null;
         // Extract repo from html_url if currentRepo is not available
         let repo = currentRepo;
-        if (!repo && currentRun.html_url) {
-          const urlMatch = currentRun.html_url.match(/github\.com\/([^\/]+\/[^\/]+)/);
+        if (!repo && firstAfterRun.html_url) {
+          const urlMatch = firstAfterRun.html_url.match(/github\.com\/([^\/]+\/[^\/]+)/);
           if (urlMatch) {
             repo = urlMatch[1];
           }
         }
         const commitUrl = commitSha && repo
           ? `https://github.com/${repo}/commit/${commitSha}`
-          : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : currentRun.html_url);
+          : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : firstAfterRun.html_url);
 
         const worseningPoint = {
           date: currentDate,
@@ -2416,9 +2541,12 @@ export default function Dashboard() {
           severityScore,
           commitSha,
           commitUrl,
-          html_url: currentRun.html_url,
+          workflowName: currentRun.workflow_name || workflowName,
+          branch: currentRun.branch || '',
+          html_url: firstAfterRun.html_url,
           created_at: currentRun.created_at,
-          run: currentRun
+          run: firstAfterRun,
+          firstAfterRun
         };
 
         worseningPoints.push(worseningPoint);
@@ -2480,6 +2608,12 @@ export default function Dashboard() {
     // Calculate overall median for reference line
     const allDurations = sortedRuns.map(r => r.duration || 0).filter(d => d > 0);
     const overallMedian = calculateMedian(allDurations);
+
+    return { byDate, selectedWorseningPoints, worseningPoints, overallMedian };
+  };
+
+  const getDurationExplosionData = (workflowName) => {
+    const { byDate, overallMedian } = getDurationExplosionAnalysis(workflowName);
 
     return Object.entries(byDate)
       .map(([date, data]) => ({
@@ -3750,6 +3884,18 @@ export default function Dashboard() {
                   Jobs
                 </button>
                 <button
+                  id="stats-tab-degradations"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'degradations'}
+                  aria-controls="stats-panel-degradations"
+                  className={`stats-tab-button ${activeStatsTab === 'degradations' ? 'active' : ''}`}
+                  onClick={() => setActiveStatsTab('degradations')}
+                >
+                  <span className="tab-icon"><UIIcon name="degradations" /></span>
+                  Degradations
+                </button>
+                <button
                   id="stats-tab-branch"
                   type="button"
                   role="tab"
@@ -3984,6 +4130,131 @@ export default function Dashboard() {
                 </div>
               );
             })()}
+
+            {activeStatsTab === 'degradations' && (
+              <div
+                id="stats-panel-degradations"
+                role="tabpanel"
+                aria-labelledby="stats-tab-degradations"
+                className={`table-wrapper ${workflowDegradations.length > 10 ? 'table-wrapper-scroll' : ''}`}
+              >
+                {workflowDegradationsLoading && (
+                  <div style={{
+                    padding: '28px 40px',
+                    textAlign: 'center',
+                    color: 'var(--muted)'
+                  }}>
+                    Checking workflow commits for YAML changes...
+                  </div>
+                )}
+
+                {!workflowDegradationsLoading && workflowDegradations.length === 0 && !progress.isStreaming && (
+                  <div style={{
+                    padding: '40px',
+                    textAlign: 'center',
+                    color: 'var(--muted)'
+                  }}>
+                    No YAML-related workflow degradations detected for the selected filters.
+                  </div>
+                )}
+
+                {workflowDegradations.length > 0 && (
+                  <table className="branch-table">
+                    <thead>
+                      <tr>
+                        <th>Workflow</th>
+                        <th>Branch</th>
+                        <th>Changed YAML</th>
+                        <th>Before</th>
+                        <th>After</th>
+                        <th>Increase</th>
+                        <th>Commit</th>
+                        <th>Detected</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {workflowDegradations.map(item => {
+                        const detectedAt = item.detectedAt
+                          ? new Date(item.detectedAt).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric'
+                            })
+                          : '—';
+
+                        return (
+                          <tr key={item.id}>
+                            <td className="branch-name">{item.workflowName}</td>
+                            <td>{item.branch || '—'}</td>
+                            <td>
+                              <div style={{ display: 'grid', gap: '3px' }}>
+                                {item.changedFiles.map(file => (
+                                  <span key={file} style={{ color: 'var(--muted)', fontSize: '12px', fontFamily: 'monospace' }}>
+                                    {file}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td>{item.previousMedian.toFixed(1)}s</td>
+                            <td>{item.nextMedian.toFixed(1)}s</td>
+                            <td style={{ color: '#ff9800', fontWeight: 600 }}>
+                              +{item.increasePercent.toFixed(0)}%
+                            </td>
+                            <td className="branch-name">
+                              {item.commitUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(item.commitUrl, '_blank')}
+                                  style={{
+                                    color: 'var(--accent)',
+                                    background: 'none',
+                                    border: 0,
+                                    padding: 0,
+                                    font: 'inherit',
+                                    fontFamily: 'monospace',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {item.shortSha}
+                                </button>
+                              ) : item.shortSha}
+                            </td>
+                            <td>{detectedAt}</td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {item.commitUrl && (
+                                  <button
+                                    type="button"
+                                    className="panel-icon-button"
+                                    title="Open commit"
+                                    aria-label={`Open commit ${item.shortSha}`}
+                                    onClick={() => window.open(item.commitUrl, '_blank')}
+                                  >
+                                    <UIIcon name="branch" />
+                                  </button>
+                                )}
+                                {item.runUrl && (
+                                  <button
+                                    type="button"
+                                    className="panel-icon-button"
+                                    title="Open workflow run"
+                                    aria-label={`Open workflow run for ${item.workflowName}`}
+                                    onClick={() => window.open(item.runUrl, '_blank')}
+                                  >
+                                    <UIIcon name="play" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
 
             {activeStatsTab === 'branch' && (
               <div id="stats-panel-branch" role="tabpanel" aria-labelledby="stats-tab-branch">

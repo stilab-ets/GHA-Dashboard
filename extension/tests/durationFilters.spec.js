@@ -47,3 +47,11 @@ test('outlier count ignores missing and zero durations', async () => {
 
   expect(countRunDurationOutliers(runs)).toBe(1);
 });
+
+test('workflow YAML changes are recognized separately from other YAML files', async () => {
+  const { isWorkflowYamlFile } = await import('../src/durationFilters.mjs');
+
+  expect(isWorkflowYamlFile('.github/workflows/ci.yml')).toBe(true);
+  expect(isWorkflowYamlFile('.github/workflows/release.yaml')).toBe(true);
+  expect(isWorkflowYamlFile('backend/config.yaml')).toBe(false);
+});

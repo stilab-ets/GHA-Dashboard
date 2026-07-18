@@ -533,6 +533,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     'event': run.get('event', 'unknown'),
                     'branch': run.get('head_branch'),
                     'head_branch': run.get('head_branch'),
+                    'commit_sha': run.get('head_sha'),
                     'actor': run.get('actor', {}).get('login') if isinstance(run.get('actor'), dict) else None,
                     'issuer_name': run.get('actor', {}).get('login') if isinstance(run.get('actor'), dict) else None,
                     'job_details': [],  # Empty for now
