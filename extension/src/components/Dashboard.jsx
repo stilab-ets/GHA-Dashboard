@@ -497,6 +497,7 @@ export default function Dashboard() {
   const [jobProgress, setJobProgress] = useState({ runs_processed: 0, total_runs: 0, jobs_collected: 0, isCollecting: false });
   const [workflowDegradations, setWorkflowDegradations] = useState([]);
   const [workflowDegradationsLoading, setWorkflowDegradationsLoading] = useState(false);
+  const [workflowDegradationsError, setWorkflowDegradationsError] = useState(null);
   const commitFilesCacheRef = useRef(new Map());
   const [dashboardTheme, setDashboardTheme] = useState(getInitialTheme);
   const [collectionPaused, setCollectionPaused] = useState(false);
@@ -986,6 +987,7 @@ export default function Dashboard() {
     if (!currentRepo || runs.length === 0) {
       setWorkflowDegradations([]);
       setWorkflowDegradationsLoading(false);
+      setWorkflowDegradationsError(null);
       return undefined;
     }
 
@@ -1014,21 +1016,25 @@ export default function Dashboard() {
     if (candidateCommitShas.length === 0) {
       setWorkflowDegradations([]);
       setWorkflowDegradationsLoading(false);
+      setWorkflowDegradationsError(null);
       return undefined;
     }
 
     const loadDegradations = async () => {
       setWorkflowDegradations([]);
       setWorkflowDegradationsLoading(true);
+      setWorkflowDegradationsError(null);
 
       try {
         const token = await getGithubToken();
-        if (!token || cancelled) return;
+        if (cancelled) return;
+        if (!token) throw new Error('GitHub token unavailable');
 
         const [owner, repository] = currentRepo.split('/');
-        if (!owner || !repository) return;
+        if (!owner || !repository) throw new Error('Invalid repository');
 
         const filesByCommit = new Map();
+        let failedCommitCount = 0;
         await Promise.all(candidateCommitShas.map(async commitSha => {
           const cacheKey = `${currentRepo}:${commitSha}`;
           let files = commitFilesCacheRef.current.get(cacheKey);
@@ -1041,6 +1047,7 @@ export default function Dashboard() {
               });
               if (!response.ok) {
                 console.warn(`[Dashboard] Unable to load files for commit ${commitSha} (${response.status})`);
+                failedCommitCount += 1;
                 return;
               }
 
@@ -1049,6 +1056,7 @@ export default function Dashboard() {
               commitFilesCacheRef.current.set(cacheKey, files);
             } catch (error) {
               console.warn(`[Dashboard] Unable to load files for commit ${commitSha}:`, error);
+              failedCommitCount += 1;
               return;
             }
           }
@@ -1083,6 +1091,16 @@ export default function Dashboard() {
             .sort((left, right) => right.increasePercent - left.increasePercent);
 
           setWorkflowDegradations(confirmedDegradations);
+          if (failedCommitCount > 0) {
+            setWorkflowDegradationsError(
+              `${failedCommitCount} commit${failedCommitCount === 1 ? '' : 's'} could not be checked. Results may be incomplete.`
+            );
+          }
+        }
+      } catch (error) {
+        console.warn('[Dashboard] Unable to verify workflow commits:', error);
+        if (!cancelled) {
+          setWorkflowDegradationsError('Unable to check workflow commits for YAML changes.');
         }
       } finally {
         if (!cancelled) setWorkflowDegradationsLoading(false);
@@ -4148,7 +4166,17 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                {!workflowDegradationsLoading && workflowDegradations.length === 0 && !progress.isStreaming && (
+                {!workflowDegradationsLoading && workflowDegradationsError && (
+                  <div style={{
+                    padding: '16px 40px',
+                    textAlign: 'center',
+                    color: 'var(--warning)'
+                  }}>
+                    {workflowDegradationsError}
+                  </div>
+                )}
+
+                {!workflowDegradationsLoading && !workflowDegradationsError && workflowDegradations.length === 0 && !progress.isStreaming && (
                   <div style={{
                     padding: '40px',
                     textAlign: 'center',

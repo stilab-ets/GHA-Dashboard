@@ -2,6 +2,26 @@ const { test, expect } = require('../fixtures');
 
 const REPOSITORY_URL = 'https://github.com/AUTOMATIC1111/stable-diffusion-webui';
 
+function createDurationShiftRuns({ workflowId, workflowName, commitSha, firstId }) {
+  return Array.from({ length: 21 }, (_, index) => ({
+    id: firstId + index,
+    workflow_id: workflowId,
+    workflow_name: workflowName,
+    status: 'completed',
+    conclusion: 'success',
+    created_at: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+    updated_at: new Date(Date.UTC(2026, 0, 1, 0, index, 30)).toISOString(),
+    duration: index <= 10 ? 100 : 200,
+    branch: 'main',
+    actor: 'tester',
+    event: 'push',
+    commit_sha: commitSha,
+    head_sha: commitSha,
+    html_url: `https://github.com/AUTOMATIC1111/stable-diffusion-webui/actions/runs/${firstId + index}`,
+    jobs: [],
+  }));
+}
+
 test('testing repository is accessible', async ({ context }) => {
   const page = await context.newPage();
 
@@ -147,4 +167,112 @@ test('dashboard collection scope sends dates and selected workflows', async ({ c
   expect(extractionPayload.filters.workflowIds).toEqual([101, 202]);
   expect(extractionPayload.filters.refreshWorkflowIds).toEqual([]);
   expect(extractionPayload.filters.fetchJobDetails).toBe(true);
+});
+
+test('dashboard shows confirmed YAML degradations and warns about incomplete checks', async ({ context, extensionId }) => {
+  const yamlCommitSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const codeCommitSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const failedCommitSha = 'cccccccccccccccccccccccccccccccccccccccc';
+  const runs = [
+    ...createDurationShiftRuns({
+      workflowId: 101,
+      workflowName: 'YAML Workflow',
+      commitSha: yamlCommitSha,
+      firstId: 1000,
+    }),
+    ...createDurationShiftRuns({
+      workflowId: 202,
+      workflowName: 'Code Workflow',
+      commitSha: codeCommitSha,
+      firstId: 2000,
+    }),
+    ...createDurationShiftRuns({
+      workflowId: 303,
+      workflowName: 'Unavailable Workflow',
+      commitSha: failedCommitSha,
+      firstId: 3000,
+    }),
+  ];
+  const requestedCommits = new Set();
+
+  await context.route('**/api/workflows/**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ workflows: [] }),
+  }));
+
+  await context.route('**/api/data/check/**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ exists: false, totalRuns: 0, runsWithJobs: 0, lastUpdated: null }),
+  }));
+
+  await context.route('**/api/commit-files/**', route => {
+    const commitSha = route.request().url().split('/').pop();
+    requestedCommits.add(commitSha);
+    if (commitSha === failedCommitSha) {
+      return route.fulfill({ status: 500 });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        commitSha,
+        files: commitSha === yamlCommitSha
+          ? ['.github/workflows/tests.yaml']
+          : ['src/app.js'],
+      }),
+    });
+  });
+
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
+  await popup.evaluate(() => new Promise(resolve => {
+    chrome.storage.session.set({ githubToken: 'ghp_yaml_test_token' }, () => resolve());
+  }));
+  await popup.close();
+
+  const page = await context.newPage();
+  await page.goto(REPOSITORY_URL);
+  await page.locator('#gha-dashboard-nav-button').click();
+  await expect(page.locator('#gha-dashboard-iframe')).toBeVisible();
+
+  const frame = page.frameLocator('#gha-dashboard-iframe');
+  await expect(frame.locator('#root')).toBeVisible();
+  await expect(frame.getByRole('button', { name: /start data collection/i })).toBeVisible();
+
+  const worker = context.serviceWorkers()[0];
+  await worker.evaluate(async ({ repo, runs }) => {
+    await chrome.storage.local.set({
+      wsStatus: {
+        isStreaming: false,
+        isComplete: true,
+        repo,
+        totalRuns: runs.length,
+        collectedRuns: runs.length,
+        phase: 'workflow_runs',
+      },
+      wsRuns: runs,
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await chrome.storage.local.set({
+      wsRuns: runs.map(run => ({ ...run, testRefresh: true })),
+    });
+  }, {
+    repo: 'AUTOMATIC1111/stable-diffusion-webui',
+    runs,
+  });
+
+  await frame.getByRole('tab', { name: 'Degradations' }).click();
+
+  const panel = frame.locator('#stats-panel-degradations');
+  await expect.poll(() => requestedCommits.size).toBe(3);
+  expect([...requestedCommits]).toEqual(expect.arrayContaining([yamlCommitSha, codeCommitSha, failedCommitSha]));
+  await expect(panel).toContainText('YAML Workflow');
+  await expect(panel.locator('tbody tr')).toHaveCount(1);
+  await expect(panel).toContainText('.github/workflows/tests.yaml');
+  await expect(panel).toContainText('+100%');
+  await expect(panel).not.toContainText('Code Workflow');
+  await expect(panel).toContainText('1 commit could not be checked. Results may be incomplete.');
+  await expect(panel).not.toContainText('No YAML-related workflow degradations');
 });
