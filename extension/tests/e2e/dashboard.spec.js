@@ -47,7 +47,7 @@ test('dashboard page opens correctly when dashboard button is clicked', async ({
 
   await page.goto(REPOSITORY_URL);
 
-  await page.locator('#gha-dashboard-nav-button').click();
+  await page.locator('#gha-dashboard-nav-button a').click();
 
   await expect(
     page.locator('#gha-dashboard-iframe')
@@ -103,7 +103,7 @@ test('dashboard collection scope sends dates and selected workflows', async ({ c
 
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button').click();
+  await page.locator('#gha-dashboard-nav-button a').click();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
   const startDateButton = frame.getByRole('button', { name: /collection start date/i });
@@ -234,7 +234,7 @@ test('dashboard shows confirmed YAML degradations and warns about incomplete che
 
   const page = await context.newPage();
   await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button').click();
+  await page.locator('#gha-dashboard-nav-button a').click();
   await expect(page.locator('#gha-dashboard-iframe')).toBeVisible();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
