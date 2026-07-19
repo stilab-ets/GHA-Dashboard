@@ -151,20 +151,23 @@
       return;
     }
 
+    const firstNavAnchor = nav.querySelector('li[class] a[class]');
     const navItem = document.createElement('li');
     navItem.id = 'gha-dashboard-nav-button';
-    navItem.className = 'd-flex';
+    navItem.className = firstNavAnchor?.closest('li')?.className || 'd-flex';
 
     const button = document.createElement('a');
     button.href = '#';
-    button.className = 'UnderlineNav-item';
+    button.className = firstNavAnchor?.className || 'UnderlineNav-item';
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-selected', 'false');
     button.innerHTML = `
-      <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" style="fill: currentColor; margin-right: 4px;">
-        <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"></path>
-      </svg>
-      GHA-Dashboard
+      <span data-component="icon">
+        <svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" style="fill: currentColor; margin-right: 4px; vertical-align: text-bottom; display: inline-block; overflow: visible;">
+          <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"></path>
+        </svg>
+      </span>
+      <span data-component="text" data-content="GHA-Dashboard">GHA-Dashboard</span>
     `;
     button.style.cssText = 'cursor: pointer; text-decoration: none;';
     
