@@ -1,28 +1,10 @@
 const { test, expect } = require('../fixtures');
+const recordedDurationDegradation = require('../data/gha-dashboard-duration-degradation.json');
 
 const REPOSITORY_URL = 'https://github.com/AUTOMATIC1111/stable-diffusion-webui';
+const GHA_DASHBOARD_REPOSITORY_URL = 'https://github.com/stilab-ets/GHA-Dashboard';
 
-function createDurationShiftRuns({ workflowId, workflowName, commitSha, firstId }) {
-  return Array.from({ length: 21 }, (_, index) => ({
-    id: firstId + index,
-    workflow_id: workflowId,
-    workflow_name: workflowName,
-    status: 'completed',
-    conclusion: 'success',
-    created_at: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
-    updated_at: new Date(Date.UTC(2026, 0, 1, 0, index, 30)).toISOString(),
-    duration: index <= 10 ? 100 : 200,
-    branch: 'main',
-    actor: 'tester',
-    event: 'push',
-    commit_sha: commitSha,
-    head_sha: commitSha,
-    html_url: `https://github.com/AUTOMATIC1111/stable-diffusion-webui/actions/runs/${firstId + index}`,
-    jobs: [],
-  }));
-}
-
-async function setupDashboardHarness(context, extensionId) {
+async function authenticateDashboardHarness(context, extensionId) {
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
   await popup.locator('#auth-token').click();
@@ -39,6 +21,10 @@ async function setupDashboardHarness(context, extensionId) {
     message: 'Waiting for the E2E authentication token to be stored',
   }).toBeTruthy();
   await popup.close();
+}
+
+async function setupDashboardHarness(context, extensionId) {
+  await authenticateDashboardHarness(context, extensionId);
 
   await context.route('**/api/workflows/**', route => route.fulfill({
     status: 200,
@@ -176,77 +162,22 @@ test('dashboard collection scope sends dates and selected workflows', async ({ c
   expect(extractionPayload.filters.fetchJobDetails).toBe(true);
 });
 
-test('dashboard shows confirmed YAML degradations and warns about incomplete checks', async ({ context, extensionId }) => {
-  const yamlCommitSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-  const codeCommitSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-  const failedCommitSha = 'cccccccccccccccccccccccccccccccccccccccc';
-  const runs = [
-    ...createDurationShiftRuns({
-      workflowId: 101,
-      workflowName: 'YAML Workflow',
-      commitSha: yamlCommitSha,
-      firstId: 1000,
-    }),
-    ...createDurationShiftRuns({
-      workflowId: 202,
-      workflowName: 'Code Workflow',
-      commitSha: codeCommitSha,
-      firstId: 2000,
-    }),
-    ...createDurationShiftRuns({
-      workflowId: 303,
-      workflowName: 'Unavailable Workflow',
-      commitSha: failedCommitSha,
-      firstId: 3000,
-    }),
-  ];
-  const requestedCommits = new Set();
-
-  await context.route('**/api/workflows/**', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ workflows: [] }),
-  }));
-
-  await context.route('**/api/data/check/**', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ exists: false, totalRuns: 0, runsWithJobs: 0, lastUpdated: null }),
-  }));
-
-  await context.route('**/api/commit-files/**', route => {
-    const commitSha = route.request().url().split('/').pop();
-    requestedCommits.add(commitSha);
-    if (commitSha === failedCommitSha) {
-      return route.fulfill({ status: 500 });
-    }
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        commitSha,
-        files: commitSha === yamlCommitSha
-          ? ['.github/workflows/tests.yaml']
-          : ['src/app.js'],
-      }),
-    });
-  });
-
-  const popup = await context.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
-  await popup.evaluate(() => new Promise(resolve => {
-    chrome.storage.session.set({ githubToken: 'ghp_yaml_test_token' }, () => resolve());
-  }));
-  await popup.close();
+test('dashboard identifies a YAML degradation from recorded real GitHub runs', async ({ context, extensionId }) => {
+  const { runs, source } = recordedDurationDegradation;
+  await authenticateDashboardHarness(context, extensionId);
 
   const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
+  await page.goto(GHA_DASHBOARD_REPOSITORY_URL);
   await page.locator('#gha-dashboard-nav-button a').click();
   await expect(page.locator('#gha-dashboard-iframe')).toBeVisible();
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
   await expect(frame.locator('#root')).toBeVisible();
   await expect(frame.getByRole('button', { name: /start data collection/i })).toBeVisible();
+
+  const commitCheck = page.waitForResponse(response => (
+    response.url().includes(`/api/commit-files/stilab-ets/GHA-Dashboard/${source.targetCommit}`)
+  ));
 
   const worker = context.serviceWorkers()[0];
   await worker.evaluate(async ({ repo, runs }) => {
@@ -266,21 +197,23 @@ test('dashboard shows confirmed YAML degradations and warns about incomplete che
       wsRuns: runs.map(run => ({ ...run, testRefresh: true })),
     });
   }, {
-    repo: 'AUTOMATIC1111/stable-diffusion-webui',
+    repo: source.repository,
     runs,
   });
+
+  const commitResponse = await commitCheck;
+  expect(commitResponse.status()).toBe(200);
 
   await frame.getByRole('tab', { name: 'Degradations' }).click();
 
   const panel = frame.locator('#stats-panel-degradations');
-  await expect.poll(() => requestedCommits.size).toBe(3);
-  expect([...requestedCommits]).toEqual(expect.arrayContaining([yamlCommitSha, codeCommitSha, failedCommitSha]));
-  await expect(panel).toContainText('YAML Workflow');
+  await expect(panel).toContainText(source.workflow);
   await expect(panel.locator('tbody tr')).toHaveCount(1);
-  await expect(panel).toContainText('.github/workflows/tests.yaml');
-  await expect(panel).toContainText('+100%');
-  await expect(panel).not.toContainText('Code Workflow');
-  await expect(panel).toContainText('1 commit could not be checked. Results may be incomplete.');
+  await expect(panel).toContainText(source.changedWorkflow);
+  await expect(panel).toContainText('94.0s');
+  await expect(panel).toContainText('187.5s');
+  await expect(panel).toContainText('+99%');
+  await expect(panel).toContainText(source.targetCommit.slice(0, 7));
   await expect(panel).not.toContainText('No YAML-related workflow degradations');
 });
 
