@@ -211,14 +211,13 @@
       return;
     }
 
-    const firstNavAnchor = nav.querySelector('li[class] a[class]');
     const navItem = document.createElement('li');
     navItem.id = 'gha-dashboard-nav-button';
-    navItem.className = firstNavAnchor?.closest('li')?.className || 'd-flex';
+    navItem.className = 'd-flex';
 
     const button = document.createElement('a');
     button.href = '#';
-    button.className = firstNavAnchor?.className || 'UnderlineNav-item';
+    button.className = 'UnderlineNav-item';
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-selected', 'false');
     button.innerHTML = `
