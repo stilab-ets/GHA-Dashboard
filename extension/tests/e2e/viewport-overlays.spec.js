@@ -61,8 +61,8 @@ async function seedDashboardRuns(context, extensionId, runs) {
 test('hint popup stays fully inside the browser viewport after page scrolling', async ({ context }) => {
   const page = await context.newPage();
   const viewport = { width: 900, height: 520 };
-  await page.setViewportSize(viewport);
   await openDashboard(page);
+  await page.setViewportSize(viewport);
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -100,8 +100,8 @@ test('hint popup stays fully inside the browser viewport after page scrolling', 
 test('fullscreen iframe remains viewport-fixed and returns without clipping the dashboard', async ({ context }) => {
   const page = await context.newPage();
   const viewport = { width: 1000, height: 640 };
-  await page.setViewportSize(viewport);
   await openDashboard(page);
+  await page.setViewportSize(viewport);
 
   const iframe = page.locator('#gha-dashboard-iframe');
   const frame = page.frameLocator('#gha-dashboard-iframe');
@@ -170,8 +170,8 @@ test('fullscreen iframe remains viewport-fixed and returns without clipping the 
 test('real KPI chart popup stays centered after page scrolling', async ({ context, extensionId }) => {
   const page = await context.newPage();
   const viewport = { width: 1200, height: 800 };
-  await page.setViewportSize(viewport);
   await openDashboard(page);
+  await page.setViewportSize(viewport);
 
   const frame = page.frameLocator('#gha-dashboard-iframe');
   await expect(frame.getByRole('button', { name: /start data collection/i })).toBeVisible();
