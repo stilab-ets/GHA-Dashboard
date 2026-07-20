@@ -261,8 +261,15 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                 }
                 all_runs_list = list(existing_runs_by_id.values())
                 print(f"[WebSocket] Found {existing_runs_count} existing runs in cache")
+                cached_runs_missing_commit_sha = any(
+                    not (run.get("commit_sha") or run.get("head_sha"))
+                    for run in existing_runs_list
+                )
 
-                if existing_runs_list and not getattr(filters, "forceRefresh", False):
+                if (
+                    existing_runs_list
+                    and not getattr(filters, "forceRefresh", False)
+                ):
                     print("[WebSocket] Serving cached runs without GitHub refresh")
                     batch_size = 100
                     for i in range(0, len(existing_runs_list), batch_size):
@@ -291,7 +298,10 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     })
                     return
                 elif existing_runs_list:
-                    print("[WebSocket] Seeding frontend with cached runs before GitHub refresh")
+                    if cached_runs_missing_commit_sha and config.get("fetch_job_details", False):
+                        print("[WebSocket] Cached job data is missing commit SHAs; refreshing to backfill flaky detection keys")
+                    else:
+                        print("[WebSocket] Seeding frontend with cached runs before GitHub refresh")
                     batch_size = 100
                     for i in range(0, len(existing_runs_list), batch_size):
                         cached_batch = existing_runs_list[i:i + batch_size]
@@ -429,7 +439,7 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
             if all_runs_list:
                 print(f"[WebSocket] Starting Phase 2: Job details collection")
                 phase2_start_time = time.time()
-                phase2_batch_size = 50  # Smaller batches for job details
+                phase2_batch_size = 1  # Show each job-enriched run as soon as it is available.
                 batch = []
                 jobs_collected = 0
                 last_keepalive = 0
@@ -446,12 +456,13 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                     runs_per_second = current_count / elapsed_time if elapsed_time > 0 else 0
                     eta_seconds = (total_runs_count - current_count) / runs_per_second if runs_per_second > 0 and total_runs_count > current_count else None
                     
-                    # Send batch to frontend (batch size 50 for Phase 2)
+                    # Send each Phase 2 update immediately so the Jobs tab can
+                    # fill in incrementally while remaining runs are still loading.
                     if len(batch) >= phase2_batch_size:
                         msg = {
                             "type": "runs",
                             "data": batch,
-                            "page": (current_count // phase2_batch_size) + 1,
+                            "page": current_count,
                             "hasMore": True,
                             "phase": "jobs",
                             "totalRuns": total_runs_count,
@@ -463,22 +474,20 @@ def send_data(ws: Any, repo: str, filters: AggregationFilters, token: str = None
                         batch.clear()
                         last_keepalive = current_count
                     
-                    # Send job progress update (with timing info)
-                    if current_count % 10 == 0 or current_count == total_runs_count:
-                        job_progress_msg = {
-                            "type": "job_progress",
-                            "runs_processed": current_count,
-                            "total_runs": total_runs_count,
-                            "jobs_collected": jobs_collected,
-                            "elapsed_time": elapsed_time,
-                            "eta_seconds": eta_seconds
-                        }
-                        try:
-                            _send_ws_json(ws, job_progress_msg)
-                        except WebSocketClientDisconnected:
-                            raise
-                        except:
-                            pass
+                    job_progress_msg = {
+                        "type": "job_progress",
+                        "runs_processed": current_count,
+                        "total_runs": total_runs_count,
+                        "jobs_collected": jobs_collected,
+                        "elapsed_time": elapsed_time,
+                        "eta_seconds": eta_seconds
+                    }
+                    try:
+                        _send_ws_json(ws, job_progress_msg)
+                    except WebSocketClientDisconnected:
+                        raise
+                    except:
+                        pass
                     
                     # Send keepalive every 50 runs to prevent timeout
                     if current_count - last_keepalive >= 50:

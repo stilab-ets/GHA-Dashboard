@@ -10,6 +10,7 @@ import {
   getValidRunDuration,
   sanitizeRunDurationForDashboard
 } from './durationFilters.mjs';
+import { detectFlakyTests } from './flakyTests.mjs';
 
 function formatTodayForFilter() {
   const today = new Date();
@@ -720,6 +721,7 @@ export function convertRunsToDashboard(runs, repo, filters) {
       branchComparison: [],
       workflowStats: [],
       jobStats: [],
+      flakyTests: [],
       branchStatsGrouped: [],
       eventStats: [],
       timeToFix: [],
@@ -796,6 +798,7 @@ export function convertRunsToDashboard(runs, repo, filters) {
   const branchComparison = calculateBranchStats(filteredRuns);
   const workflowStats = calculateWorkflowStats(filteredRuns);
   const jobStats = calculateJobStats(filteredRuns);
+  const flakyTests = detectFlakyTests(filteredRuns, repo);
   const branchStatsGrouped = calculateBranchStatsGrouped(filteredRuns);
   const eventStats = calculateEventStats(filteredRuns);
   const contributorStats = calculateContributorStats(filteredRuns);
@@ -859,6 +862,7 @@ export function convertRunsToDashboard(runs, repo, filters) {
     branchComparison,
     workflowStats: workflowStats,
     jobStats: jobStats,
+    flakyTests: flakyTests,
     branchStatsGrouped: branchStatsGrouped,
     eventStats: eventStats,
     contributorStats: contributorStats,
