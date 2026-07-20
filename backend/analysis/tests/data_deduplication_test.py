@@ -1,6 +1,6 @@
 from data.manager import DataManager
 from data.persistence import DataPersistence
-from ghaminer_stream import dedupe_runs_by_id, get_run_identity
+from ghaminer_stream import convert_ghaminer_run_to_dashboard, dedupe_runs_by_id, get_run_identity
 
 
 def test_save_runs_batch_de_duplicates_existing_runs_by_id(tmp_path):
@@ -69,3 +69,16 @@ def test_dedupe_runs_by_id_keeps_statistics_count_coherent():
     run_301 = deduped[0]
     assert run_301["conclusion"] == "success"
     assert run_301["jobs"] == [{"id": "job-1"}]
+
+
+def test_dashboard_run_conversion_preserves_commit_sha():
+    run = convert_ghaminer_run_to_dashboard({
+        "id_build": 401,
+        "workflow_id": 10,
+        "workflow_name": "CI",
+        "head_sha": "abc123456789",
+        "job_details": [],
+    }, "owner/repo")
+
+    assert run["commit_sha"] == "abc123456789"
+    assert run["head_sha"] == "abc123456789"

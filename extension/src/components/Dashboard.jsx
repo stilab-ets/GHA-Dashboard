@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
 import { buildDashboardCollectionFilters, extendWorkflowScopeForSelection, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForSelectionDelta, workflowNamesForIds } from '../scopeFilters.mjs';
+import { isWorkflowYamlFile } from '../durationFilters.mjs';
 import browser from "webextension-polyfill";
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -50,6 +51,8 @@ function UIIcon({ name }) {
     pulse: <path d="M3 13h4l3-7 4 13 3-7h4" />,
     workflow: <><circle cx="6" cy="6" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><path d="M8 7.5 11 16M16 7.5 13 16" /></>,
     jobs: <><path d="M5 12c2.5-4 5.5-4 8 0s5.5 4 8 0" /><path d="M5 16c2.5-4 5.5-4 8 0s5.5 4 8 0" /></>,
+    degradations: <><path d="M12 3 2.8 20h18.4L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
+    flaky: <><path d="M12 3 2.8 20h18.4L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
     branch: <><circle cx="7" cy="5" r="2" /><circle cx="17" cy="12" r="2" /><circle cx="7" cy="19" r="2" /><path d="M7 7v10M9 6c4 0 8 2 8 6M9 18c4 0 8-2 8-6" /></>,
     events: <><path d="M4 13h3l2-5 4 10 2-5h5" /><path d="M4 7h4M16 7h4" /></>,
     contributors: <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M3.5 19c.8-3.6 3-5 5.5-5s4.7 1.4 5.5 5" /><path d="M13.5 15c1-.9 2.1-1.3 3.5-1.3 2.1 0 3.8 1.2 4.5 4.3" /></>
@@ -261,72 +264,51 @@ function MetricCard({ tone = 'info', icon, title, explanation, value, note, chil
 // InfoIcon component for displaying help tooltips
 function InfoIcon({ explanation, id }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [popupStyle, setPopupStyle] = useState(null);
-  const [popupPlacement, setPopupPlacement] = useState('above');
   const iconRef = useRef(null);
-  const popupRef = useRef(null);
+  const generatedId = useId();
+  const popupId = id || generatedId;
 
-  const updatePopupPosition = () => {
-    if (!iconRef.current) return;
+  const postHintMessage = (type) => {
+    if (!window.parent || window.parent === window) return;
 
-    const rect = iconRef.current.getBoundingClientRect();
-    const popupRect = popupRef.current?.getBoundingClientRect();
-    const viewportPadding = 12;
-    const popupWidth = Math.min(popupRect?.width || 460, window.innerWidth - viewportPadding * 2);
-    const popupHeight = Math.min(popupRect?.height || 360, window.innerHeight - viewportPadding * 2);
-    const gap = 10;
-    const left = Math.min(
-      Math.max(rect.left, viewportPadding),
-      window.innerWidth - viewportPadding - popupWidth
-    );
-    const spaceAbove = rect.top - viewportPadding;
-    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
-    const placeAbove = spaceAbove >= popupHeight + gap || spaceAbove >= spaceBelow;
-    const top = placeAbove
-      ? Math.max(viewportPadding, Math.min(rect.top - gap - popupHeight, window.innerHeight - viewportPadding - popupHeight))
-      : Math.max(viewportPadding, Math.min(rect.bottom + gap, window.innerHeight - viewportPadding - popupHeight));
-
-    setPopupPlacement(placeAbove ? 'above' : 'below');
-
-    setPopupStyle({
-      position: 'fixed',
-      left: `${left}px`,
-      top: `${top}px`,
-      transform: 'none',
-      width: `${popupWidth}px`,
-    });
+    const rect = iconRef.current?.getBoundingClientRect();
+    window.parent.postMessage({
+      type,
+      id: popupId,
+      explanation,
+      theme: document.querySelector('.dashboard.light') ? 'light' : 'dark',
+      anchor: rect ? {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom
+      } : null
+    }, '*');
   };
 
-  useLayoutEffect(() => {
-    if (isOpen) {
-      updatePopupPosition();
-    }
-  }, [isOpen]);
-
   useEffect(() => {
+    if (!isOpen) return undefined;
+
     const handleClickOutside = (event) => {
-      if (iconRef.current && popupRef.current &&
-        !iconRef.current.contains(event.target) &&
-        !popupRef.current.contains(event.target)) {
+      if (iconRef.current && !iconRef.current.contains(event.target)) {
+        postHintMessage('GHA_DASHBOARD_HINT_CLOSE');
+        setIsOpen(false);
+      }
+    };
+    const handleParentMessage = (event) => {
+      if (event.data?.type === 'GHA_DASHBOARD_HINT_CLOSED' && event.data.id === popupId) {
         setIsOpen(false);
       }
     };
 
-    if (isOpen) {
-      updatePopupPosition();
-      document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('message', handleParentMessage);
 
-      const handleReposition = () => updatePopupPosition();
-      window.addEventListener('resize', handleReposition);
-      window.addEventListener('scroll', handleReposition, true);
-
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-        window.removeEventListener('resize', handleReposition);
-        window.removeEventListener('scroll', handleReposition, true);
-      };
-    }
-  }, [isOpen]);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('message', handleParentMessage);
+    };
+  }, [isOpen, popupId]);
 
   return (
     <div style={{ position: 'relative', display: 'inline-block', marginLeft: '8px' }}>
@@ -335,38 +317,19 @@ function InfoIcon({ explanation, id }) {
         className="info-icon-button"
         onClick={(e) => {
           e.stopPropagation();
-          setIsOpen(!isOpen);
+          if (isOpen) {
+            postHintMessage('GHA_DASHBOARD_HINT_CLOSE');
+            setIsOpen(false);
+          } else {
+            postHintMessage('GHA_DASHBOARD_HINT_OPEN');
+            setIsOpen(true);
+          }
         }}
         aria-label="Show explanation"
+        aria-expanded={isOpen}
       >
         ?
       </button>
-      {isOpen && (
-        createPortal(
-          <div
-            ref={popupRef}
-            className="info-icon-popup"
-            data-placement={popupPlacement}
-            style={popupStyle || undefined}
-          >
-            <div className="info-icon-popup-title">
-              {explanation.title || 'Information'}
-            </div>
-            <div>{explanation.text}</div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
-              className="info-icon-popup-close"
-              aria-label="Close explanation"
-            >
-              ×
-            </button>
-          </div>,
-          document.body
-        )
-      )}
     </div>
   );
 }
@@ -521,6 +484,10 @@ export default function Dashboard() {
   const [phase2StartTime, setPhase2StartTime] = useState(null);
   const elapsedIntervalRef = useRef(null);
   const [jobProgress, setJobProgress] = useState({ runs_processed: 0, total_runs: 0, jobs_collected: 0, isCollecting: false });
+  const [workflowDegradations, setWorkflowDegradations] = useState([]);
+  const [workflowDegradationsLoading, setWorkflowDegradationsLoading] = useState(false);
+  const [workflowDegradationsError, setWorkflowDegradationsError] = useState(null);
+  const commitFilesCacheRef = useRef(new Map());
   const [dashboardTheme, setDashboardTheme] = useState(getInitialTheme);
   const [collectionPaused, setCollectionPaused] = useState(false);
   // Filter states
@@ -888,11 +855,12 @@ export default function Dashboard() {
   useEffect(() => {
     if (!fullscreenPanelId) return undefined;
 
-    const requestViewportMetrics = () => {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'GHA_DASHBOARD_VIEWPORT_METRICS_REQUEST' }, '*');
-      }
-    };
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'GHA_DASHBOARD_FULLSCREEN',
+        active: true
+      }, '*');
+    }
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -900,16 +868,16 @@ export default function Dashboard() {
       }
     };
 
-    requestViewportMetrics();
-    const animationFrameId = window.requestAnimationFrame(requestViewportMetrics);
-    const timeoutId = window.setTimeout(requestViewportMetrics, 50);
-
     document.body.classList.add('dashboard-chart-fullscreen-active');
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId);
-      window.clearTimeout(timeoutId);
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'GHA_DASHBOARD_FULLSCREEN',
+          active: false
+        }, '*');
+      }
       document.body.classList.remove('dashboard-chart-fullscreen-active');
       document.removeEventListener('keydown', handleKeyDown);
     };
@@ -1007,6 +975,140 @@ export default function Dashboard() {
 
     return result.githubToken ?? null;
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    const runs = data?.rawRuns || [];
+
+    if (!currentRepo || runs.length === 0) {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(false);
+      setWorkflowDegradationsError(null);
+      return undefined;
+    }
+
+    const workflowNames = Array.from(new Set(
+      runs.map(run => run.workflow_name).filter(Boolean)
+    ));
+    const candidates = workflowNames.flatMap(workflowName => (
+      getDurationExplosionAnalysis(workflowName).worseningPoints
+    ));
+    const candidatesByCommit = new Map();
+    candidates.forEach(candidate => {
+      const run = candidate.firstAfterRun || candidate.run;
+      const commitSha = candidate.commitSha;
+      if (!commitSha || !run) return;
+
+      const key = `${candidate.workflowName}\u0000${candidate.branch}\u0000${commitSha}`;
+      if (!candidatesByCommit.has(key)) {
+        candidatesByCommit.set(key, candidate);
+      }
+    });
+    const uniqueCandidates = Array.from(candidatesByCommit.values());
+    const candidateCommitShas = Array.from(new Set(
+      uniqueCandidates.map(candidate => candidate.commitSha).filter(Boolean)
+    ));
+
+    if (candidateCommitShas.length === 0) {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(false);
+      setWorkflowDegradationsError(null);
+      return undefined;
+    }
+
+    const loadDegradations = async () => {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(true);
+      setWorkflowDegradationsError(null);
+
+      try {
+        const token = await getGithubToken();
+        if (cancelled) return;
+        if (!token) throw new Error('GitHub token unavailable');
+
+        const [owner, repository] = currentRepo.split('/');
+        if (!owner || !repository) throw new Error('Invalid repository');
+
+        const filesByCommit = new Map();
+        let failedCommitCount = 0;
+        await Promise.all(candidateCommitShas.map(async commitSha => {
+          const cacheKey = `${currentRepo}:${commitSha}`;
+          let files = commitFilesCacheRef.current.get(cacheKey);
+
+          if (files === undefined) {
+            const url = `http://127.0.0.1:3000/api/commit-files/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${encodeURIComponent(commitSha)}`;
+            try {
+              const response = await fetch(url, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              if (!response.ok) {
+                console.warn(`[Dashboard] Unable to load files for commit ${commitSha} (${response.status})`);
+                failedCommitCount += 1;
+                return;
+              }
+
+              const result = await response.json();
+              files = Array.isArray(result.files) ? result.files : [];
+              commitFilesCacheRef.current.set(cacheKey, files);
+            } catch (error) {
+              console.warn(`[Dashboard] Unable to load files for commit ${commitSha}:`, error);
+              failedCommitCount += 1;
+              return;
+            }
+          }
+
+          filesByCommit.set(commitSha, files);
+        }));
+
+        if (!cancelled) {
+          const confirmedDegradations = uniqueCandidates
+            .map(candidate => {
+              const yamlFiles = Array.from(new Set(
+                (filesByCommit.get(candidate.commitSha) || []).filter(isWorkflowYamlFile)
+              ));
+              if (yamlFiles.length === 0) return null;
+
+              const firstAfterRun = candidate.firstAfterRun || candidate.run;
+              return {
+                id: `${candidate.workflowName}\u0000${candidate.branch}\u0000${candidate.commitSha}`,
+                workflowName: candidate.workflowName,
+                branch: candidate.branch,
+                shortSha: candidate.commitSha.slice(0, 7),
+                commitUrl: `https://github.com/${currentRepo}/commit/${candidate.commitSha}`,
+                runUrl: firstAfterRun.html_url || null,
+                changedFiles: yamlFiles,
+                detectedAt: firstAfterRun.created_at || firstAfterRun.updated_at || '',
+                previousMedian: candidate.previousMedian,
+                nextMedian: candidate.nextMedian,
+                increasePercent: candidate.severityScore * 100,
+              };
+            })
+            .filter(Boolean)
+            .sort((left, right) => right.increasePercent - left.increasePercent);
+
+          setWorkflowDegradations(confirmedDegradations);
+          if (failedCommitCount > 0) {
+            setWorkflowDegradationsError(
+              `${failedCommitCount} commit${failedCommitCount === 1 ? '' : 's'} could not be checked. Results may be incomplete.`
+            );
+          }
+        }
+      } catch (error) {
+        console.warn('[Dashboard] Unable to verify workflow commits:', error);
+        if (!cancelled) {
+          setWorkflowDegradationsError('Unable to check workflow commits for YAML changes.');
+        }
+      } finally {
+        if (!cancelled) setWorkflowDegradationsLoading(false);
+      }
+    };
+
+    loadDegradations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRepo, data?.rawRuns]);
 
   const buildScopedQuery = (scope = getCollectionScope()) => {
     const params = new URLSearchParams();
@@ -2308,6 +2410,7 @@ export default function Dashboard() {
     branchComparison = [],
     workflowStats = [],
     jobStats = [],
+    flakyTests = [],
     branchStatsGrouped = [],
     eventStats = [],
     contributorStats = [],
@@ -2419,8 +2522,10 @@ export default function Dashboard() {
   };
 
   // Helper function for duration explosion chart
-  const getDurationExplosionData = (workflowName) => {
-    if (!rawRuns || rawRuns.length === 0) return [];
+  const getDurationExplosionAnalysis = (workflowName) => {
+    if (!rawRuns || rawRuns.length === 0) {
+      return { byDate: {}, selectedWorseningPoints: [], worseningPoints: [], overallMedian: 0 };
+    }
 
     let filteredRuns = rawRuns.filter(run => (run.duration || 0) > 0 && !run.durationExcludedFromStats);
     if (workflowName !== 'all') {
@@ -2462,19 +2567,20 @@ export default function Dashboard() {
         const severityScore = (nextMedian - previousMedian) / previousMedian;
         const dateTimestamp = new Date(currentDate).getTime();
 
-        // Store the worsening point with commit info
-        const commitSha = currentRun.commit_sha || currentRun.head_sha || null;
+        // Associate the worsening point with the first run after the change.
+        const firstAfterRun = nextRuns[0];
+        const commitSha = firstAfterRun.commit_sha || firstAfterRun.head_sha || null;
         // Extract repo from html_url if currentRepo is not available
         let repo = currentRepo;
-        if (!repo && currentRun.html_url) {
-          const urlMatch = currentRun.html_url.match(/github\.com\/([^\/]+\/[^\/]+)/);
+        if (!repo && firstAfterRun.html_url) {
+          const urlMatch = firstAfterRun.html_url.match(/github\.com\/([^\/]+\/[^\/]+)/);
           if (urlMatch) {
             repo = urlMatch[1];
           }
         }
         const commitUrl = commitSha && repo
           ? `https://github.com/${repo}/commit/${commitSha}`
-          : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : currentRun.html_url);
+          : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : firstAfterRun.html_url);
 
         const worseningPoint = {
           date: currentDate,
@@ -2485,9 +2591,12 @@ export default function Dashboard() {
           severityScore,
           commitSha,
           commitUrl,
-          html_url: currentRun.html_url,
+          workflowName: currentRun.workflow_name || workflowName,
+          branch: currentRun.branch || '',
+          html_url: firstAfterRun.html_url,
           created_at: currentRun.created_at,
-          run: currentRun
+          run: firstAfterRun,
+          firstAfterRun
         };
 
         worseningPoints.push(worseningPoint);
@@ -2549,6 +2658,12 @@ export default function Dashboard() {
     // Calculate overall median for reference line
     const allDurations = sortedRuns.map(r => r.duration || 0).filter(d => d > 0);
     const overallMedian = calculateMedian(allDurations);
+
+    return { byDate, selectedWorseningPoints, worseningPoints, overallMedian };
+  };
+
+  const getDurationExplosionData = (workflowName) => {
+    const { byDate, overallMedian } = getDurationExplosionAnalysis(workflowName);
 
     return Object.entries(byDate)
       .map(([date, data]) => ({
@@ -4005,6 +4120,30 @@ export default function Dashboard() {
                   Jobs
                 </button>
                 <button
+                  id="stats-tab-degradations"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'degradations'}
+                  aria-controls="stats-panel-degradations"
+                  className={`stats-tab-button ${activeStatsTab === 'degradations' ? 'active' : ''}`}
+                  onClick={() => setActiveStatsTab('degradations')}
+                >
+                  <span className="tab-icon"><UIIcon name="degradations" /></span>
+                  Degradations
+                </button>
+                <button
+                  id="stats-tab-flaky"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'flaky'}
+                  aria-controls="stats-panel-flaky"
+                  className={`stats-tab-button ${activeStatsTab === 'flaky' ? 'active' : ''}`}
+                  onClick={() => setActiveStatsTab('flaky')}
+                >
+                  <span className="tab-icon"><UIIcon name="flaky" /></span>
+                  Flaky
+                </button>
+                <button
                   id="stats-tab-branch"
                   type="button"
                   role="tab"
@@ -4230,6 +4369,292 @@ export default function Dashboard() {
                               </td>
                               <td>{j.medianDuration}s</td>
                               <td>{j.totalDuration}s</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })()}
+
+            {activeStatsTab === 'degradations' && (
+              <div
+                id="stats-panel-degradations"
+                role="tabpanel"
+                aria-labelledby="stats-tab-degradations"
+                className={`table-wrapper ${workflowDegradations.length > 10 ? 'table-wrapper-scroll' : ''}`}
+              >
+                {workflowDegradationsLoading && (
+                  <div style={{
+                    padding: '28px 40px',
+                    textAlign: 'center',
+                    color: 'var(--muted)'
+                  }}>
+                    Checking workflow commits for YAML changes...
+                  </div>
+                )}
+
+                {!workflowDegradationsLoading && workflowDegradationsError && (
+                  <div style={{
+                    padding: '16px 40px',
+                    textAlign: 'center',
+                    color: 'var(--warning)'
+                  }}>
+                    {workflowDegradationsError}
+                  </div>
+                )}
+
+                {!workflowDegradationsLoading && !workflowDegradationsError && workflowDegradations.length === 0 && !progress.isStreaming && (
+                  <div style={{
+                    padding: '40px',
+                    textAlign: 'center',
+                    color: 'var(--muted)'
+                  }}>
+                    No YAML-related workflow degradations detected for the selected filters.
+                  </div>
+                )}
+
+                {workflowDegradations.length > 0 && (
+                  <table className="branch-table">
+                    <thead>
+                      <tr>
+                        <th>Workflow</th>
+                        <th>Branch</th>
+                        <th>Changed YAML</th>
+                        <th>Before</th>
+                        <th>After</th>
+                        <th>Increase</th>
+                        <th>Commit</th>
+                        <th>Detected</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {workflowDegradations.map(item => {
+                        const detectedAt = item.detectedAt
+                          ? new Date(item.detectedAt).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric'
+                            })
+                          : '—';
+
+                        return (
+                          <tr key={item.id}>
+                            <td className="branch-name">{item.workflowName}</td>
+                            <td>{item.branch || '—'}</td>
+                            <td>
+                              <div style={{ display: 'grid', gap: '3px' }}>
+                                {item.changedFiles.map(file => (
+                                  <span key={file} style={{ color: 'var(--muted)', fontSize: '12px', fontFamily: 'monospace' }}>
+                                    {file}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td>{item.previousMedian.toFixed(1)}s</td>
+                            <td>{item.nextMedian.toFixed(1)}s</td>
+                            <td style={{ color: '#ff9800', fontWeight: 600 }}>
+                              +{item.increasePercent.toFixed(0)}%
+                            </td>
+                            <td className="branch-name">
+                              {item.commitUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(item.commitUrl, '_blank')}
+                                  style={{
+                                    color: 'var(--accent)',
+                                    background: 'none',
+                                    border: 0,
+                                    padding: 0,
+                                    font: 'inherit',
+                                    fontFamily: 'monospace',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {item.shortSha}
+                                </button>
+                              ) : item.shortSha}
+                            </td>
+                            <td>{detectedAt}</td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {item.commitUrl && (
+                                  <button
+                                    type="button"
+                                    className="panel-icon-button"
+                                    title="Open commit"
+                                    aria-label={`Open commit ${item.shortSha}`}
+                                    onClick={() => window.open(item.commitUrl, '_blank')}
+                                  >
+                                    <UIIcon name="branch" />
+                                  </button>
+                                )}
+                                {item.runUrl && (
+                                  <button
+                                    type="button"
+                                    className="panel-icon-button"
+                                    title="Open workflow run"
+                                    aria-label={`Open workflow run for ${item.workflowName}`}
+                                    onClick={() => window.open(item.runUrl, '_blank')}
+                                  >
+                                    <UIIcon name="play" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {activeStatsTab === 'flaky' && (() => {
+              return (
+                <div
+                  id="stats-panel-flaky"
+                  role="tabpanel"
+                  aria-labelledby="stats-tab-flaky"
+                  className={`table-wrapper ${flakyTests.length > 10 ? 'table-wrapper-scroll' : ''}`}
+                >
+                  {jobProgress.isCollecting && jobProgress.total_runs > 0 && (
+                    <div style={{
+                      padding: '15px',
+                      marginBottom: '12px',
+                      background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '15px'
+                    }}>
+                      <div className="spinner"></div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ color: 'var(--text)', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
+                          Collecting job data...
+                        </div>
+                        <div style={{ color: 'var(--muted)', fontSize: '12px', marginBottom: '8px' }}>
+                          {jobProgress.runs_processed} / {jobProgress.total_runs} runs processed ({jobProgress.jobs_collected} jobs collected)
+                        </div>
+                        <div style={{
+                          height: '4px',
+                          background: 'color-mix(in srgb, var(--border) 60%, transparent)',
+                          borderRadius: '2px',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{
+                            width: `${(jobProgress.runs_processed / jobProgress.total_runs) * 100}%`,
+                            height: '100%',
+                            background: '#4caf50',
+                            transition: 'width 0.3s ease'
+                          }}></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {flakyTests.length === 0 && jobProgress.isCollecting && (
+                    <div style={{
+                      padding: '28px 40px',
+                      textAlign: 'center',
+                      color: 'var(--muted)'
+                    }}>
+                      No flaky jobs have been found yet. New matches will appear here as job data is collected.
+                    </div>
+                  )}
+                  {flakyTests.length === 0 && !jobProgress.isCollecting && !progress.isStreaming && (
+                    <div style={{
+                      padding: '40px',
+                      textAlign: 'center',
+                      color: 'var(--muted)'
+                    }}>
+                      No flaky jobs detected for the selected filters.
+                    </div>
+                  )}
+                  {flakyTests.length > 0 && (
+                    <table className="branch-table">
+                      <thead>
+                        <tr>
+                          <th>Commit</th>
+                          <th>Workflow</th>
+                          <th>Job</th>
+                          <th>Successes</th>
+                          <th>Failures</th>
+                          <th>Total Runs</th>
+                          <th>Last Seen</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {flakyTests.map(item => {
+                          const latestRunUrl = item.runUrls?.[item.runUrls.length - 1];
+                          const lastSeen = item.latestSeenAt
+                            ? new Date(item.latestSeenAt).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })
+                            : 'Unknown';
+
+                          return (
+                            <tr key={item.id}>
+                              <td className="branch-name">
+                                {item.commitUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => window.open(item.commitUrl, '_blank')}
+                                    style={{
+                                      color: 'var(--accent)',
+                                      background: 'none',
+                                      border: 0,
+                                      padding: 0,
+                                      font: 'inherit',
+                                      fontFamily: 'monospace',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    {item.shortSha || 'unknown'}
+                                  </button>
+                                ) : (
+                                  <span style={{ fontFamily: 'monospace' }}>{item.shortSha || 'unknown'}</span>
+                                )}
+                              </td>
+                              <td style={{ color: 'var(--muted)', fontSize: '13px' }}>{item.workflowName || 'unknown'}</td>
+                              <td>{item.jobName || 'unknown'}</td>
+                              <td>{item.successes}</td>
+                              <td>{item.failures}</td>
+                              <td>{item.totalRuns}</td>
+                              <td>{lastSeen}</td>
+                              <td>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                  {item.commitUrl && (
+                                    <button
+                                      type="button"
+                                      className="panel-icon-button"
+                                      title="Open commit"
+                                      aria-label={`Open commit ${item.shortSha}`}
+                                      onClick={() => window.open(item.commitUrl, '_blank')}
+                                    >
+                                      <UIIcon name="branch" />
+                                    </button>
+                                  )}
+                                  {latestRunUrl && (
+                                    <button
+                                      type="button"
+                                      className="panel-icon-button"
+                                      title="Open latest run"
+                                      aria-label={`Open latest run for ${item.jobName}`}
+                                      onClick={() => window.open(latestRunUrl, '_blank')}
+                                    >
+                                      <UIIcon name="play" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}

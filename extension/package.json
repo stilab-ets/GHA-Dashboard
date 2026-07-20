@@ -8,9 +8,8 @@
     "preview": "vite preview",
     "pack": "npm run build && node src/scripts/assemble.js",
     "dist": "npm run pack && powershell -NoProfile -Command \"Compress-Archive -Path build\\* -DestinationPath gha-dashboard.zip -Force\"",
-    "test:unit": "node --test tests/scopeFilters.node.test.mjs tests/trendAnalysis.node.test.mjs",
-    "test:unit:browser": "node --test tests/unit",
-    "test:e2e": "npm run pack chromium && npx playwright test tests"
+    "test:unit": "node --test tests/unit/*.test.mjs",
+    "test:e2e": "npm run pack chromium && npx playwright test tests/e2e"
   },
   "dependencies": {
     "react": "^19.0.0",

@@ -36,3 +36,8 @@ export function sanitizeRunDurationForDashboard(run) {
     durationExcludedFromStats: true
   };
 }
+
+export function isWorkflowYamlFile(filePath) {
+  const normalizedPath = String(filePath ?? '').trim().replace(/\\/g, '/').toLowerCase();
+  return normalizedPath.startsWith('.github/workflows/') && /\.(yml|yaml)$/.test(normalizedPath);
+}

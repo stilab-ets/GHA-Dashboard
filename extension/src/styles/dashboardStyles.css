@@ -959,12 +959,11 @@
 }
 
 .dashboard-chart-popup-layer {
-    position: absolute;
-    top: var(--gha-visible-top, 0px);
-    left: 0;
-    right: 0;
+    position: fixed;
+    inset: 0;
     z-index: 5001;
-    height: var(--gha-visible-height, 100vh);
+    display: grid;
+    place-items: center;
     padding: 24px;
     box-sizing: border-box;
     pointer-events: auto;
@@ -1017,13 +1016,10 @@
 }
 
 .dashboard-chart-popup {
-    position: absolute;
-    top: var(--gha-popup-center-visible-y, 50%);
-    left: 50%;
-    transform: translate(-50%, -50%);
+    position: relative;
     z-index: 1;
     width: min(920px, calc(100vw - 48px));
-    height: min(560px, calc(var(--gha-visible-height, 640px) - 48px));
+    height: min(560px, calc(100vh - 48px));
     max-width: 100%;
     max-height: 100%;
     min-height: 0;
