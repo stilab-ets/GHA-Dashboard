@@ -42,6 +42,7 @@ function UIIcon({ name }) {
     pulse: <path d="M3 13h4l3-7 4 13 3-7h4" />,
     workflow: <><circle cx="6" cy="6" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><path d="M8 7.5 11 16M16 7.5 13 16" /></>,
     jobs: <><path d="M5 12c2.5-4 5.5-4 8 0s5.5 4 8 0" /><path d="M5 16c2.5-4 5.5-4 8 0s5.5 4 8 0" /></>,
+    flaky: <><path d="M12 3 2.8 20h18.4L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
     branch: <><circle cx="7" cy="5" r="2" /><circle cx="17" cy="12" r="2" /><circle cx="7" cy="19" r="2" /><path d="M7 7v10M9 6c4 0 8 2 8 6M9 18c4 0 8-2 8-6" /></>,
     events: <><path d="M4 13h3l2-5 4 10 2-5h5" /><path d="M4 7h4M16 7h4" /></>,
     contributors: <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M3.5 19c.8-3.6 3-5 5.5-5s4.7 1.4 5.5 5" /><path d="M13.5 15c1-.9 2.1-1.3 3.5-1.3 2.1 0 3.8 1.2 4.5 4.3" /></>
@@ -2240,6 +2241,7 @@ export default function Dashboard() {
     branchComparison = [],
     workflowStats = [],
     jobStats = [],
+    flakyTests = [],
     branchStatsGrouped = [],
     eventStats = [],
     contributorStats = [],
@@ -3750,6 +3752,18 @@ export default function Dashboard() {
                   Jobs
                 </button>
                 <button
+                  id="stats-tab-flaky"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'flaky'}
+                  aria-controls="stats-panel-flaky"
+                  className={`stats-tab-button ${activeStatsTab === 'flaky' ? 'active' : ''}`}
+                  onClick={() => setActiveStatsTab('flaky')}
+                >
+                  <span className="tab-icon"><UIIcon name="flaky" /></span>
+                  Flaky
+                </button>
+                <button
                   id="stats-tab-branch"
                   type="button"
                   role="tab"
@@ -3975,6 +3989,157 @@ export default function Dashboard() {
                               </td>
                               <td>{j.medianDuration}s</td>
                               <td>{j.totalDuration}s</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })()}
+
+            {activeStatsTab === 'flaky' && (() => {
+              return (
+                <div
+                  id="stats-panel-flaky"
+                  role="tabpanel"
+                  aria-labelledby="stats-tab-flaky"
+                  className={`table-wrapper ${flakyTests.length > 10 ? 'table-wrapper-scroll' : ''}`}
+                >
+                  {jobProgress.isCollecting && jobProgress.total_runs > 0 && (
+                    <div style={{
+                      padding: '15px',
+                      marginBottom: '12px',
+                      background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '15px'
+                    }}>
+                      <div className="spinner"></div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ color: 'var(--text)', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
+                          Collecting job data...
+                        </div>
+                        <div style={{ color: 'var(--muted)', fontSize: '12px', marginBottom: '8px' }}>
+                          {jobProgress.runs_processed} / {jobProgress.total_runs} runs processed ({jobProgress.jobs_collected} jobs collected)
+                        </div>
+                        <div style={{
+                          height: '4px',
+                          background: 'color-mix(in srgb, var(--border) 60%, transparent)',
+                          borderRadius: '2px',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{
+                            width: `${(jobProgress.runs_processed / jobProgress.total_runs) * 100}%`,
+                            height: '100%',
+                            background: '#4caf50',
+                            transition: 'width 0.3s ease'
+                          }}></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {flakyTests.length === 0 && jobProgress.isCollecting && (
+                    <div style={{
+                      padding: '28px 40px',
+                      textAlign: 'center',
+                      color: 'var(--muted)'
+                    }}>
+                      No flaky jobs have been found yet. New matches will appear here as job data is collected.
+                    </div>
+                  )}
+                  {flakyTests.length === 0 && !jobProgress.isCollecting && !progress.isStreaming && (
+                    <div style={{
+                      padding: '40px',
+                      textAlign: 'center',
+                      color: 'var(--muted)'
+                    }}>
+                      No flaky jobs detected for the selected filters.
+                    </div>
+                  )}
+                  {flakyTests.length > 0 && (
+                    <table className="branch-table">
+                      <thead>
+                        <tr>
+                          <th>Commit</th>
+                          <th>Workflow</th>
+                          <th>Job</th>
+                          <th>Successes</th>
+                          <th>Failures</th>
+                          <th>Total Runs</th>
+                          <th>Last Seen</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {flakyTests.map(item => {
+                          const latestRunUrl = item.runUrls?.[item.runUrls.length - 1];
+                          const lastSeen = item.latestSeenAt
+                            ? new Date(item.latestSeenAt).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })
+                            : 'Unknown';
+
+                          return (
+                            <tr key={item.id}>
+                              <td className="branch-name">
+                                {item.commitUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => window.open(item.commitUrl, '_blank')}
+                                    style={{
+                                      color: 'var(--accent)',
+                                      background: 'none',
+                                      border: 0,
+                                      padding: 0,
+                                      font: 'inherit',
+                                      fontFamily: 'monospace',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    {item.shortSha || 'unknown'}
+                                  </button>
+                                ) : (
+                                  <span style={{ fontFamily: 'monospace' }}>{item.shortSha || 'unknown'}</span>
+                                )}
+                              </td>
+                              <td style={{ color: 'var(--muted)', fontSize: '13px' }}>{item.workflowName || 'unknown'}</td>
+                              <td>{item.jobName || 'unknown'}</td>
+                              <td>{item.successes}</td>
+                              <td>{item.failures}</td>
+                              <td>{item.totalRuns}</td>
+                              <td>{lastSeen}</td>
+                              <td>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                  {item.commitUrl && (
+                                    <button
+                                      type="button"
+                                      className="panel-icon-button"
+                                      title="Open commit"
+                                      aria-label={`Open commit ${item.shortSha}`}
+                                      onClick={() => window.open(item.commitUrl, '_blank')}
+                                    >
+                                      <UIIcon name="branch" />
+                                    </button>
+                                  )}
+                                  {latestRunUrl && (
+                                    <button
+                                      type="button"
+                                      className="panel-icon-button"
+                                      title="Open latest run"
+                                      aria-label={`Open latest run for ${item.jobName}`}
+                                      onClick={() => window.open(latestRunUrl, '_blank')}
+                                    >
+                                      <UIIcon name="play" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}
