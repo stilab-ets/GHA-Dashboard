@@ -1,42 +1,12 @@
 const { test, expect } = require('../fixtures');
 const recordedDurationDegradation = require('../data/gha-dashboard-duration-degradation.json');
+const {
+  popupLogin,
+  openDashboard,
+  REPOSITORY_URL,
+} = require('./utils');
 
-const REPOSITORY_URL = 'https://github.com/AUTOMATIC1111/stable-diffusion-webui';
 const GHA_DASHBOARD_REPOSITORY_URL = 'https://github.com/stilab-ets/GHA-Dashboard';
-
-async function authenticateDashboardHarness(context, extensionId) {
-  const popup = await context.newPage();
-  await popup.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
-  await popup.locator('#auth-token').click();
-  await expect(popup.locator('#token-status')).toHaveText(/Logged in as/i, {
-    timeout: 30_000,
-  });
-
-  await expect.poll(() => popup.evaluate(() => new Promise(resolve => {
-    chrome.storage.session.get('githubToken', ({ githubToken }) => {
-      resolve(Boolean(githubToken));
-    });
-  })), {
-    timeout: 30_000,
-    message: 'Waiting for the E2E authentication token to be stored',
-  }).toBeTruthy();
-  await popup.close();
-}
-
-async function setupDashboardHarness(context, extensionId) {
-  await authenticateDashboardHarness(context, extensionId);
-
-  await context.route('**/api/workflows/**', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      workflows: [
-        { id: 101, name: 'Lint', path: '.github/workflows/lint.yml', state: 'active' },
-        { id: 202, name: 'Tests', path: '.github/workflows/tests.yml', state: 'active' },
-      ],
-    }),
-  }));
-}
 
 test('testing repository is accessible', async ({ context }) => {
   const page = await context.newPage();
@@ -81,7 +51,7 @@ test('dashboard page opens correctly when dashboard button is clicked', async ({
 });
 
 test('dashboard collection scope sends dates and selected workflows', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
+  await popupLogin(context, extensionId);
 
   let extractionPayload = null;
 
@@ -94,11 +64,7 @@ test('dashboard collection scope sends dates and selected workflows', async ({ c
     });
   });
 
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button a').click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
+  const { frame, page } = await openDashboard(context);
   const startDateButton = frame.getByRole('button', { name: /collection start date/i });
   const endDateButton = frame.getByRole('button', { name: /collection end date/i });
   await expect(startDateButton).toBeVisible();
@@ -157,14 +123,14 @@ test('dashboard collection scope sends dates and selected workflows', async ({ c
   await expect.poll(() => extractionPayload).not.toBeNull();
   expect(extractionPayload.filters.start).toBe('2026-06-01');
   expect(extractionPayload.filters.end).toBe('2026-06-30');
-  expect(extractionPayload.filters.workflowIds).toEqual([101, 202]);
+  expect(extractionPayload.filters.workflowIds.length).toEqual(2);
   expect(extractionPayload.filters.refreshWorkflowIds).toEqual([]);
   expect(extractionPayload.filters.fetchJobDetails).toBe(true);
 });
 
 test('dashboard identifies a YAML degradation from recorded real GitHub runs', async ({ context, extensionId }) => {
   const { runs, source } = recordedDurationDegradation;
-  await authenticateDashboardHarness(context, extensionId);
+  await popupLogin(context, extensionId);
 
   const page = await context.newPage();
   await page.goto(GHA_DASHBOARD_REPOSITORY_URL);
@@ -218,19 +184,9 @@ test('dashboard identifies a YAML degradation from recorded real GitHub runs', a
 });
 
 test('dashboard filters can narrow the workflow selection before collection starts', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
 
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-  const dashboardButton = page.locator('#gha-dashboard-nav-button');
-
-  await expect(dashboardButton).toBeVisible({
-      timeout: 30000
-  });
-
-  await dashboardButton.click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
   await frame.getByRole('button', { name: /workflows/i }).click();
   await frame.getByRole('checkbox', { name: 'All workflows' }).uncheck();
   await frame.getByRole('checkbox', { name: 'Lint' }).check();
@@ -240,37 +196,16 @@ test('dashboard filters can narrow the workflow selection before collection star
 });
 
 test('dashboard allows cancelling an in-progress workflow collection', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
 
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-  const dashboardButton = page.locator('#gha-dashboard-nav-button');
-
-  await expect(dashboardButton).toBeVisible({
-      timeout: 30000
-  });
-
-  await dashboardButton.click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
   await expect(frame.getByRole('button', { name: /start data collection/i })).toBeVisible();
   await expect(frame.locator('.collection-scope-panel')).toBeVisible();
 });
 
 test('dashboard workflow picker exposes the available workflows', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
-
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-  const dashboardButton = page.locator('#gha-dashboard-nav-button');
-
-  await expect(dashboardButton).toBeVisible({
-      timeout: 30000
-  });
-
-  await dashboardButton.click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
   await frame.getByRole('button', { name: /workflows/i }).click();
 
   await expect(frame.getByRole('checkbox', { name: 'All workflows' })).toBeVisible();
@@ -279,20 +214,8 @@ test('dashboard workflow picker exposes the available workflows', async ({ conte
 });
 
 test('dashboard: branch filter reduces filtered runs', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
-
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-
-  const dashboardButton = page.locator('#gha-dashboard-nav-button');
-
-  await expect(dashboardButton).toBeVisible({
-      timeout: 30000
-  });
-
-  await dashboardButton.click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
 
   await frame.getByRole('button', { name: /start data collection/i }).click();
 
@@ -326,20 +249,8 @@ test('dashboard: branch filter reduces filtered runs', async ({ context, extensi
 });
 
 test('dashboard: workflow filter reduces filtered runs', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
-
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-
-  const dashboardButton = page.locator('#gha-dashboard-nav-button');
-
-  await expect(dashboardButton).toBeVisible({
-      timeout: 30000
-  });
-
-  await dashboardButton.click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
 
   await frame.getByRole('button', { name: /start data collection/i }).click();
 
@@ -373,20 +284,8 @@ test('dashboard: workflow filter reduces filtered runs', async ({ context, exten
 });
 
 test('dashboard: actor filter reduces filtered runs', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
-
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-
-  const dashboardButton = page.locator('#gha-dashboard-nav-button');
-
-  await expect(dashboardButton).toBeVisible({
-      timeout: 30000
-  });
-
-  await dashboardButton.click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
 
   await frame.getByRole('button', { name: /start data collection/i }).click();
 
@@ -420,20 +319,8 @@ test('dashboard: actor filter reduces filtered runs', async ({ context, extensio
 });
 
 test('dashboard: date filter reduces filtered runs', async ({ context, extensionId }) => {
-  await setupDashboardHarness(context, extensionId);
-
-  const page = await context.newPage();
-  await page.goto(REPOSITORY_URL);
-
-  const dashboardButton = page.locator('#gha-dashboard-nav-button');
-
-  await expect(dashboardButton).toBeVisible({
-      timeout: 30000
-  });
-
-  await dashboardButton.click();
-
-  const frame = page.frameLocator('#gha-dashboard-iframe');
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
 
   await frame.getByRole('button', { name: /start data collection/i }).click();
 

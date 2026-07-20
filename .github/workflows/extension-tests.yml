@@ -73,7 +73,12 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y xvfb
 
-    - name: Run tests
+    - name: Run E2E tests
       run: |
         cd extension
         xvfb-run --server-args="-screen 0 1920x1080x24" -a npm run test:e2e
+
+    - name: Run unit tests
+      run: |
+        cd extension
+        npm run test:unit
