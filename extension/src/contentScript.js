@@ -86,6 +86,66 @@
         min-width: 0 !important;
         overflow: visible !important;
       }
+      #gha-dashboard-iframe.gha-dashboard-fullscreen-frame {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        height: 100vh !important;
+        min-height: 100vh !important;
+        z-index: 2147483646 !important;
+      }
+      #gha-dashboard-hint-popup {
+        position: fixed;
+        z-index: 2147483647;
+        box-sizing: border-box;
+        width: min(460px, calc(100vw - 24px));
+        max-height: calc(100vh - 24px);
+        overflow: auto;
+        padding: 12px;
+        color: #172033;
+        background: #fff;
+        border: 1px solid #d8dee8;
+        border-radius: 6px;
+        box-shadow: 0 12px 28px rgba(16, 24, 40, 0.2);
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        overflow-wrap: break-word;
+      }
+      #gha-dashboard-hint-popup[data-theme="dark"] {
+        color: #ddd;
+        background: #222;
+        border-color: #555;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+      }
+      #gha-dashboard-hint-popup .gha-dashboard-hint-title {
+        margin: 0 0 8px;
+        padding-right: 24px;
+        font-size: 14px;
+        font-weight: 800;
+      }
+      #gha-dashboard-hint-popup .gha-dashboard-hint-close {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 24px;
+        height: 24px;
+        display: grid;
+        place-items: center;
+        margin: 0;
+        padding: 0;
+        color: inherit;
+        background: transparent;
+        border: 0;
+        border-radius: 4px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 18px;
+      }
+      #gha-dashboard-hint-popup .gha-dashboard-hint-close:hover,
+      #gha-dashboard-hint-popup .gha-dashboard-hint-close:focus-visible {
+        background: rgba(127, 127, 127, 0.18);
+        outline: none;
+      }
     `;
     document.head.appendChild(style);
   };
@@ -390,7 +450,101 @@
     `;
     iframe.setAttribute('scrolling', 'no');
 
+    let dashboardFullscreen = false;
+    let hostHintPopup = null;
+    let hostHintState = null;
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
+
+    const notifyHintClosed = (id) => {
+      iframe.contentWindow?.postMessage({ type: 'GHA_DASHBOARD_HINT_CLOSED', id }, '*');
+    };
+
+    const positionDashboardHint = () => {
+      if (!hostHintPopup || !hostHintState?.anchor) return;
+
+      const padding = 12;
+      const viewport = {
+        width: document.documentElement.clientWidth || window.innerWidth,
+        height: document.documentElement.clientHeight || window.innerHeight
+      };
+      const frame = iframe.getBoundingClientRect();
+      const anchor = {
+        left: frame.left + hostHintState.anchor.left,
+        top: frame.top + hostHintState.anchor.top,
+        bottom: frame.top + hostHintState.anchor.bottom
+      };
+      const popup = hostHintPopup.getBoundingClientRect();
+      const placeAbove = anchor.top - padding >= popup.height + 10 ||
+        anchor.top >= viewport.height - anchor.bottom;
+      const preferredTop = placeAbove ? anchor.top - popup.height - 10 : anchor.bottom + 10;
+
+      hostHintPopup.style.left = `${clamp(anchor.left, padding, viewport.width - popup.width - padding)}px`;
+      hostHintPopup.style.top = `${clamp(preferredTop, padding, viewport.height - popup.height - padding)}px`;
+      hostHintPopup.style.visibility = 'visible';
+    };
+
+    const closeDashboardHint = (notifyIframe = true) => {
+      if (!hostHintPopup) return;
+
+      const id = hostHintState?.id;
+      hostHintPopup.remove();
+      hostHintPopup = null;
+      hostHintState = null;
+      if (notifyIframe) notifyHintClosed(id);
+    };
+
+    const handleHostHintOutsideClick = (event) => {
+      if (hostHintPopup && !hostHintPopup.contains(event.target)) {
+        closeDashboardHint(true);
+      }
+    };
+
+    const openDashboardHint = (data) => {
+      if (!data?.anchor || !data?.id) return;
+
+      closeDashboardHint(true);
+      hostHintState = {
+        id: data.id,
+        anchor: data.anchor
+      };
+
+      const popup = document.createElement('div');
+      popup.id = 'gha-dashboard-hint-popup';
+      popup.dataset.theme = data.theme === 'light' ? 'light' : 'dark';
+      popup.style.visibility = 'hidden';
+      popup.setAttribute('role', 'dialog');
+      popup.setAttribute('aria-label', data.explanation?.title || 'Information');
+
+      const title = document.createElement('div');
+      title.className = 'gha-dashboard-hint-title';
+      title.textContent = data.explanation?.title || 'Information';
+
+      const text = document.createElement('div');
+      text.textContent = data.explanation?.text || '';
+
+      const closeButton = document.createElement('button');
+      closeButton.type = 'button';
+      closeButton.className = 'gha-dashboard-hint-close';
+      closeButton.setAttribute('aria-label', 'Close explanation');
+      closeButton.textContent = '×';
+      closeButton.addEventListener('click', () => closeDashboardHint(true));
+
+      popup.append(title, text, closeButton);
+      document.body.appendChild(popup);
+      hostHintPopup = popup;
+
+      positionDashboardHint();
+    };
+
+    const setDashboardFrameFullscreen = (isFullscreen) => {
+      dashboardFullscreen = Boolean(isFullscreen);
+      iframe.classList.toggle('gha-dashboard-fullscreen-frame', dashboardFullscreen);
+      if (dashboardFullscreen) closeDashboardHint(true);
+    };
+
     const setDashboardFrameHeight = (height) => {
+      if (dashboardFullscreen) return;
+
       const parsedHeight = Number(height);
       if (!Number.isFinite(parsedHeight) || parsedHeight <= 0) return;
 
@@ -403,13 +557,35 @@
 
     const handleDashboardMessage = (event) => {
       if (event.source !== iframe.contentWindow) return;
-      if (event.data?.type === 'GHA_DASHBOARD_HEIGHT') {
-        setDashboardFrameHeight(event.data.height);
+      switch (event.data?.type) {
+        case 'GHA_DASHBOARD_HEIGHT':
+          setDashboardFrameHeight(event.data.height);
+          break;
+        case 'GHA_DASHBOARD_FULLSCREEN':
+          setDashboardFrameFullscreen(event.data.active);
+          break;
+        case 'GHA_DASHBOARD_HINT_OPEN':
+          openDashboardHint(event.data);
+          break;
+        case 'GHA_DASHBOARD_HINT_CLOSE':
+          if (!hostHintState || event.data.id === hostHintState.id) closeDashboardHint(false);
+          break;
       }
     };
 
+    const cleanupOverlayHandlers = () => {
+      closeDashboardHint(false);
+      window.removeEventListener('resize', positionDashboardHint);
+      window.removeEventListener('scroll', positionDashboardHint, true);
+      document.removeEventListener('mousedown', handleHostHintOutsideClick, true);
+    };
+
     window.addEventListener('message', handleDashboardMessage);
+    window.addEventListener('resize', positionDashboardHint);
+    window.addEventListener('scroll', positionDashboardHint, { passive: true, capture: true });
+    document.addEventListener('mousedown', handleHostHintOutsideClick, true);
     iframe._ghaResizeCleanup = () => {
+      cleanupOverlayHandlers();
       window.removeEventListener('message', handleDashboardMessage);
     };
     
@@ -477,38 +653,6 @@
           return Math.max(360, Math.min(720, remainingViewport + 80));
         };
         
-        const updateDashboardViewportMetrics = () => {
-          try {
-            const iframeRect = iframe.getBoundingClientRect();
-            const docEl = iframeDoc.documentElement;
-            const visibleTop = Math.max(0, -iframeRect.top);
-            const visibleBottom = Math.min(iframeRect.height, window.innerHeight - iframeRect.top);
-            const visibleHeight = Math.max(360, visibleBottom - visibleTop);
-            const desiredPopupTop = (window.innerHeight / 2) - iframeRect.top;
-            const popupHeight = Math.min(560, Math.max(240, visibleHeight - 48));
-            const popupHalfHeight = popupHeight / 2;
-            const minPopupTop = visibleTop + popupHalfHeight + 24;
-            const maxPopupTop = visibleBottom - popupHalfHeight - 24;
-            const centeredVisibleTop = visibleTop + visibleHeight / 2;
-            const popupTop = minPopupTop <= maxPopupTop
-              ? Math.min(Math.max(desiredPopupTop, minPopupTop), maxPopupTop)
-              : centeredVisibleTop;
-
-            docEl.style.setProperty('--gha-visible-top', `${visibleTop}px`);
-            docEl.style.setProperty('--gha-visible-height', `${visibleHeight}px`);
-            docEl.style.setProperty('--gha-popup-top', `${popupTop}px`);
-            docEl.style.setProperty('--gha-popup-center-visible-y', `${popupTop - visibleTop}px`);
-          } catch (e) {
-            // Silent fail - the iframe can be removed during GitHub navigation
-          }
-        };
-
-        const handleViewportMetricsRequest = (event) => {
-          if (event.source === iframeWin && event.data?.type === 'GHA_DASHBOARD_VIEWPORT_METRICS_REQUEST') {
-            updateDashboardViewportMetrics();
-          }
-        };
-
         const postThemeToDashboard = () => {
           try {
             iframeWin.postMessage({
@@ -529,7 +673,6 @@
           try {
             const root = iframeDoc.getElementById('root');
             if (!root) return;
-            updateDashboardViewportMetrics();
 
             const dashboard = root.querySelector('.dashboard') || root;
             const rootRect = root.getBoundingClientRect();
@@ -572,12 +715,11 @@
             const nextHeight = Math.ceil(height);
             
             setDashboardFrameHeight(nextHeight);
-            updateDashboardViewportMetrics();
           } catch (e) {
             // Silent fail - element likely removed
           }
         };
-        
+
         // Initial resize after short delay for React to render
         setTimeout(resizeIframe, 500);
         setTimeout(postThemeToDashboard, 100);
@@ -602,26 +744,19 @@
         
         // Resize on window resize
         window.addEventListener('resize', resizeIframe);
-        window.addEventListener('resize', updateDashboardViewportMetrics);
-        window.addEventListener('scroll', updateDashboardViewportMetrics, { passive: true, capture: true });
-        document.addEventListener('scroll', updateDashboardViewportMetrics, { passive: true, capture: true });
-        window.addEventListener('message', handleViewportMetricsRequest);
         window.addEventListener('focus', postThemeToDashboard);
         
         // Periodic check
         const intervalId = setInterval(resizeIframe, 500);
         iframe.dataset.intervalId = intervalId;
         iframe._ghaResizeCleanup = () => {
+          cleanupOverlayHandlers();
           clearInterval(intervalId);
           observer.disconnect();
           if (resizeObserver) {
             resizeObserver.disconnect();
           }
           window.removeEventListener('resize', resizeIframe);
-          window.removeEventListener('resize', updateDashboardViewportMetrics);
-          window.removeEventListener('scroll', updateDashboardViewportMetrics, true);
-          document.removeEventListener('scroll', updateDashboardViewportMetrics, true);
-          window.removeEventListener('message', handleViewportMetricsRequest);
           window.removeEventListener('focus', postThemeToDashboard);
           window.removeEventListener('message', handleDashboardMessage);
         };
