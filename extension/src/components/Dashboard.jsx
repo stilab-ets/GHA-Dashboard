@@ -3841,18 +3841,33 @@ export default function Dashboard() {
                   Workflow trend alerts
                   <InfoIcon explanation={{
                     title: 'Workflow Trend Alerts',
-                    text: (
-                      <>
-                        <p>Fits a trend line across the runs (with valid duration data) in the chosen "Trend window" to detect whether duration (performance) or failure rate (reliability) is generally increasing, and by how much.</p>
-                        <ul className="info-icon-popup-list">
-                          <li><strong>Current selection:</strong> an aggregate alert computed across every workflow currently included by your filters, in addition to each workflow's own alert.</li>
-                          <li><strong>Delta:</strong> the total change the trend line predicts from the start to the end of the window.</li>
-                          <li><strong>Previous:</strong> the trend line's fitted value at the start of the window.</li>
-                          <li><strong>Recent:</strong> the trend line's fitted value at the end of the window.</li>
-                          <li><strong>Window:</strong> how many runs were used for that calculation — this can be lower than the requested window size if the workflow doesn't have that many runs (with valid duration data) yet.</li>
-                        </ul>
-                      </>
-                    )
+                    text: {
+                      paragraphs: [
+                        'Fits a trend line across the runs (with valid duration data) in the chosen "Trend window" to detect whether duration (performance) or failure rate (reliability) is generally increasing, and by how much.'
+                      ],
+                      list: [
+                        {
+                          label: 'Current selection:',
+                          text: ' an aggregate alert computed across every workflow currently included by your filters, in addition to each workflow\'s own alert.'
+                        },
+                        {
+                          label: 'Delta:',
+                          text: ' the total change the trend line predicts from the start to the end of the window.'
+                        },
+                        {
+                          label: 'Previous:',
+                          text: ' the trend line\'s fitted value at the start of the window.'
+                        },
+                        {
+                          label: 'Recent:',
+                          text: ' the trend line\'s fitted value at the end of the window.'
+                        },
+                        {
+                          label: 'Window:',
+                          text: ' how many runs were used for that calculation — this can be lower than the requested window size if the workflow doesn\'t have that many runs (with valid duration data) yet.'
+                        }
+                      ]
+                    }
                   }} />
                 </h3>
               </div>
