@@ -510,11 +510,24 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     # Try to get existing run from cache
                     existing_run = data_manager.get_existing_run(str(run_id))
                     if existing_run:
+                        backfilled_commit_sha = False
+                        incoming_commit_sha = run.get('head_sha') or run.get('commit_sha')
+                        if incoming_commit_sha and not (existing_run.get('commit_sha') or existing_run.get('head_sha')):
+                            existing_run = existing_run.copy()
+                            existing_run['commit_sha'] = incoming_commit_sha
+                            existing_run['head_sha'] = incoming_commit_sha
+                            backfilled_commit_sha = True
+                            if persistence:
+                                try:
+                                    persistence.save_run(repo, existing_run)
+                                    data_manager.update_cache_after_save(run=existing_run)
+                                except Exception as e:
+                                    print(f"[GHAminer Stream] Warning: Failed to backfill commit SHA for run {run_id}: {e}")
                         added_existing_run = upsert_unique_run(all_runs, existing_run, all_run_ids)
                         existing_runs_count += 1
                         total_runs = len(all_runs)
                         display_total = actual_total if actual_total else total_runs
-                        if added_existing_run:
+                        if added_existing_run or backfilled_commit_sha:
                             yield (existing_run, total_runs, display_total, all_runs, new_runs_collected, existing_runs_count)
                     continue
                 
@@ -534,6 +547,7 @@ def stream_workflow_runs_phase1(repo: str, token: str, config: dict = None) -> G
                     'branch': run.get('head_branch'),
                     'head_branch': run.get('head_branch'),
                     'commit_sha': run.get('head_sha'),
+                    'head_sha': run.get('head_sha'),
                     'actor': run.get('actor', {}).get('login') if isinstance(run.get('actor'), dict) else None,
                     'issuer_name': run.get('actor', {}).get('login') if isinstance(run.get('actor'), dict) else None,
                     'job_details': [],  # Empty for now

@@ -234,3 +234,84 @@ def test_phase1_preserves_github_run_commit_sha_without_writing_cache(monkeypatc
 
     assert dashboard_run["commit_sha"] == "abc123"
     assert dashboard_run["head_sha"] == "abc123"
+
+
+def test_send_data_streams_phase2_job_details_per_run(monkeypatch):
+    import json
+
+    from analysis import endpoint as endpoint_module
+    from data import persistence as persistence_module
+
+    class WebSocketStub:
+        def __init__(self):
+            self.messages = []
+            self.closed = False
+
+        def send(self, payload):
+            self.messages.append(json.loads(payload))
+
+        def close(self):
+            self.closed = True
+
+    class PersistenceStub:
+        def get_all_runs(self, repo):
+            return {}
+
+    def fake_phase1(repo, token, config):
+        all_runs = [
+            {
+                "id": 101,
+                "workflow_id": 10,
+                "workflow_name": "CI",
+                "created_at": "2026-06-02T10:00:00Z",
+                "jobs": [],
+            },
+            {
+                "id": 202,
+                "workflow_id": 10,
+                "workflow_name": "CI",
+                "created_at": "2026-06-03T10:00:00Z",
+                "jobs": [],
+            },
+        ]
+
+        for index, run in enumerate(all_runs, start=1):
+            yield run, index, len(all_runs), all_runs, index, 0
+
+    def fake_phase2(repo, token, all_runs, config):
+        yield {
+            **all_runs[0],
+            "jobs": [{"name": "build", "conclusion": "success", "duration": 12}],
+        }, 1, 2
+        yield {
+            **all_runs[1],
+            "jobs": [{"name": "test", "conclusion": "failure", "duration": 21}],
+        }, 2, 2
+
+    monkeypatch.setattr(endpoint_module, "GEVENT_AVAILABLE", True)
+    monkeypatch.setattr(endpoint_module, "spawn", lambda *args, **kwargs: object(), raising=False)
+    monkeypatch.setattr(endpoint_module, "load_config", lambda: {})
+    monkeypatch.setattr(endpoint_module, "stream_workflow_runs_phase1", fake_phase1)
+    monkeypatch.setattr(endpoint_module, "stream_job_details_phase2", fake_phase2)
+    monkeypatch.setattr(persistence_module, "DataPersistence", PersistenceStub)
+
+    ws = WebSocketStub()
+    filters = endpoint_module.AggregationFilters(fetchJobDetails=True)
+
+    endpoint_module.send_data(ws, "owner/repo", filters, token="token")
+
+    phase2_run_messages = [
+        message
+        for message in ws.messages
+        if message.get("type") == "runs" and message.get("phase") == "jobs"
+    ]
+    progress_messages = [
+        message
+        for message in ws.messages
+        if message.get("type") == "job_progress"
+    ]
+
+    assert [message["data"][0]["id"] for message in phase2_run_messages] == [101, 202]
+    assert all(len(message["data"]) == 1 for message in phase2_run_messages)
+    assert [message["runs_processed"] for message in progress_messages] == [1, 2]
+    assert ws.closed is True
