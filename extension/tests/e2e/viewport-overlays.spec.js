@@ -1,70 +1,16 @@
 const { test, expect } = require('../fixtures');
+const {
+  popupLogin,
+  openDashboard
+} = require('./utils');
 
-const REPOSITORY_URL = 'https://github.com/AUTOMATIC1111/stable-diffusion-webui';
-
-async function openDashboard(page) {
-  await page.goto(REPOSITORY_URL);
-  await page.locator('#gha-dashboard-nav-button').click();
-  await expect(page.locator('#gha-dashboard-iframe')).toBeVisible();
-  await expect(page.frameLocator('#gha-dashboard-iframe').locator('#root')).toBeVisible();
-}
-
-function createDashboardRuns() {
-  return Array.from({ length: 4 }, (_, index) => {
-    const createdAt = new Date(Date.now() - (index + 1) * 24 * 60 * 60 * 1000).toISOString();
-    return {
-      id: index + 1,
-      workflow_id: 101,
-      workflow_name: 'Viewport test workflow',
-      branch: 'main',
-      actor: 'viewport-test',
-      event: 'push',
-      conclusion: index === 2 ? 'failure' : 'success',
-      status: 'completed',
-      created_at: createdAt,
-      updated_at: createdAt,
-      duration: 30 + index * 10,
-      run_number: index + 1,
-      jobs: []
-    };
-  });
-}
-
-async function seedDashboardRuns(context, extensionId, runs) {
-  const storagePage = await context.newPage();
-  await storagePage.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
-
-  await storagePage.evaluate(({ repo }) => new Promise(resolve => {
-    chrome.storage.local.set({
-      wsStatus: {
-        repo,
-        isStreaming: false,
-        isComplete: true,
-        totalRuns: 0
-      }
-    }, resolve);
-  }), { repo: 'AUTOMATIC1111/stable-diffusion-webui' });
-
-  // Give the extension storage listener a first change to populate its
-  // repository cache before the dashboard receives the final run set.
-  await storagePage.evaluate(({ runs }) => new Promise(resolve => {
-    chrome.storage.local.set({ wsRuns: runs.slice(0, -1) }, resolve);
-  }), { runs });
-  await storagePage.waitForTimeout(250);
-  await storagePage.evaluate(({ runs }) => new Promise(resolve => {
-    chrome.storage.local.set({ wsRuns: runs }, resolve);
-  }), { runs });
-
-  await storagePage.close();
-}
-
-test('hint popup stays fully inside the browser viewport after page scrolling', async ({ context }) => {
-  const page = await context.newPage();
+test('hint popup stays fully inside the browser viewport after page scrolling', async ({ context, extensionId }) => {
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
+  
   const viewport = { width: 900, height: 520 };
-  await openDashboard(page);
   await page.setViewportSize(viewport);
 
-  const frame = page.frameLocator('#gha-dashboard-iframe');
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await frame.locator('body').evaluate(() => {
     window.parent.postMessage({
@@ -97,14 +43,14 @@ test('hint popup stays fully inside the browser viewport after page scrolling', 
   await expect(popup).toHaveCount(0);
 });
 
-test('fullscreen iframe remains viewport-fixed and returns without clipping the dashboard', async ({ context }) => {
-  const page = await context.newPage();
+test('fullscreen iframe remains viewport-fixed and returns without clipping the dashboard', async ({ context, extensionId }) => {
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
+
   const viewport = { width: 1000, height: 640 };
-  await openDashboard(page);
   await page.setViewportSize(viewport);
 
   const iframe = page.locator('#gha-dashboard-iframe');
-  const frame = page.frameLocator('#gha-dashboard-iframe');
   const originalStyle = await iframe.evaluate(element => ({
     width: element.style.width,
     position: getComputedStyle(element).position
@@ -168,14 +114,13 @@ test('fullscreen iframe remains viewport-fixed and returns without clipping the 
 });
 
 test('real KPI chart popup stays centered after page scrolling', async ({ context, extensionId }) => {
-  const page = await context.newPage();
+  await popupLogin(context, extensionId);
+  const { frame, page } = await openDashboard(context);
+
   const viewport = { width: 1200, height: 800 };
-  await openDashboard(page);
   await page.setViewportSize(viewport);
 
-  const frame = page.frameLocator('#gha-dashboard-iframe');
-  await expect(frame.getByRole('button', { name: /start data collection/i })).toBeVisible();
-  await seedDashboardRuns(context, extensionId, createDashboardRuns());
+  await frame.getByRole('button', { name: /start data collection/i }).click();;
 
   await expect(frame.getByText('Filtered runs', { exact: true })).toBeVisible();
   const openChartButton = frame.getByRole('button', { name: 'Open chart popup' }).first();
