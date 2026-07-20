@@ -5,6 +5,7 @@ import {
   countRunDurationOutliers,
   getValidRunDuration,
   isRunDurationOutlier,
+  isWorkflowYamlFile,
   MAX_VALID_RUN_DURATION_SECONDS,
   sanitizeRunDurationForDashboard,
 } from '../../src/durationFilters.mjs';
@@ -48,4 +49,10 @@ test('outlier count ignores missing and zero durations', () => {
   ];
 
   assert.equal(countRunDurationOutliers(runs), 1);
+});
+
+test('workflow YAML changes are recognized separately from other YAML files', () => {
+  assert.equal(isWorkflowYamlFile('.github/workflows/ci.yml'), true);
+  assert.equal(isWorkflowYamlFile('.github/workflows/release.yaml'), true);
+  assert.equal(isWorkflowYamlFile('backend/config.yaml'), false);
 });

@@ -524,6 +524,64 @@ def get_workflows(repositoryName: str):
 
 
 # ============================================
+# Commit Files Endpoint
+# ============================================
+@app.get("/api/commit-files/<owner>/<repo>/<commit_sha>")
+def get_commit_files(owner: str, repo: str, commit_sha: str):
+    """
+    Return the paths changed by a commit.
+
+    The dashboard uses this endpoint only after it has detected a potential
+    duration degradation. Keeping the GitHub request on the backend prevents
+    the extension from needing to call the GitHub API directly.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else None
+    if not token and os.getenv("ALLOW_ENV_GITHUB_TOKEN_FALLBACK") == "1":
+        token = os.getenv("GITHUB_TOKEN")
+
+    if not token:
+        return jsonify({"error": "GitHub token required to load commit files"}), 401
+
+    repository = f"{owner}/{repo}"
+    if not owner or not repo or "/" in owner or "/" in repo or not commit_sha:
+        return jsonify({"error": "Invalid repository or commit format"}), 400
+
+    try:
+        response = requests.get(
+            f"https://api.github.com/repos/{repository}/commits/{commit_sha}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+            timeout=15,
+        )
+
+        if response.status_code == 404:
+            return jsonify({"error": "Commit not found"}), 404
+        if response.status_code >= 400:
+            return jsonify({
+                "error": "Unable to load commit files",
+                "status": response.status_code,
+            }), response.status_code
+
+        payload = response.json()
+        files = [
+            file_info.get("filename")
+            for file_info in payload.get("files", [])
+            if isinstance(file_info, dict) and file_info.get("filename")
+        ]
+
+        return jsonify({
+            "repo": repository,
+            "commitSha": commit_sha,
+            "files": files,
+        }), 200
+    except requests.RequestException as e:
+        return jsonify({"error": str(e)}), 502
+
+
+# ============================================
 # Data Check Endpoint
 # ============================================
 @app.route("/api/data/check/<path:repositoryName>")
