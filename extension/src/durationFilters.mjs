@@ -1,4 +1,4 @@
-export const MAX_DAYS = 5;
+export const MAX_DAYS = 399;
 export const MAX_VALID_RUN_DURATION_SECONDS = MAX_DAYS * 24 * 60 * 60;
 
 export function normalizeDurationSeconds(value) {

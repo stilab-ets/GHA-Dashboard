@@ -123,6 +123,16 @@
         font-size: 14px;
         font-weight: 800;
       }
+      #gha-dashboard-hint-popup .gha-dashboard-hint-text p {
+        margin: 0 0 8px;
+      }
+      #gha-dashboard-hint-popup .gha-dashboard-hint-text ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+      #gha-dashboard-hint-popup .gha-dashboard-hint-text li {
+        margin: 4px 0;
+      }
       #gha-dashboard-hint-popup .gha-dashboard-hint-close {
         position: absolute;
         top: 6px;
@@ -499,6 +509,40 @@
       }
     };
 
+    const renderHintText = (value) => {
+      const text = document.createElement('div');
+      text.className = 'gha-dashboard-hint-text';
+
+      if (typeof value === 'string') {
+        text.textContent = value;
+        return text;
+      }
+
+      if (!value || typeof value !== 'object') return text;
+
+      (Array.isArray(value.paragraphs) ? value.paragraphs : []).forEach((paragraph) => {
+        const element = document.createElement('p');
+        element.textContent = String(paragraph);
+        text.appendChild(element);
+      });
+
+      if (Array.isArray(value.list)) {
+        const list = document.createElement('ul');
+        value.list.forEach((item) => {
+          if (!item || typeof item !== 'object') return;
+
+          const listItem = document.createElement('li');
+          const label = document.createElement('strong');
+          label.textContent = String(item.label || '');
+          listItem.append(label, document.createTextNode(String(item.text || '')));
+          list.appendChild(listItem);
+        });
+        text.appendChild(list);
+      }
+
+      return text;
+    };
+
     const openDashboardHint = (data) => {
       if (!data?.anchor || !data?.id) return;
 
@@ -519,8 +563,7 @@
       title.className = 'gha-dashboard-hint-title';
       title.textContent = data.explanation?.title || 'Information';
 
-      const text = document.createElement('div');
-      text.textContent = data.explanation?.text || '';
+      const text = renderHintText(data.explanation?.text);
 
       const closeButton = document.createElement('button');
       closeButton.type = 'button';

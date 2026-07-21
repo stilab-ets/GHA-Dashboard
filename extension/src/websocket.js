@@ -10,6 +10,7 @@ import {
   getValidRunDuration,
   sanitizeRunDurationForDashboard
 } from './durationFilters.mjs';
+import { analyzeWorkflowNegativeTrends } from './trendAnalysis.mjs';
 import { detectFlakyTests } from './flakyTests.mjs';
 
 function formatTodayForFilter() {
@@ -725,6 +726,13 @@ export function convertRunsToDashboard(runs, repo, filters) {
       branchStatsGrouped: [],
       eventStats: [],
       timeToFix: [],
+      negativeTrendAnalysis: {
+        alerts: [],
+        hasDegradation: false,
+        workflowsAnalyzed: 0,
+        runsAnalyzed: 0,
+        insufficientData: true
+      },
       rawRuns: [],
       workflows: ['all'],
       branches: ['all'],
@@ -803,6 +811,9 @@ export function convertRunsToDashboard(runs, repo, filters) {
   const eventStats = calculateEventStats(filteredRuns);
   const contributorStats = calculateContributorStats(filteredRuns);
   const timeToFix = calculateTimeToFix(filteredRuns);
+  const negativeTrendAnalysis = analyzeWorkflowNegativeTrends(filteredRuns, {
+    windowSize: filters?.trendWindowSize ?? null
+  });
 
   // Status breakdown
   const statusBreakdown = [
@@ -867,6 +878,7 @@ export function convertRunsToDashboard(runs, repo, filters) {
     eventStats: eventStats,
     contributorStats: contributorStats,
     timeToFix: timeToFix,
+    negativeTrendAnalysis,
     topFailedWorkflows,
     failureDurationOverTime,
     rawRuns: rawRunsForDashboard,

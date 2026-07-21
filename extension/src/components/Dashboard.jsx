@@ -27,9 +27,17 @@ import {
 } from 'recharts';
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3', '#9c27b0', '#00bcd4'];
-const SHOW_OVERALL_HEALTH_CHECK = false;
+const SHOW_OVERALL_HEALTH_CHECK = true;
 const ALL_TIME_START_DATE = '2000-01-01';
 const ALL_TIME_END_DATE = '2100-01-01';
+const DEFAULT_TREND_WINDOW_SIZE = 10;
+// null represents "all runs in the selected period" (previous behavior).
+const TREND_WINDOW_PRESETS = [
+  { label: 'All runs in period', value: null },
+  { label: 'Last 10 runs', value: 10 },
+  { label: 'Last 20 runs', value: 20 },
+  { label: 'Last 50 runs', value: 50 }
+];
 
 function UIIcon({ name }) {
   const icons = {
@@ -338,6 +346,26 @@ function formatDuration(seconds) {
   return formatTimeValue(seconds);
 }
 
+// Unlike formatDuration (which rounds to whole minutes/hours for the compact
+// stat cards), this keeps minute+second precision so trend alert values
+// stay internally consistent — e.g. "2m 5s" and "2m 38s" instead of both
+// rounding down to "2m" and "3m", which would make Recent - Previous look
+// like it disagrees with the Delta column.
+function formatTrendDuration(seconds) {
+  const safeSeconds = Math.max(0, Math.round(seconds || 0));
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+
+  if (safeSeconds < 3600) {
+    const minutes = Math.floor(safeSeconds / 60);
+    const remainingSeconds = safeSeconds % 60;
+    return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(safeSeconds / 3600);
+  const remainingMinutes = Math.floor((safeSeconds % 3600) / 60);
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
 function formatDateForInput(d) {
   const pad = (n) => String(n).padStart(2, '0');
   const year = d.getFullYear();
@@ -477,7 +505,10 @@ export default function Dashboard() {
     branch: ['all'],
     actor: ['all'],
     start: defaultStart,
-    end: defaultEnd
+    end: defaultEnd,
+    // Number of most recent runs to compare against the previous window when
+    // looking for trend degradations; null means "all runs in the selected period".
+    trendWindowSize: DEFAULT_TREND_WINDOW_SIZE
   });
   const defaultCollectionScope = {
     start: defaultStart,
@@ -655,8 +686,10 @@ export default function Dashboard() {
   const [openDropdowns, setOpenDropdowns] = useState({
     workflow: false,
     branch: false,
-    actor: false
+    actor: false,
+    trendWindow: false
   });
+  const [trendWindowCustomInput, setTrendWindowCustomInput] = useState('');
   const [collectionWorkflowDropdownOpen, setCollectionWorkflowDropdownOpen] = useState(false);
 
   const [activeStatsTab, setActiveStatsTab] = useState('workflows');
@@ -695,7 +728,8 @@ export default function Dashboard() {
   const dropdownRefs = {
     workflow: useRef(null),
     branch: useRef(null),
-    actor: useRef(null)
+    actor: useRef(null),
+    trendWindow: useRef(null)
   };
   const datePickerRef = useRef(null);
   const collectionDatePickerRef = useRef(null);
@@ -1216,7 +1250,7 @@ export default function Dashboard() {
   };
 
   // Load existing data from cache
-  const loadExistingData = async (repo, scope = getCollectionScope()) => {
+  const loadExistingData = async (repo, scope = getCollectionScope(), explicitFilters = null) => {
     if (!repo) return false;
 
     try {
@@ -1247,7 +1281,7 @@ export default function Dashboard() {
 
           // Now process the runs into dashboard format
           // Use convertRunsToDashboard directly (no dependency on _runsByRepo)
-          const processedData = await processRunsToDashboardFormat(result.runs, repo, scope);
+          const processedData = await processRunsToDashboardFormat(result.runs, repo, scope, explicitFilters);
 
           if (processedData) {
             console.log('[Dashboard] Processed data successfully:', processedData.totalRuns, 'runs');
@@ -1272,7 +1306,7 @@ export default function Dashboard() {
   };
 
   // Process runs into dashboard format using convertRunsToDashboard directly
-  const processRunsToDashboardFormat = async (runs, repo = null, scope = getCollectionScope()) => {
+  const processRunsToDashboardFormat = async (runs, repo = null, scope = getCollectionScope(), explicitFilters = null) => {
     if (!runs || runs.length === 0) {
       console.log('[Dashboard] processRunsToDashboardFormat: No runs provided');
       return null;
@@ -1306,16 +1340,28 @@ export default function Dashboard() {
     // Use convertRunsToDashboard directly instead of filterRunsLocally
     // This avoids the dependency on _runsByRepo being populated
     const { start: startDate, end: endDate, workflowIds } = scopedFilters;
-
-    try {
-      const dashboardData = convertRunsToDashboard(scopedRuns, repoToUse, {
+    const dashboardFilters = explicitFilters
+      ? {
+        workflow: explicitFilters.workflow || ['all'],
+        branch: explicitFilters.branch || ['all'],
+        actor: explicitFilters.actor || ['all'],
+        startDate: explicitFilters.start || explicitFilters.startDate || startDate,
+        endDate: explicitFilters.end || explicitFilters.endDate || endDate,
+        workflowIds: explicitFilters.workflowIds ?? workflowIds,
+        trendWindowSize: explicitFilters.trendWindowSize ?? filters.trendWindowSize
+      }
+      : {
         workflow: ['all'],
         branch: ['all'],
         actor: ['all'],
-        startDate: startDate,
-        endDate: endDate,
-        workflowIds
-      });
+        startDate,
+        endDate,
+        workflowIds,
+        trendWindowSize: filters.trendWindowSize
+      };
+
+    try {
+      const dashboardData = convertRunsToDashboard(scopedRuns, repoToUse, dashboardFilters);
 
       if (dashboardData) {
         console.log(`[Dashboard] Successfully converted to dashboard format: ${dashboardData.totalRuns} runs`);
@@ -1430,7 +1476,7 @@ export default function Dashboard() {
       setCurrentRepo(repo);
       console.log('[Dashboard] Using repo:', repo);
 
-      let shouldRefreshAfterCache = Boolean(options.forceRefresh ?? collectMore);
+      let shouldRefreshAfterCache = Boolean(collectMore || options.forceRefresh);
 
       // Preserve existing date filters when starting new collection
       // Only initialize defaults if filters haven't been set yet
@@ -1526,6 +1572,23 @@ export default function Dashboard() {
       });
 
       const finalData = await fetchDashboardDataViaWebSocket(repo, wsFilters, onProgress);
+      const finalFilters = {
+        workflow: localFilters.workflow || filters.workflow,
+        branch: filters.branch,
+        actor: filters.actor,
+        start: dateFiltersRef.current.start,
+        end: dateFiltersRef.current.end,
+        workflowIds: collectionScope.workflowIds
+      };
+      const finalFilteredData = applyLocalFiltersWithFilters(finalData, finalFilters);
+
+      if (finalFilteredData) {
+        syncAvailableFiltersFromData(finalData);
+        setData(finalFilteredData);
+      }
+
+      await loadExistingData(repo, collectionScope, finalFilters);
+
       setLoading(false);
       setDataLoaded(true);
       setProgress(prev => ({
@@ -1597,7 +1660,8 @@ export default function Dashboard() {
       actor: filters.actor,
       startDate: activeDateRange.start,
       endDate: activeDateRange.end,
-      workflowIds: getAppliedCollectionScope().workflowIds
+      workflowIds: getAppliedCollectionScope().workflowIds,
+      trendWindowSize: filters.trendWindowSize
     };
 
     const filtered = filterRunsLocally(filterValues, rawData.repo || currentRepo);
@@ -1625,7 +1689,8 @@ export default function Dashboard() {
       actor: explicitFilters.actor || filters.actor,
       startDate: explicitFilters.start || filters.start,
       endDate: explicitFilters.end || filters.end,
-      workflowIds: explicitFilters.workflowIds || getAppliedCollectionScope().workflowIds
+      workflowIds: explicitFilters.workflowIds || getAppliedCollectionScope().workflowIds,
+      trendWindowSize: explicitFilters.trendWindowSize ?? filters.trendWindowSize
     }, rawData.repo || currentRepo);
 
     if (filtered) {
@@ -1743,7 +1808,8 @@ export default function Dashboard() {
           actor: filters.actor,
           startDate: activeDateRange.start,
           endDate: activeDateRange.end,
-          workflowIds: getAppliedCollectionScope().workflowIds
+          workflowIds: getAppliedCollectionScope().workflowIds,
+          trendWindowSize: filters.trendWindowSize
         }, currentRepo);
 
         if (filtered) {
@@ -1857,7 +1923,8 @@ export default function Dashboard() {
         actor: filters.actor,
         startDate: filters.start,
         endDate: filters.end,
-        workflowIds: getAppliedCollectionScope().workflowIds
+        workflowIds: getAppliedCollectionScope().workflowIds,
+        trendWindowSize: filters.trendWindowSize
       }, currentRepo);
 
       if (filtered) {
@@ -1883,6 +1950,7 @@ export default function Dashboard() {
     filters.workflow,
     filters.branch,
     filters.actor,
+    filters.trendWindowSize,
     appliedCollectionScope,
     currentRepo,
     dataExists,
@@ -2250,7 +2318,7 @@ export default function Dashboard() {
         <div className="collection-start-actions">
           <button
             className="primary-action primary-action-large"
-            onClick={() => loadDashboardData(false)}
+            onClick={() => loadDashboardData(false, { forceRefresh: true })}
             type="button"
             disabled={workflowOptionsLoading}
           >
@@ -2299,7 +2367,7 @@ export default function Dashboard() {
           {error}
         </p>
         <div className="dashboard-error-actions">
-          <button className="primary-action" onClick={() => loadDashboardData(false)} type="button">Retry</button>
+          <button className="primary-action" onClick={() => loadDashboardData(false, { forceRefresh: true })} type="button">Retry</button>
         </div>
       </div>
     </div>
@@ -2347,6 +2415,7 @@ export default function Dashboard() {
     eventStats = [],
     contributorStats = [],
     timeToFix = [],
+    negativeTrendAnalysis = {},
     topFailedWorkflows = [],
     failureDurationOverTime = [],
     rawRuns = []
@@ -2389,7 +2458,7 @@ export default function Dashboard() {
         workflowIds,
       },
       refreshWorkflowIds,
-      forceRefresh: refreshWorkflowIds.length > 0,
+      forceRefresh: true,
       localFilters: {
         workflow: workflowFilter,
       },
@@ -3085,6 +3154,46 @@ export default function Dashboard() {
   const filteredRunsDetailNote = excludedOutlierRuns > 0
     ? `${filteredRunsNote}; ${excludedOutlierRuns} duration outliers excluded from duration KPIs`
     : filteredRunsNote;
+  const trendAlerts = Array.isArray(negativeTrendAnalysis.alerts)
+    ? negativeTrendAnalysis.alerts
+    : [];
+  const trendSummaryTone = trendAlerts.some(alert => alert.severity === 'danger')
+    ? 'danger'
+    : trendAlerts.length > 0
+      ? 'warning'
+      : 'info';
+  const workflowFilterValues = Array.isArray(filters.workflow) ? filters.workflow : ['all'];
+  const selectedWorkflowCount = workflowFilterValues.filter(workflow => workflow !== 'all').length;
+  const trendScopeLabel = !selectedWorkflowCount || workflowFilterValues.includes('all')
+    ? 'All workflows'
+    : `${selectedWorkflowCount} selected workflow${selectedWorkflowCount > 1 ? 's' : ''}`;
+  const trendWindowSize = filters.trendWindowSize ?? null;
+  const trendWindowPreset = TREND_WINDOW_PRESETS.find(preset => preset.value === trendWindowSize);
+  const trendWindowLabel = trendWindowPreset
+    ? trendWindowPreset.label
+    : `Last ${trendWindowSize} runs`;
+  const setTrendWindowSize = (value) => {
+    setFilters(prev => ({ ...prev, trendWindowSize: value }));
+    setOpenDropdowns(prev => ({ ...prev, trendWindow: false }));
+  };
+  const applyCustomTrendWindowSize = () => {
+    const parsed = Number(trendWindowCustomInput);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      setTrendWindowSize(Math.floor(parsed));
+      setTrendWindowCustomInput('');
+    }
+  };
+  const formatTrendMetricValue = (alert, value) => (
+    alert.unit === 'percent'
+      ? `${Math.round(value || 0)}%`
+      : formatTrendDuration(value || 0)
+  );
+  const formatTrendDeltaValue = (alert) => {
+    const delta = Math.round(alert.delta || 0);
+    return alert.unit === 'percent'
+      ? `+${delta} pts`
+      : `+${formatTrendDuration(delta)}`;
+  };
   const chartAxisColor = dashboardTheme === 'light' ? '#667085' : '#bcd';
   const chartGridColor = dashboardTheme === 'light' ? '#98a2b3' : '#122';
   const maxDurationColor = dashboardTheme === 'light' ? '#d97706' : '#ffd54a';
@@ -3135,29 +3244,6 @@ export default function Dashboard() {
             ) : (
               <button className="cancel-action" type="button" onClick={cancelCollection}>Cancel collection</button>
             )}
-          </section>
-        )}
-
-        {/* TODO: Re-enable once the Overall health check implementation is ready. */}
-        {SHOW_OVERALL_HEALTH_CHECK && (
-          <section className="overall-health-section card" aria-label="Overall health check">
-            <div className="overall-health-header">
-              <div>
-                <p className="eyebrow">Overall health check</p>
-                <h3>Workflow health summary</h3>
-              </div>
-            </div>
-            <div className="overall-health-grid">
-              <div className="overall-health-card overall-health-warning" aria-label="Duration worsening warning placeholder">
-                <h4>Warnings</h4>
-              </div>
-              <div className="overall-health-card overall-health-danger" aria-label="Failure rate warning placeholder">
-                <h4>Failures</h4>
-              </div>
-              <div className="overall-health-card overall-health-info" aria-label="Workflow status summary placeholder">
-                <h4>Overall health</h4>
-              </div>
-            </div>
           </section>
         )}
 
@@ -3745,6 +3831,190 @@ export default function Dashboard() {
                 )}
           </div>
         </div>
+
+        {SHOW_OVERALL_HEALTH_CHECK && (
+          <section className="overall-health-section" aria-label="Overall health check">
+            <div className="overall-health-header">
+              <div>
+                <p className="eyebrow">Overall health check</p>
+                <h3>
+                  Workflow trend alerts
+                  <InfoIcon explanation={{
+                    title: 'Workflow Trend Alerts',
+                    text: {
+                      paragraphs: [
+                        'Fits a trend line across the runs (with valid duration data) in the chosen "Trend window" to detect whether duration (performance) or failure rate (reliability) is generally increasing, and by how much.'
+                      ],
+                      list: [
+                        {
+                          label: 'Current selection:',
+                          text: ' an aggregate alert computed across every workflow currently included by your filters, in addition to each workflow\'s own alert.'
+                        },
+                        {
+                          label: 'Delta:',
+                          text: ' the total change the trend line predicts from the start to the end of the window.'
+                        },
+                        {
+                          label: 'Previous:',
+                          text: ' the trend line\'s fitted value at the start of the window.'
+                        },
+                        {
+                          label: 'Recent:',
+                          text: ' the trend line\'s fitted value at the end of the window.'
+                        },
+                        {
+                          label: 'Window:',
+                          text: ' how many runs were used for that calculation — this can be lower than the requested window size if the workflow doesn\'t have that many runs (with valid duration data) yet.'
+                        }
+                      ]
+                    }
+                  }} />
+                </h3>
+              </div>
+
+              <div className="overall-health-header-controls">
+                <div className="filter-group trend-window-group" ref={dropdownRefs.trendWindow}>
+                  <label>Trend window</label>
+                  <div className="dropdown-container">
+                    <button
+                      className="dropdown-toggle"
+                      type="button"
+                      aria-expanded={openDropdowns.trendWindow}
+                      onClick={() => setOpenDropdowns(prev => ({ ...prev, trendWindow: !prev.trendWindow }))}
+                    >
+                      {trendWindowLabel}
+                      <span className="dropdown-arrow">▼</span>
+                    </button>
+
+                    {openDropdowns.trendWindow && (
+                      <div className="dropdown-menu">
+                        {TREND_WINDOW_PRESETS.map(preset => (
+                          <label key={String(preset.value)} className="dropdown-item">
+                            <input
+                              type="radio"
+                              name="trendWindowSize"
+                              checked={trendWindowSize === preset.value}
+                              onChange={() => setTrendWindowSize(preset.value)}
+                            />
+                            <span>{preset.label}</span>
+                          </label>
+                        ))}
+
+                        <label className="dropdown-item trend-window-custom-item">
+                          <input
+                            type="radio"
+                            name="trendWindowSize"
+                            checked={!trendWindowPreset}
+                            onChange={() => {}}
+                          />
+                          <span>Custom:</span>
+                          <input
+                            type="number"
+                            min="1"
+                            className="trend-window-custom-input"
+                            placeholder="e.g. 30"
+                            value={trendWindowCustomInput}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setTrendWindowCustomInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') applyCustomTrendWindowSize();
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="trend-window-custom-apply"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              applyCustomTrendWindowSize();
+                            }}
+                          >
+                            Apply
+                          </button>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className={`overall-health-status overall-health-status-${trendSummaryTone}`}>
+                  {trendAlerts.length > 0
+                    ? `${trendAlerts.length} degradation${trendAlerts.length > 1 ? 's' : ''} detected`
+                    : 'No degradation detected'}
+                </div>
+              </div>
+            </div>
+
+            {trendAlerts.length > 0 ? (
+              <div className={`overall-health-alert-frame overall-health-alert-frame-${trendSummaryTone}`}>
+                <ul className="trend-alert-list" aria-label="Detected workflow degradations">
+                  {trendAlerts.map(alert => (
+                    <li
+                      key={alert.id}
+                      className={`trend-alert-row trend-alert-row-${alert.severity}`}
+                      aria-label={`${alert.title} for ${alert.workflowName}`}
+                    >
+                      <span className={`trend-alert-indicator trend-alert-indicator-${alert.severity}`} aria-hidden="true" />
+                      <div className="trend-alert-main">
+                        <div className="trend-alert-title-line">
+                          <strong>{alert.title}</strong>
+                          <span>{alert.type}</span>
+                        </div>
+                        <p>{alert.summary}</p>
+                        <small>
+                          {alert.workflowName}
+                          {alert.firstRunDate && alert.latestRunDate
+                            ? `, ${alert.firstRunDate} to ${alert.latestRunDate}`
+                            : alert.latestRunDate
+                              ? `, latest ${alert.latestRunDate}`
+                              : ''}
+                        </small>
+                        {alert.isCapped && (
+                          <small className="trend-alert-capped-note">
+                            Requested last {alert.requestedWindowSize} runs, but only {alert.availableRunsTotal} runs (with valid duration data) exist for this workflow — showing trend for those {alert.availableRunsTotal}.
+                          </small>
+                        )}
+                      </div>
+                      <dl className="trend-alert-row-metrics">
+                        <div>
+                          <dt>Delta</dt>
+                          <dd className={`trend-alert-delta trend-alert-delta-${alert.severity}`}>
+                            {formatTrendDeltaValue(alert)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Previous</dt>
+                          <dd>{formatTrendMetricValue(alert, alert.previousValue)}</dd>
+                        </div>
+                        <div>
+                          <dt>Recent</dt>
+                          <dd>{formatTrendMetricValue(alert, alert.recentValue)}</dd>
+                        </div>
+                        <div>
+                          <dt>Window</dt>
+                          <dd>
+                            {alert.runCount} runs
+                            {alert.isCapped && (
+                              <span className="trend-alert-window-split"> (max {alert.availableRunsTotal})</span>
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="overall-health-empty overall-health-info">
+                <strong>No degradation detected.</strong>
+                <span>
+                  {negativeTrendAnalysis.insufficientData
+                    ? `More historical runs are needed for ${trendScopeLabel}.`
+                    : `${trendScopeLabel} is stable across ${negativeTrendAnalysis.runsAnalyzed || 0} runs.`}
+                </span>
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Stats */}
         <div className="stats-row">
