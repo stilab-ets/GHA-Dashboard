@@ -3865,39 +3865,41 @@ export default function Dashboard() {
             <div className={`overall-health-header${healthCheckCollapsed ? ' overall-health-header-collapsed' : ''}`}>
               <div>
                 <p className="eyebrow">Overall health check</p>
-                <h3>
-                  Workflow trend alerts
-                  <InfoIcon explanation={{
-                    title: 'Workflow Trend Alerts',
-                    text: {
-                      paragraphs: [
-                        'Fits a trend line across the runs (with valid duration data) in the chosen "Trend window" to detect whether duration (performance) or failure rate (reliability) is generally increasing, and by how much.'
-                      ],
-                      list: [
-                        {
-                          label: 'Current selection:',
-                          text: ' an aggregate alert computed across every workflow currently included by your filters, in addition to each workflow\'s own alert.'
-                        },
-                        {
-                          label: 'Delta:',
-                          text: ' the total change the trend line predicts from the start to the end of the window.'
-                        },
-                        {
-                          label: 'Previous:',
-                          text: ' the trend line\'s fitted value at the start of the window.'
-                        },
-                        {
-                          label: 'Recent:',
-                          text: ' the trend line\'s fitted value at the end of the window.'
-                        },
-                        {
-                          label: 'Window:',
-                          text: ' how many runs were used for that calculation — this can be lower than the requested window size if the workflow doesn\'t have that many runs (with valid duration data) yet.'
-                        }
-                      ]
-                    }
-                  }} />
-                </h3>
+                {!healthCheckCollapsed && (
+                  <h3>
+                    Workflow trend alerts
+                    <InfoIcon explanation={{
+                      title: 'Workflow Trend Alerts',
+                      text: {
+                        paragraphs: [
+                          'Fits a trend line across the runs (with valid duration data) in the chosen "Trend window" to detect whether duration (performance) or failure rate (reliability) is generally increasing, and by how much.'
+                        ],
+                        list: [
+                          {
+                            label: 'Current selection:',
+                            text: ' an aggregate alert computed across every workflow currently included by your filters, in addition to each workflow\'s own alert.'
+                          },
+                          {
+                            label: 'Delta:',
+                            text: ' the total change the trend line predicts from the start to the end of the window.'
+                          },
+                          {
+                            label: 'Previous:',
+                            text: ' the trend line\'s fitted value at the start of the window.'
+                          },
+                          {
+                            label: 'Recent:',
+                            text: ' the trend line\'s fitted value at the end of the window.'
+                          },
+                          {
+                            label: 'Window:',
+                            text: ' how many runs were used for that calculation — this can be lower than the requested window size if the workflow doesn\'t have that many runs (with valid duration data) yet.'
+                          }
+                        ]
+                      }
+                    }} />
+                  </h3>
+                )}
               </div>
 
               <div className="overall-health-header-controls">
