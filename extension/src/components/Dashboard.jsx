@@ -4061,16 +4061,25 @@ export default function Dashboard() {
                     Workflow health score
                     <InfoIcon explanation={{
                       title: 'Workflow Health Score',
-                      text: (
-                        <>
-                          <p>A 0-100 score summarizing how healthy each workflow (and the current selection as a whole) is, based only on the metrics available.</p>
-                          <ul className="info-icon-popup-list">
-                            <li><strong>Base:</strong> the workflow's success rate, as a percentage. Example: 95% successful runs starts at a score of 95.</li>
-                            <li><strong>Trend penalty:</strong> points are subtracted if "Workflow trend alerts" detects a degradation for that same workflow — 10 points for a warning-severity trend, 20 points for a danger-severity trend (only the bigger one applies if both are detected). Example: that 95 becomes 85 with a warning-level degradation, or 75 with a danger-level one. No penalty is applied when there isn't enough history to check for a trend.</li>
-                            <li><strong>Color:</strong> green at 90 and above, orange from 70 to 89, red below 70.</li>
-                          </ul>
-                        </>
-                      )
+                      text: {
+                        paragraphs: [
+                          'A 0-100 score summarizing how healthy each workflow (and the current selection as a whole) is, based only on the metrics available.'
+                        ],
+                        list: [
+                          {
+                            label: 'Base:',
+                            text: ' the workflow\'s success rate, as a percentage. Example: 95% successful runs starts at a score of 95.'
+                          },
+                          {
+                            label: 'Trend penalty:',
+                            text: ' points are subtracted if "Workflow trend alerts" detects a degradation for that same workflow — 10 points for a warning-severity trend, 20 points for a danger-severity trend (only the bigger one applies if both are detected). Example: that 95 becomes 85 with a warning-level degradation, or 75 with a danger-level one. No penalty is applied when there isn\'t enough history to check for a trend.'
+                          },
+                          {
+                            label: 'Color:',
+                            text: ' green at 90 and above, orange from 70 to 89, red below 70.'
+                          }
+                        ]
+                      }
                     }} />
                   </h4>
                 </div>
