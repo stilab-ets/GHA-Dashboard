@@ -1063,6 +1063,11 @@ body.dashboard-chart-fullscreen-active {
     box-sizing: border-box;
 }
 
+.overall-health-header-collapsed {
+    justify-content: flex-start;
+    margin-bottom: 0;
+}
+
 .overall-health-header h3 {
     margin: 2px 0 0;
     font-size: 20px;
@@ -1070,13 +1075,25 @@ body.dashboard-chart-fullscreen-active {
 }
 
 .overall-health-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     flex: 0 0 auto;
     padding: 7px 10px;
     border-radius: 999px;
     border: 1px solid var(--border);
+    background: none;
+    font: inherit;
     font-size: 12px;
     font-weight: 850;
     text-transform: uppercase;
+    cursor: pointer;
+}
+
+.overall-health-status:hover,
+.overall-health-status:focus-visible {
+    filter: brightness(1.08);
+    outline: none;
 }
 
 .overall-health-status-info {
@@ -1095,6 +1112,17 @@ body.dashboard-chart-fullscreen-active {
     color: var(--danger);
     background: var(--danger-soft);
     border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.overall-health-status-arrow {
+    display: inline-block;
+    font-size: 10px;
+    transition: transform 0.15s ease;
+    transform: rotate(180deg);
+}
+
+.overall-health-status-arrow-collapsed {
+    transform: rotate(0deg);
 }
 
 .overall-health-header-controls {
@@ -1330,6 +1358,106 @@ body.dashboard-chart-fullscreen-active {
 
 .trend-alert-delta-danger {
     color: var(--danger) !important;
+}
+
+.overall-health-scores {
+    width: 100%;
+    margin-top: 16px;
+}
+
+.overall-health-scores-header {
+    margin-bottom: 8px;
+}
+
+.overall-health-scores-header h4 {
+    margin: 2px 0 0;
+    font-size: 20px;
+    font-weight: 600;
+    font-family: inherit;
+    line-height: 1.2;
+}
+
+.health-score-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 336px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-y: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--card-bg) 86%, var(--bg));
+}
+
+.health-score-row {
+    display: grid;
+    grid-template-columns: 6px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.health-score-row:last-child {
+    border-bottom: 0;
+}
+
+.health-score-row-success {
+    background: color-mix(in srgb, var(--success-soft) 54%, transparent);
+}
+
+.health-score-row-warning {
+    background: color-mix(in srgb, var(--warning-soft) 54%, transparent);
+}
+
+.health-score-row-danger {
+    background: color-mix(in srgb, var(--danger-soft) 54%, transparent);
+}
+
+.health-score-indicator {
+    align-self: stretch;
+    width: 6px;
+    border-radius: 999px;
+}
+
+.health-score-indicator-success {
+    background: var(--success);
+}
+
+.health-score-indicator-warning {
+    background: var(--warning);
+}
+
+.health-score-indicator-danger {
+    background: var(--danger);
+}
+
+.health-score-row-name {
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 750;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.health-score-row-label {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.health-score-row-value {
+    flex: 0 0 auto;
+    min-width: 2.4em;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 850;
+    text-align: right;
 }
 
 .overall-health-card {

@@ -119,6 +119,31 @@ function selectTrendScope(sortedRuns, options) {
   };
 }
 
+// Computes a plain success rate over the same "last N runs" (or "all runs")
+// window the trend engine uses, so a health score computed for the same
+// window as the trend alerts stays representative of that window instead of
+// always reflecting the whole filtered period. Unlike the trend line itself,
+// this doesn't require enough runs to fit a regression — a ratio is
+// meaningful even from just one or two runs.
+export function computeWindowSuccessStats(runs, options = {}) {
+  const sortedRuns = [...runs]
+    .filter(run => run?.created_at && getValidRunDuration(run) !== null)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  const fixedWindowSize = requestedWindowSize(options);
+  const scopedRuns = fixedWindowSize
+    ? sortedRuns.slice(-Math.min(fixedWindowSize, sortedRuns.length))
+    : sortedRuns;
+
+  const totalRuns = scopedRuns.length;
+  const successes = scopedRuns.filter(run => run.conclusion === 'success').length;
+
+  return {
+    successRate: totalRuns > 0 ? successes / totalRuns : 0,
+    totalRuns
+  };
+}
+
 function analyzeRunGroup(runs, workflowName, scope, options) {
   // Only runs with a valid duration are considered at all — a run with no
   // usable duration (cancelled, still in progress, missing data) can't

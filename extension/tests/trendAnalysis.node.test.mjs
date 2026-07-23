@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { analyzeWorkflowNegativeTrends } from '../src/trendAnalysis.mjs';
+import { analyzeWorkflowNegativeTrends, computeWindowSuccessStats } from '../src/trendAnalysis.mjs';
 
 function run(id, workflowName, day, duration, conclusion = 'success') {
   return {
@@ -210,4 +210,41 @@ test('still reports insufficient data when even the relaxed fixed-window floor i
   assert.equal(analysis.hasDegradation, false);
   assert.equal(analysis.insufficientData, true);
   assert.deepEqual(analysis.alerts, []);
+});
+
+test('computeWindowSuccessStats reflects the whole period when no window is requested', () => {
+  const runs = [
+    ...Array.from({ length: 8 }, (_, index) => run(index + 1, 'Build', index + 1, 100, 'success')),
+    ...Array.from({ length: 2 }, (_, index) => run(index + 9, 'Build', index + 9, 100, 'failure'))
+  ];
+
+  const stats = computeWindowSuccessStats(runs);
+
+  assert.equal(stats.totalRuns, 10);
+  assert.equal(stats.successRate, 0.8);
+});
+
+test('computeWindowSuccessStats only counts runs within the requested window', () => {
+  // 10 old successful runs, then 5 recent runs that are all failures — picking
+  // "last 5" should reflect only the recent failures, not the whole history.
+  const runs = [
+    ...Array.from({ length: 10 }, (_, index) => run(index + 1, 'Build', index + 1, 100, 'success')),
+    ...Array.from({ length: 5 }, (_, index) => run(index + 11, 'Build', index + 11, 100, 'failure'))
+  ];
+
+  const allTimeStats = computeWindowSuccessStats(runs);
+  const windowedStats = computeWindowSuccessStats(runs, { windowSize: 5 });
+
+  assert.equal(allTimeStats.successRate, 10 / 15);
+  assert.equal(windowedStats.totalRuns, 5);
+  assert.equal(windowedStats.successRate, 0);
+});
+
+test('computeWindowSuccessStats does not require a minimum run count to compute a ratio', () => {
+  const runs = [run(1, 'Build', 1, 100, 'success'), run(2, 'Build', 2, 100, 'failure')];
+
+  const stats = computeWindowSuccessStats(runs, { windowSize: 10 });
+
+  assert.equal(stats.totalRuns, 2);
+  assert.equal(stats.successRate, 0.5);
 });
