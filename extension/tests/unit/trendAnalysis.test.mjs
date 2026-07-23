@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { analyzeWorkflowNegativeTrends, computeWindowSuccessStats } from '../src/trendAnalysis.mjs';
+import { analyzeWorkflowNegativeTrends, computeWindowSuccessStats } from '../../src/trendAnalysis.mjs';
 
 function run(id, workflowName, day, duration, conclusion = 'success') {
   return {

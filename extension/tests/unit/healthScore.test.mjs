@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { calculateHealthScore } from '../src/healthScore.mjs';
+import { calculateHealthScore } from '../../src/healthScore.mjs';
 
 test('scores a perfect success rate with no trend alerts as healthy', () => {
   const result = calculateHealthScore({ successRate: 1, totalRuns: 50, trendAlerts: [] });
