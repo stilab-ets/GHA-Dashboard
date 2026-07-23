@@ -1,6 +1,7 @@
 # ADR-002 : Adoption de `webextension-polyfill` pour la compatibilité multi-navigateurs
 
 - **Statut** : Accepté
+- **Date** : 2026-07-04
 
 ## Contexte
 
