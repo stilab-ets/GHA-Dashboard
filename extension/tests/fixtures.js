@@ -29,6 +29,10 @@ exports.test = base.extend({
 
     const context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
+      viewport: {
+        width: 1920,
+        height: 1080,
+      },
       args: [
         `--disable-extensions-except=${pathToExtension}`,
         `--load-extension=${pathToExtension}`

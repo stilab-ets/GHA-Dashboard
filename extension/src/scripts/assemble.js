@@ -45,6 +45,7 @@ async function main() {
       dest: 'manifest.json'
     },
     { src: 'src/background.js', dest: 'background.js' },
+    { src: 'src/scopeFilters.mjs', dest: 'scopeFilters.mjs' },
     { src: 'src/contentScript.js', dest: 'contentScript.js' },
     { src: 'src/popup/popup.css', dest: 'popup/popup.css' }
   ];

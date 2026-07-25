@@ -2,7 +2,6 @@ import requests
 from repo_info_collector import get_workflow_ids
 from datetime import datetime, timezone, timedelta
 import time
-import math
 import logging
 import sys
 import os
@@ -19,14 +18,44 @@ except ImportError:
     PERFORMANCE_LOGGING = False
 
 
+def _get_env_int(name, default):
+    try:
+        return int(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_env_float(name, default):
+    try:
+        return float(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 def get_request(url, token):
     headers = {'Authorization': f'token {token}'}
-    attempt = 0
-    while attempt < 5:
-        # Start timing for API call
-        start_time = time.time()
-        response = requests.get(url, headers=headers)
-        duration = time.time() - start_time
+    max_attempts = max(1, _get_env_int("GITHUB_API_MAX_ATTEMPTS", 3))
+    timeout_seconds = max(1, _get_env_float("GITHUB_API_TIMEOUT_SECONDS", 15))
+    max_rate_limit_wait = max(0, _get_env_float("GITHUB_API_MAX_RATE_LIMIT_WAIT_SECONDS", 30))
+
+    for attempt in range(max_attempts):
+        try:
+            # Start timing for API call
+            start_time = time.time()
+            response = requests.get(url, headers=headers, timeout=timeout_seconds)
+            duration = time.time() - start_time
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            if attempt >= max_attempts - 1:
+                logging.error(f"GitHub request failed after {max_attempts} attempts. URL: {url}, Error: {e}")
+                return None
+
+            wait_time = min(2 ** attempt, 8)
+            logging.warning(f"GitHub request failed. Retrying in {wait_time} seconds. URL: {url}, Error: {e}")
+            time.sleep(wait_time)
+            continue
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Unexpected GitHub request error. URL: {url}, Error: {e}")
+            return None
 
         if response.status_code == 200:
             # Parse JSON once so we can log richer information
@@ -71,14 +100,25 @@ def get_request(url, token):
             return data
         elif response.status_code == 403 and 'X-RateLimit-Reset' in response.headers:
             reset_time = datetime.fromtimestamp(int(response.headers['X-RateLimit-Reset']), timezone.utc)
-            sleep_time = (reset_time - datetime.now(timezone.utc)).total_seconds() + 10
-            logging.error(f"Rate limit exceeded, sleeping for {sleep_time} seconds. URL: {url}")
+            sleep_time = max(0, (reset_time - datetime.now(timezone.utc)).total_seconds() + 10)
+            if sleep_time > max_rate_limit_wait:
+                logging.error(
+                    f"Rate limit wait ({sleep_time:.1f}s) exceeds max wait ({max_rate_limit_wait:.1f}s). "
+                    f"Skipping URL: {url}"
+                )
+                return None
+            logging.error(f"Rate limit exceeded, sleeping for {sleep_time:.1f} seconds. URL: {url}")
             time.sleep(sleep_time)
+        elif response.status_code in [500, 502, 503, 504] and attempt < max_attempts - 1:
+            wait_time = min(2 ** attempt, 8)
+            logging.warning(
+                f"GitHub server error {response.status_code}. Retrying in {wait_time} seconds. URL: {url}"
+            )
+            time.sleep(wait_time)
         else:
             logging.error(
                 f"Failed to fetch data, status code: {response.status_code}, URL: {url}, Response: {response.text}")
-            time.sleep(math.pow(2, attempt) * 10)  # Exponential backoff
-        attempt += 1
+            return None
     return None
 
 

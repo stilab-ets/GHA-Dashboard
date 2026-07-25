@@ -1,7 +1,10 @@
-import { useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
-import { buildDashboardCollectionFilters, filterRunsForScope, normalizeWorkflowIds } from '../scopeFilters.mjs';
+import { buildDashboardCollectionFilters, extendWorkflowScopeForSelection, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForSelectionDelta, workflowNamesForIds } from '../scopeFilters.mjs';
+import { calculateHealthScore } from '../healthScore.mjs';
+import { computeWindowSuccessStats } from '../trendAnalysis.mjs';
+import { isWorkflowYamlFile } from '../durationFilters.mjs';
 import browser from "webextension-polyfill";
 // We need to access the internal convertRunsToDashboard function
 // Since it's not exported, we'll use filterRunsLocally which uses it internally
@@ -26,9 +29,17 @@ import {
 } from 'recharts';
 
 const COLORS = ['#4caf50', '#f44336', '#ff9800', '#2196f3', '#9c27b0', '#00bcd4'];
-const SHOW_OVERALL_HEALTH_CHECK = false;
+const SHOW_OVERALL_HEALTH_CHECK = true;
 const ALL_TIME_START_DATE = '2000-01-01';
 const ALL_TIME_END_DATE = '2100-01-01';
+const DEFAULT_TREND_WINDOW_SIZE = 10;
+// null represents "all runs in the selected period" (previous behavior).
+const TREND_WINDOW_PRESETS = [
+  { label: 'All runs in period', value: null },
+  { label: 'Last 10 runs', value: 10 },
+  { label: 'Last 20 runs', value: 20 },
+  { label: 'Last 50 runs', value: 50 }
+];
 
 function UIIcon({ name }) {
   const icons = {
@@ -42,6 +53,8 @@ function UIIcon({ name }) {
     pulse: <path d="M3 13h4l3-7 4 13 3-7h4" />,
     workflow: <><circle cx="6" cy="6" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><path d="M8 7.5 11 16M16 7.5 13 16" /></>,
     jobs: <><path d="M5 12c2.5-4 5.5-4 8 0s5.5 4 8 0" /><path d="M5 16c2.5-4 5.5-4 8 0s5.5 4 8 0" /></>,
+    degradations: <><path d="M12 3 2.8 20h18.4L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
+    flaky: <><path d="M12 3 2.8 20h18.4L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
     branch: <><circle cx="7" cy="5" r="2" /><circle cx="17" cy="12" r="2" /><circle cx="7" cy="19" r="2" /><path d="M7 7v10M9 6c4 0 8 2 8 6M9 18c4 0 8-2 8-6" /></>,
     events: <><path d="M4 13h3l2-5 4 10 2-5h5" /><path d="M4 7h4M16 7h4" /></>,
     contributors: <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M3.5 19c.8-3.6 3-5 5.5-5s4.7 1.4 5.5 5" /><path d="M13.5 15c1-.9 2.1-1.3 3.5-1.3 2.1 0 3.8 1.2 4.5 4.3" /></>
@@ -253,156 +266,72 @@ function MetricCard({ tone = 'info', icon, title, explanation, value, note, chil
 // InfoIcon component for displaying help tooltips
 function InfoIcon({ explanation, id }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [popupStyle, setPopupStyle] = useState(null);
-  const [popupPlacement, setPopupPlacement] = useState('above');
   const iconRef = useRef(null);
-  const popupRef = useRef(null);
+  const generatedId = useId();
+  const popupId = id || generatedId;
 
-  const updatePopupPosition = () => {
-    if (!iconRef.current) return;
+  const postHintMessage = (type) => {
+    if (!window.parent || window.parent === window) return;
 
-    const rect = iconRef.current.getBoundingClientRect();
-    const popupRect = popupRef.current?.getBoundingClientRect();
-    const viewportPadding = 12;
-    const popupWidth = Math.min(popupRect?.width || 320, window.innerWidth - viewportPadding * 2);
-    const popupHeight = Math.min(popupRect?.height || 220, window.innerHeight - viewportPadding * 2);
-    const gap = 10;
-    const left = Math.min(
-      Math.max(rect.left, viewportPadding),
-      window.innerWidth - viewportPadding - popupWidth
-    );
-    const spaceAbove = rect.top - viewportPadding;
-    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
-    const placeAbove = spaceAbove >= popupHeight + gap || spaceAbove >= spaceBelow;
-    const top = placeAbove
-      ? Math.max(viewportPadding, Math.min(rect.top - gap - popupHeight, window.innerHeight - viewportPadding - popupHeight))
-      : Math.max(viewportPadding, Math.min(rect.bottom + gap, window.innerHeight - viewportPadding - popupHeight));
-
-    setPopupPlacement(placeAbove ? 'above' : 'below');
-
-    setPopupStyle({
-      position: 'fixed',
-      left: `${left}px`,
-      top: `${top}px`,
-      transform: 'none',
-      width: `${popupWidth}px`,
-    });
+    const rect = iconRef.current?.getBoundingClientRect();
+    window.parent.postMessage({
+      type,
+      id: popupId,
+      explanation,
+      theme: document.querySelector('.dashboard.light') ? 'light' : 'dark',
+      anchor: rect ? {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom
+      } : null
+    }, '*');
   };
 
-  useLayoutEffect(() => {
-    if (isOpen) {
-      updatePopupPosition();
-    }
-  }, [isOpen]);
-
   useEffect(() => {
+    if (!isOpen) return undefined;
+
     const handleClickOutside = (event) => {
-      if (iconRef.current && popupRef.current &&
-        !iconRef.current.contains(event.target) &&
-        !popupRef.current.contains(event.target)) {
+      if (iconRef.current && !iconRef.current.contains(event.target)) {
+        postHintMessage('GHA_DASHBOARD_HINT_CLOSE');
+        setIsOpen(false);
+      }
+    };
+    const handleParentMessage = (event) => {
+      if (event.data?.type === 'GHA_DASHBOARD_HINT_CLOSED' && event.data.id === popupId) {
         setIsOpen(false);
       }
     };
 
-    if (isOpen) {
-      updatePopupPosition();
-      document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('message', handleParentMessage);
 
-      const handleReposition = () => updatePopupPosition();
-      window.addEventListener('resize', handleReposition);
-      window.addEventListener('scroll', handleReposition, true);
-
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-        window.removeEventListener('resize', handleReposition);
-        window.removeEventListener('scroll', handleReposition, true);
-      };
-    }
-  }, [isOpen]);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('message', handleParentMessage);
+    };
+  }, [isOpen, popupId]);
 
   return (
     <div style={{ position: 'relative', display: 'inline-block', marginLeft: '8px' }}>
       <button
         ref={iconRef}
+        className="info-icon-button"
         onClick={(e) => {
           e.stopPropagation();
-          setIsOpen(!isOpen);
-        }}
-        style={{
-          width: '20px',
-          height: '20px',
-          borderRadius: '50%',
-          border: '1px solid #666',
-          background: '#333',
-          color: '#fff',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '12px',
-          padding: 0,
-          lineHeight: 1,
-          transition: 'all 0.2s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.target.style.background = '#444';
-          e.target.style.borderColor = '#888';
-        }}
-        onMouseLeave={(e) => {
-          e.target.style.background = '#333';
-          e.target.style.borderColor = '#666';
+          if (isOpen) {
+            postHintMessage('GHA_DASHBOARD_HINT_CLOSE');
+            setIsOpen(false);
+          } else {
+            postHintMessage('GHA_DASHBOARD_HINT_OPEN');
+            setIsOpen(true);
+          }
         }}
         aria-label="Show explanation"
+        aria-expanded={isOpen}
       >
         ?
       </button>
-      {isOpen && (
-        createPortal(
-          <div
-            ref={popupRef}
-            className="info-icon-popup"
-            data-placement={popupPlacement}
-            style={popupStyle || undefined}
-          >
-            <div style={{ marginBottom: '8px', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>
-              {explanation.title || 'Information'}
-            </div>
-            <div>{explanation.text}</div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
-              style={{
-                position: 'absolute',
-                top: '8px',
-                right: '8px',
-                background: 'transparent',
-                border: 'none',
-                color: '#888',
-                cursor: 'pointer',
-                fontSize: '18px',
-                lineHeight: 1,
-                padding: 0,
-                width: '20px',
-                height: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.color = '#fff';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.color = '#888';
-              }}
-            >
-              ×
-            </button>
-          </div>,
-          document.body
-        )
-      )}
     </div>
   );
 }
@@ -417,6 +346,26 @@ function formatTimeValue(seconds) {
 function formatDuration(seconds) {
   if (!seconds || seconds < 0) return '0s';
   return formatTimeValue(seconds);
+}
+
+// Unlike formatDuration (which rounds to whole minutes/hours for the compact
+// stat cards), this keeps minute+second precision so trend alert values
+// stay internally consistent — e.g. "2m 5s" and "2m 38s" instead of both
+// rounding down to "2m" and "3m", which would make Recent - Previous look
+// like it disagrees with the Delta column.
+function formatTrendDuration(seconds) {
+  const safeSeconds = Math.max(0, Math.round(seconds || 0));
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+
+  if (safeSeconds < 3600) {
+    const minutes = Math.floor(safeSeconds / 60);
+    const remainingSeconds = safeSeconds % 60;
+    return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(safeSeconds / 3600);
+  const remainingMinutes = Math.floor((safeSeconds % 3600) / 60);
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
 function formatDateForInput(d) {
@@ -537,6 +486,10 @@ export default function Dashboard() {
   const [phase2StartTime, setPhase2StartTime] = useState(null);
   const elapsedIntervalRef = useRef(null);
   const [jobProgress, setJobProgress] = useState({ runs_processed: 0, total_runs: 0, jobs_collected: 0, isCollecting: false });
+  const [workflowDegradations, setWorkflowDegradations] = useState([]);
+  const [workflowDegradationsLoading, setWorkflowDegradationsLoading] = useState(false);
+  const [workflowDegradationsError, setWorkflowDegradationsError] = useState(null);
+  const commitFilesCacheRef = useRef(new Map());
   const [dashboardTheme, setDashboardTheme] = useState(getInitialTheme);
   const [collectionPaused, setCollectionPaused] = useState(false);
   // Filter states
@@ -554,7 +507,10 @@ export default function Dashboard() {
     branch: ['all'],
     actor: ['all'],
     start: defaultStart,
-    end: defaultEnd
+    end: defaultEnd,
+    // Number of most recent runs to compare against the previous window when
+    // looking for trend degradations; null means "all runs in the selected period".
+    trendWindowSize: DEFAULT_TREND_WINDOW_SIZE
   });
   const defaultCollectionScope = {
     start: defaultStart,
@@ -590,8 +546,24 @@ export default function Dashboard() {
   const hasIncompleteDateRange = (scope = {}) =>
     Boolean(scope.start) !== Boolean(scope.end);
 
+  const getWorkflowFilterForScope = (scope = {}) => {
+    const workflowIds = normalizeWorkflowIds(scope.workflowIds);
+    if (workflowIds.length === 0) {
+      return ['all'];
+    }
+
+    const workflowNames = workflowNamesForIds(workflowOptions, workflowIds);
+    return workflowNames.length === workflowIds.length ? workflowNames : null;
+  };
+
+  const sameWorkflowFilter = (left = [], right = []) => (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+
   const applyCollectionScope = (scope) => {
     const normalizedScope = normalizeCollectionScope(scope);
+    const workflowFilter = getWorkflowFilterForScope(normalizedScope);
     appliedCollectionScopeRef.current = normalizedScope;
     setAppliedCollectionScope(normalizedScope);
     setCollectionDateRange({
@@ -609,12 +581,24 @@ export default function Dashboard() {
     setFilters(prev => ({
       ...prev,
       start: normalizedScope.start,
-      end: normalizedScope.end
+      end: normalizedScope.end,
+      ...(workflowFilter ? { workflow: workflowFilter } : {})
     }));
     return normalizedScope;
   };
 
   const getAppliedCollectionScope = () => appliedCollectionScopeRef.current;
+
+  useEffect(() => {
+    const workflowFilter = getWorkflowFilterForScope(getAppliedCollectionScope());
+    if (!workflowFilter) return;
+
+    setFilters(prev => (
+      sameWorkflowFilter(prev.workflow, workflowFilter)
+        ? prev
+        : { ...prev, workflow: workflowFilter }
+    ));
+  }, [workflowOptions, appliedCollectionScope.workflowIds]);
 
   const getCollectionScopeForRequest = (collectMore = false) => {
     if (collectMore || data) {
@@ -704,10 +688,13 @@ export default function Dashboard() {
   const [openDropdowns, setOpenDropdowns] = useState({
     workflow: false,
     branch: false,
-    actor: false
+    actor: false,
+    trendWindow: false
   });
+  const [trendWindowCustomInput, setTrendWindowCustomInput] = useState('');
   const [collectionWorkflowDropdownOpen, setCollectionWorkflowDropdownOpen] = useState(false);
 
+  const [healthCheckCollapsed, setHealthCheckCollapsed] = useState(false);
   const [activeStatsTab, setActiveStatsTab] = useState('workflows');
   const [contributorSearchQuery, setContributorSearchQuery] = useState('');
   const [activeBranchEventTab, setActiveBranchEventTab] = useState('all');
@@ -744,7 +731,8 @@ export default function Dashboard() {
   const dropdownRefs = {
     workflow: useRef(null),
     branch: useRef(null),
-    actor: useRef(null)
+    actor: useRef(null),
+    trendWindow: useRef(null)
   };
   const datePickerRef = useRef(null);
   const collectionDatePickerRef = useRef(null);
@@ -870,11 +858,12 @@ export default function Dashboard() {
   useEffect(() => {
     if (!fullscreenPanelId) return undefined;
 
-    const requestViewportMetrics = () => {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'GHA_DASHBOARD_VIEWPORT_METRICS_REQUEST' }, '*');
-      }
-    };
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'GHA_DASHBOARD_FULLSCREEN',
+        active: true
+      }, '*');
+    }
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -882,16 +871,16 @@ export default function Dashboard() {
       }
     };
 
-    requestViewportMetrics();
-    const animationFrameId = window.requestAnimationFrame(requestViewportMetrics);
-    const timeoutId = window.setTimeout(requestViewportMetrics, 50);
-
     document.body.classList.add('dashboard-chart-fullscreen-active');
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId);
-      window.clearTimeout(timeoutId);
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'GHA_DASHBOARD_FULLSCREEN',
+          active: false
+        }, '*');
+      }
       document.body.classList.remove('dashboard-chart-fullscreen-active');
       document.removeEventListener('keydown', handleKeyDown);
     };
@@ -989,6 +978,140 @@ export default function Dashboard() {
 
     return result.githubToken ?? null;
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    const runs = data?.rawRuns || [];
+
+    if (!currentRepo || runs.length === 0) {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(false);
+      setWorkflowDegradationsError(null);
+      return undefined;
+    }
+
+    const workflowNames = Array.from(new Set(
+      runs.map(run => run.workflow_name).filter(Boolean)
+    ));
+    const candidates = workflowNames.flatMap(workflowName => (
+      getDurationExplosionAnalysis(workflowName).worseningPoints
+    ));
+    const candidatesByCommit = new Map();
+    candidates.forEach(candidate => {
+      const run = candidate.firstAfterRun || candidate.run;
+      const commitSha = candidate.commitSha;
+      if (!commitSha || !run) return;
+
+      const key = `${candidate.workflowName}\u0000${candidate.branch}\u0000${commitSha}`;
+      if (!candidatesByCommit.has(key)) {
+        candidatesByCommit.set(key, candidate);
+      }
+    });
+    const uniqueCandidates = Array.from(candidatesByCommit.values());
+    const candidateCommitShas = Array.from(new Set(
+      uniqueCandidates.map(candidate => candidate.commitSha).filter(Boolean)
+    ));
+
+    if (candidateCommitShas.length === 0) {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(false);
+      setWorkflowDegradationsError(null);
+      return undefined;
+    }
+
+    const loadDegradations = async () => {
+      setWorkflowDegradations([]);
+      setWorkflowDegradationsLoading(true);
+      setWorkflowDegradationsError(null);
+
+      try {
+        const token = await getGithubToken();
+        if (cancelled) return;
+        if (!token) throw new Error('GitHub token unavailable');
+
+        const [owner, repository] = currentRepo.split('/');
+        if (!owner || !repository) throw new Error('Invalid repository');
+
+        const filesByCommit = new Map();
+        let failedCommitCount = 0;
+        await Promise.all(candidateCommitShas.map(async commitSha => {
+          const cacheKey = `${currentRepo}:${commitSha}`;
+          let files = commitFilesCacheRef.current.get(cacheKey);
+
+          if (files === undefined) {
+            const url = `http://127.0.0.1:3000/api/commit-files/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${encodeURIComponent(commitSha)}`;
+            try {
+              const response = await fetch(url, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              if (!response.ok) {
+                console.warn(`[Dashboard] Unable to load files for commit ${commitSha} (${response.status})`);
+                failedCommitCount += 1;
+                return;
+              }
+
+              const result = await response.json();
+              files = Array.isArray(result.files) ? result.files : [];
+              commitFilesCacheRef.current.set(cacheKey, files);
+            } catch (error) {
+              console.warn(`[Dashboard] Unable to load files for commit ${commitSha}:`, error);
+              failedCommitCount += 1;
+              return;
+            }
+          }
+
+          filesByCommit.set(commitSha, files);
+        }));
+
+        if (!cancelled) {
+          const confirmedDegradations = uniqueCandidates
+            .map(candidate => {
+              const yamlFiles = Array.from(new Set(
+                (filesByCommit.get(candidate.commitSha) || []).filter(isWorkflowYamlFile)
+              ));
+              if (yamlFiles.length === 0) return null;
+
+              const firstAfterRun = candidate.firstAfterRun || candidate.run;
+              return {
+                id: `${candidate.workflowName}\u0000${candidate.branch}\u0000${candidate.commitSha}`,
+                workflowName: candidate.workflowName,
+                branch: candidate.branch,
+                shortSha: candidate.commitSha.slice(0, 7),
+                commitUrl: `https://github.com/${currentRepo}/commit/${candidate.commitSha}`,
+                runUrl: firstAfterRun.html_url || null,
+                changedFiles: yamlFiles,
+                detectedAt: firstAfterRun.created_at || firstAfterRun.updated_at || '',
+                previousMedian: candidate.previousMedian,
+                nextMedian: candidate.nextMedian,
+                increasePercent: candidate.severityScore * 100,
+              };
+            })
+            .filter(Boolean)
+            .sort((left, right) => right.increasePercent - left.increasePercent);
+
+          setWorkflowDegradations(confirmedDegradations);
+          if (failedCommitCount > 0) {
+            setWorkflowDegradationsError(
+              `${failedCommitCount} commit${failedCommitCount === 1 ? '' : 's'} could not be checked. Results may be incomplete.`
+            );
+          }
+        }
+      } catch (error) {
+        console.warn('[Dashboard] Unable to verify workflow commits:', error);
+        if (!cancelled) {
+          setWorkflowDegradationsError('Unable to check workflow commits for YAML changes.');
+        }
+      } finally {
+        if (!cancelled) setWorkflowDegradationsLoading(false);
+      }
+    };
+
+    loadDegradations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRepo, data?.rawRuns]);
 
   const buildScopedQuery = (scope = getCollectionScope()) => {
     const params = new URLSearchParams();
@@ -1130,7 +1253,7 @@ export default function Dashboard() {
   };
 
   // Load existing data from cache
-  const loadExistingData = async (repo, scope = getCollectionScope()) => {
+  const loadExistingData = async (repo, scope = getCollectionScope(), explicitFilters = null) => {
     if (!repo) return false;
 
     try {
@@ -1161,7 +1284,7 @@ export default function Dashboard() {
 
           // Now process the runs into dashboard format
           // Use convertRunsToDashboard directly (no dependency on _runsByRepo)
-          const processedData = await processRunsToDashboardFormat(result.runs, repo, scope);
+          const processedData = await processRunsToDashboardFormat(result.runs, repo, scope, explicitFilters);
 
           if (processedData) {
             console.log('[Dashboard] Processed data successfully:', processedData.totalRuns, 'runs');
@@ -1186,7 +1309,7 @@ export default function Dashboard() {
   };
 
   // Process runs into dashboard format using convertRunsToDashboard directly
-  const processRunsToDashboardFormat = async (runs, repo = null, scope = getCollectionScope()) => {
+  const processRunsToDashboardFormat = async (runs, repo = null, scope = getCollectionScope(), explicitFilters = null) => {
     if (!runs || runs.length === 0) {
       console.log('[Dashboard] processRunsToDashboardFormat: No runs provided');
       return null;
@@ -1220,16 +1343,28 @@ export default function Dashboard() {
     // Use convertRunsToDashboard directly instead of filterRunsLocally
     // This avoids the dependency on _runsByRepo being populated
     const { start: startDate, end: endDate, workflowIds } = scopedFilters;
-
-    try {
-      const dashboardData = convertRunsToDashboard(scopedRuns, repoToUse, {
+    const dashboardFilters = explicitFilters
+      ? {
+        workflow: explicitFilters.workflow || ['all'],
+        branch: explicitFilters.branch || ['all'],
+        actor: explicitFilters.actor || ['all'],
+        startDate: explicitFilters.start || explicitFilters.startDate || startDate,
+        endDate: explicitFilters.end || explicitFilters.endDate || endDate,
+        workflowIds: explicitFilters.workflowIds ?? workflowIds,
+        trendWindowSize: explicitFilters.trendWindowSize ?? filters.trendWindowSize
+      }
+      : {
         workflow: ['all'],
         branch: ['all'],
         actor: ['all'],
-        startDate: startDate,
-        endDate: endDate,
-        workflowIds
-      });
+        startDate,
+        endDate,
+        workflowIds,
+        trendWindowSize: filters.trendWindowSize
+      };
+
+    try {
+      const dashboardData = convertRunsToDashboard(scopedRuns, repoToUse, dashboardFilters);
 
       if (dashboardData) {
         console.log(`[Dashboard] Successfully converted to dashboard format: ${dashboardData.totalRuns} runs`);
@@ -1246,6 +1381,7 @@ export default function Dashboard() {
 
   // Load data (only when dates change)
   const loadDashboardData = async (collectMore = false, options = {}) => {
+    const localFilters = options.localFilters || {};
     const fallbackCollectionScope = getCollectionScopeForRequest(Boolean(collectMore));
     const draftCollectionScope = normalizeCollectionScope({
       ...fallbackCollectionScope,
@@ -1392,7 +1528,7 @@ export default function Dashboard() {
 
         // Get the latest filter values from ref (including date range)
         const latestFilters = {
-          workflow: filters.workflow,
+          workflow: localFilters.workflow || filters.workflow,
           branch: filters.branch,
           actor: filters.actor,
           start: dateFiltersRef.current.start,
@@ -1434,10 +1570,28 @@ export default function Dashboard() {
         start: activeDateRange.start,
         end: activeDateRange.end,
         workflowIds: collectionScope.workflowIds,
+        refreshWorkflowIds: options.refreshWorkflowIds,
         forceRefresh: shouldRefreshAfterCache
       });
 
       const finalData = await fetchDashboardDataViaWebSocket(repo, wsFilters, onProgress);
+      const finalFilters = {
+        workflow: localFilters.workflow || filters.workflow,
+        branch: filters.branch,
+        actor: filters.actor,
+        start: dateFiltersRef.current.start,
+        end: dateFiltersRef.current.end,
+        workflowIds: collectionScope.workflowIds
+      };
+      const finalFilteredData = applyLocalFiltersWithFilters(finalData, finalFilters);
+
+      if (finalFilteredData) {
+        syncAvailableFiltersFromData(finalData);
+        setData(finalFilteredData);
+      }
+
+      await loadExistingData(repo, collectionScope, finalFilters);
+
       setLoading(false);
       setDataLoaded(true);
       setProgress(prev => ({
@@ -1509,7 +1663,8 @@ export default function Dashboard() {
       actor: filters.actor,
       startDate: activeDateRange.start,
       endDate: activeDateRange.end,
-      workflowIds: getAppliedCollectionScope().workflowIds
+      workflowIds: getAppliedCollectionScope().workflowIds,
+      trendWindowSize: filters.trendWindowSize
     };
 
     const filtered = filterRunsLocally(filterValues, rawData.repo || currentRepo);
@@ -1537,7 +1692,8 @@ export default function Dashboard() {
       actor: explicitFilters.actor || filters.actor,
       startDate: explicitFilters.start || filters.start,
       endDate: explicitFilters.end || filters.end,
-      workflowIds: explicitFilters.workflowIds || getAppliedCollectionScope().workflowIds
+      workflowIds: explicitFilters.workflowIds || getAppliedCollectionScope().workflowIds,
+      trendWindowSize: explicitFilters.trendWindowSize ?? filters.trendWindowSize
     }, rawData.repo || currentRepo);
 
     if (filtered) {
@@ -1655,7 +1811,8 @@ export default function Dashboard() {
           actor: filters.actor,
           startDate: activeDateRange.start,
           endDate: activeDateRange.end,
-          workflowIds: getAppliedCollectionScope().workflowIds
+          workflowIds: getAppliedCollectionScope().workflowIds,
+          trendWindowSize: filters.trendWindowSize
         }, currentRepo);
 
         if (filtered) {
@@ -1712,7 +1869,7 @@ export default function Dashboard() {
     return () => {
       browser.storage.onChanged.removeListener(handleStorageChange);
     };
-  }, [currentRepo, filters, availableFilters, appliedCollectionScope]);  
+  }, [currentRepo, filters, availableFilters, appliedCollectionScope]);
 
   // Real-time elapsed time counter (updates every second)
   useEffect(() => {
@@ -1769,7 +1926,8 @@ export default function Dashboard() {
         actor: filters.actor,
         startDate: filters.start,
         endDate: filters.end,
-        workflowIds: getAppliedCollectionScope().workflowIds
+        workflowIds: getAppliedCollectionScope().workflowIds,
+        trendWindowSize: filters.trendWindowSize
       }, currentRepo);
 
       if (filtered) {
@@ -1795,6 +1953,7 @@ export default function Dashboard() {
     filters.workflow,
     filters.branch,
     filters.actor,
+    filters.trendWindowSize,
     appliedCollectionScope,
     currentRepo,
     dataExists,
@@ -2162,7 +2321,7 @@ export default function Dashboard() {
         <div className="collection-start-actions">
           <button
             className="primary-action primary-action-large"
-            onClick={() => loadDashboardData(false)}
+            onClick={() => loadDashboardData(false, { forceRefresh: true })}
             type="button"
             disabled={workflowOptionsLoading}
           >
@@ -2178,7 +2337,7 @@ export default function Dashboard() {
   // Show start collection button if collection hasn't started yet
   if (!collectionStarted && !loading && !data) {
     return (
-      <div className={`dashboard ${dashboardTheme} container collection-setup-dashboard`}>
+      <div className={`dashboard ${dashboardTheme} container collection-setup-dashboard ${collectionWorkflowDropdownOpen ? 'workflow-dropdown-active' : ''}`}>
         {renderCollectionScopePanel()}
       </div>
     );
@@ -2205,18 +2364,13 @@ export default function Dashboard() {
 
   if (error) return (
     <div className={`dashboard ${dashboardTheme} container`}>
-      <div className="card" style={{
-        borderLeft: '4px solid #f44336',
-        background: 'linear-gradient(90deg, rgba(244,67,54,0.1) 0%, rgba(244,67,54,0.05) 100%)',
-        padding: '16px 20px',
-        marginTop: '16px'
-      }}>
-        <h3 style={{ margin: '0 0 8px 0', color: '#ff867c' }}>Connection Error</h3>
-        <p style={{ margin: 0, color: '#ffd0cc' }}>
+      <div className="card dashboard-error-card">
+        <h3 className="dashboard-error-title">Connection Error</h3>
+        <p className="dashboard-error-message">
           {error}
         </p>
-        <div style={{ marginTop: '12px' }}>
-          <button className="primary-action" onClick={() => loadDashboardData(false)} type="button">Retry</button>
+        <div className="dashboard-error-actions">
+          <button className="primary-action" onClick={() => loadDashboardData(false, { forceRefresh: true })} type="button">Retry</button>
         </div>
       </div>
     </div>
@@ -2259,16 +2413,19 @@ export default function Dashboard() {
     branchComparison = [],
     workflowStats = [],
     jobStats = [],
+    flakyTests = [],
     branchStatsGrouped = [],
     eventStats = [],
     contributorStats = [],
     timeToFix = [],
+    negativeTrendAnalysis = {},
     topFailedWorkflows = [],
     failureDurationOverTime = [],
     rawRuns = []
   } = data;
 
   const { workflows, branches, actors } = availableFilters;
+  const dashboardWorkflowNames = mergeWorkflowNames(workflows, workflowOptions);
 
   const totalStatus = statusBreakdown.reduce((sum, s) => sum + (s.value || 0), 0);
   const statusData = statusBreakdown.map(s => ({
@@ -2279,6 +2436,37 @@ export default function Dashboard() {
   // ============================================
   // Event Handlers
   // ============================================
+
+  const collectMoreDataFromDashboardFilters = () => {
+    const existingWorkflowIds = getAppliedCollectionScope().workflowIds;
+    const workflowIds = extendWorkflowScopeForSelection(
+      workflowOptions,
+      existingWorkflowIds,
+      filters.workflow,
+    );
+    const refreshWorkflowIds = workflowIdsForSelectionDelta(
+      workflowOptions,
+      existingWorkflowIds,
+      filters.workflow,
+    );
+    const workflowFilter = workflowNamesForIds(workflowOptions, workflowIds);
+    setError(null);
+    setCollectionScopeWorkflowIds(workflowIds.length > 0 ? workflowIds : ['all']);
+    setFilters(prev => ({
+      ...prev,
+      workflow: workflowFilter,
+    }));
+    loadDashboardData(true, {
+      collectionScope: {
+        workflowIds,
+      },
+      refreshWorkflowIds,
+      forceRefresh: true,
+      localFilters: {
+        workflow: workflowFilter,
+      },
+    });
+  };
 
   const handleFilterChange = (filterType, value) => {
     if (filterType === 'start' || filterType === 'end') {
@@ -2337,12 +2525,14 @@ export default function Dashboard() {
   };
 
   // Helper function for duration explosion chart
-  const getDurationExplosionData = (workflowName) => {
-    if (!rawRuns || rawRuns.length === 0) return [];
+  const getDurationExplosionAnalysis = (workflowName) => {
+    if (!rawRuns || rawRuns.length === 0) {
+      return { byDate: {}, selectedWorseningPoints: [], worseningPoints: [], overallMedian: 0 };
+    }
 
-    let filteredRuns = rawRuns;
+    let filteredRuns = rawRuns.filter(run => (run.duration || 0) > 0 && !run.durationExcludedFromStats);
     if (workflowName !== 'all') {
-      filteredRuns = rawRuns.filter(r => r.workflow_name === workflowName);
+      filteredRuns = filteredRuns.filter(r => r.workflow_name === workflowName);
     }
 
     // Sort runs by created_at to ensure chronological order
@@ -2380,19 +2570,20 @@ export default function Dashboard() {
         const severityScore = (nextMedian - previousMedian) / previousMedian;
         const dateTimestamp = new Date(currentDate).getTime();
 
-        // Store the worsening point with commit info
-        const commitSha = currentRun.commit_sha || currentRun.head_sha || null;
+        // Associate the worsening point with the first run after the change.
+        const firstAfterRun = nextRuns[0];
+        const commitSha = firstAfterRun.commit_sha || firstAfterRun.head_sha || null;
         // Extract repo from html_url if currentRepo is not available
         let repo = currentRepo;
-        if (!repo && currentRun.html_url) {
-          const urlMatch = currentRun.html_url.match(/github\.com\/([^\/]+\/[^\/]+)/);
+        if (!repo && firstAfterRun.html_url) {
+          const urlMatch = firstAfterRun.html_url.match(/github\.com\/([^\/]+\/[^\/]+)/);
           if (urlMatch) {
             repo = urlMatch[1];
           }
         }
         const commitUrl = commitSha && repo
           ? `https://github.com/${repo}/commit/${commitSha}`
-          : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : currentRun.html_url);
+          : (commitSha ? `https://github.com/${repo || 'unknown'}/commit/${commitSha}` : firstAfterRun.html_url);
 
         const worseningPoint = {
           date: currentDate,
@@ -2403,9 +2594,12 @@ export default function Dashboard() {
           severityScore,
           commitSha,
           commitUrl,
-          html_url: currentRun.html_url,
+          workflowName: currentRun.workflow_name || workflowName,
+          branch: currentRun.branch || '',
+          html_url: firstAfterRun.html_url,
           created_at: currentRun.created_at,
-          run: currentRun
+          run: firstAfterRun,
+          firstAfterRun
         };
 
         worseningPoints.push(worseningPoint);
@@ -2419,7 +2613,9 @@ export default function Dashboard() {
           worseningPoint: null
         };
       }
-      byDate[currentDate].durations.push(currentRun.duration || 0);
+      if ((currentRun.duration || 0) > 0) {
+        byDate[currentDate].durations.push(currentRun.duration);
+      }
       byDate[currentDate].runs.push(currentRun);
     }
 
@@ -2465,6 +2661,12 @@ export default function Dashboard() {
     // Calculate overall median for reference line
     const allDurations = sortedRuns.map(r => r.duration || 0).filter(d => d > 0);
     const overallMedian = calculateMedian(allDurations);
+
+    return { byDate, selectedWorseningPoints, worseningPoints, overallMedian };
+  };
+
+  const getDurationExplosionData = (workflowName) => {
+    const { byDate, overallMedian } = getDurationExplosionAnalysis(workflowName);
 
     return Object.entries(byDate)
       .map(([date, data]) => ({
@@ -2953,8 +3155,78 @@ export default function Dashboard() {
     ? `${rawRunsInCache} raw runs cached`
     : 'Runs after active filters';
   const filteredRunsDetailNote = excludedOutlierRuns > 0
-    ? `${filteredRunsNote}; ${excludedOutlierRuns} duration outliers excluded from stats`
+    ? `${filteredRunsNote}; ${excludedOutlierRuns} duration outliers excluded from duration KPIs`
     : filteredRunsNote;
+  const trendAlerts = Array.isArray(negativeTrendAnalysis.alerts)
+    ? negativeTrendAnalysis.alerts
+    : [];
+  const trendSummaryTone = trendAlerts.some(alert => alert.severity === 'danger')
+    ? 'danger'
+    : trendAlerts.length > 0
+      ? 'warning'
+      : 'info';
+  const workflowFilterValues = Array.isArray(filters.workflow) ? filters.workflow : ['all'];
+  const selectedWorkflowCount = workflowFilterValues.filter(workflow => workflow !== 'all').length;
+  const trendScopeLabel = !selectedWorkflowCount || workflowFilterValues.includes('all')
+    ? 'All workflows'
+    : `${selectedWorkflowCount} selected workflow${selectedWorkflowCount > 1 ? 's' : ''}`;
+  const rawRunsByWorkflow = (rawRuns || []).reduce((groups, workflowRun) => {
+    const name = workflowRun.workflow_name || 'Unknown workflow';
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(workflowRun);
+    return groups;
+  }, new Map());
+  const healthScoreWorkflowRows = (data.workflowStats || []).map(stat => ({
+    name: stat.name,
+    ...calculateHealthScore({
+      ...computeWindowSuccessStats(rawRunsByWorkflow.get(stat.name) || [], { windowSize: filters.trendWindowSize }),
+      trendAlerts: trendAlerts.filter(alert => alert.scope === 'workflow' && alert.workflowName === stat.name)
+    })
+  }));
+  const healthScoreRows = healthScoreWorkflowRows.length > 1
+    ? [
+      {
+        name: 'Current selection',
+        ...calculateHealthScore({
+          ...computeWindowSuccessStats(rawRuns || [], { windowSize: filters.trendWindowSize }),
+          trendAlerts: trendAlerts.filter(alert => alert.scope === 'selection')
+        })
+      },
+      ...healthScoreWorkflowRows
+    ]
+    : healthScoreWorkflowRows;
+  const trendWindowSize = filters.trendWindowSize ?? null;
+  const trendWindowPreset = TREND_WINDOW_PRESETS.find(preset => preset.value === trendWindowSize);
+  const trendWindowLabel = trendWindowPreset
+    ? trendWindowPreset.label
+    : `Last ${trendWindowSize} runs`;
+  const setTrendWindowSize = (value) => {
+    setFilters(prev => ({ ...prev, trendWindowSize: value }));
+    setOpenDropdowns(prev => ({ ...prev, trendWindow: false }));
+  };
+  const applyCustomTrendWindowSize = () => {
+    const parsed = Number(trendWindowCustomInput);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      setTrendWindowSize(Math.floor(parsed));
+      setTrendWindowCustomInput('');
+    }
+  };
+  const formatTrendMetricValue = (alert, value) => (
+    alert.unit === 'percent'
+      ? `${Math.round(value || 0)}%`
+      : formatTrendDuration(value || 0)
+  );
+  const formatTrendDeltaValue = (alert) => {
+    const delta = Math.round(alert.delta || 0);
+    return alert.unit === 'percent'
+      ? `+${delta} pts`
+      : `+${formatTrendDuration(delta)}`;
+  };
+  const chartAxisColor = dashboardTheme === 'light' ? '#667085' : '#bcd';
+  const chartGridColor = dashboardTheme === 'light' ? '#98a2b3' : '#122';
+  const maxDurationColor = dashboardTheme === 'light' ? '#d97706' : '#ffd54a';
+  const maxDurationFill = dashboardTheme === 'light' ? '#d977060d' : '#ffd54a18';
+  const minDurationColor = dashboardTheme === 'light' ? '#15803d' : '#4caf50';
 
   return (
     <div className={`dashboard ${dashboardTheme}`}>
@@ -3000,29 +3272,6 @@ export default function Dashboard() {
             ) : (
               <button className="cancel-action" type="button" onClick={cancelCollection}>Cancel collection</button>
             )}
-          </section>
-        )}
-
-        {/* TODO: Re-enable once the Overall health check implementation is ready. */}
-        {SHOW_OVERALL_HEALTH_CHECK && (
-          <section className="overall-health-section card" aria-label="Overall health check">
-            <div className="overall-health-header">
-              <div>
-                <p className="eyebrow">Overall health check</p>
-                <h3>Workflow health summary</h3>
-              </div>
-            </div>
-            <div className="overall-health-grid">
-              <div className="overall-health-card overall-health-warning" aria-label="Duration worsening warning placeholder">
-                <h4>Warnings</h4>
-              </div>
-              <div className="overall-health-card overall-health-danger" aria-label="Failure rate warning placeholder">
-                <h4>Failures</h4>
-              </div>
-              <div className="overall-health-card overall-health-info" aria-label="Workflow status summary placeholder">
-                <h4>Overall health</h4>
-              </div>
-            </div>
           </section>
         )}
 
@@ -3093,7 +3342,7 @@ export default function Dashboard() {
                           <span>All workflows</span>
                         </label>
 
-                        {workflows.filter(w => w !== 'all').map(w => (
+                        {dashboardWorkflowNames.filter(w => w !== 'all').map(w => (
                           <label key={w} className="dropdown-item">
                             <input
                               type="checkbox"
@@ -3419,9 +3668,9 @@ export default function Dashboard() {
                             }}
                             style={{
                               background: 'transparent',
-                              border: '1px solid #444',
+                              border: '1px solid var(--border)',
                               borderRadius: '6px',
-                              color: '#fff',
+                              color: 'var(--text)',
                               cursor: 'pointer',
                               padding: '6px 12px',
                               fontSize: '14px'
@@ -3432,7 +3681,7 @@ export default function Dashboard() {
 
                           <div
                             style={{
-                              color: '#fff',
+                              color: 'var(--text)',
                               fontSize: '16px',
                               fontWeight: '600'
                             }}
@@ -3454,9 +3703,9 @@ export default function Dashboard() {
                             }}
                             style={{
                               background: 'transparent',
-                              border: '1px solid #444',
+                              border: '1px solid var(--border)',
                               borderRadius: '6px',
-                              color: '#fff',
+                              color: 'var(--text)',
                               cursor: 'pointer',
                               padding: '6px 12px',
                               fontSize: '14px'
@@ -3481,7 +3730,7 @@ export default function Dashboard() {
                                 key={day}
                                 style={{
                                   textAlign: 'center',
-                                  color: '#888',
+                                  color: 'var(--muted)',
                                   fontSize: '12px',
                                   fontWeight: '600',
                                   padding: '8px 0'
@@ -3523,17 +3772,17 @@ export default function Dashboard() {
                                   }}
                                   style={{
                                     height: '36px',
-                                    border: isToday ? '1px solid #2196f3' : '1px solid transparent',
+                                    border: isToday ? '1px solid var(--info)' : '1px solid transparent',
                                     borderRadius: '6px',
-                                    color: '#fff',
+                                    color: isStart || isEnd ? '#fff' : 'var(--text)',
                                     cursor: 'pointer',
                                     fontSize: '13px',
                                     fontWeight: isStart || isEnd ? '700' : '400',
                                     background:
                                       isStart || isEnd
-                                        ? '#2196f3'
+                                        ? 'var(--info)'
                                         : isInRange
-                                          ? 'rgba(33, 150, 243, 0.25)'
+                                          ? 'color-mix(in srgb, var(--info) 18%, transparent)'
                                           : 'transparent'
                                   }}
                                 >
@@ -3548,11 +3797,12 @@ export default function Dashboard() {
                         <div
                           style={{
                             padding: '12px',
-                            background: '#222',
+                            background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
+                            border: '1px solid var(--border)',
                             borderRadius: '6px',
                             marginBottom: '15px',
                             fontSize: '13px',
-                            color: '#ccc'
+                            color: 'var(--text)'
                           }}
                         >
                           <div>
@@ -3576,10 +3826,10 @@ export default function Dashboard() {
                             }}
                             style={{
                               padding: '8px 20px',
-                              background: '#333',
-                              border: '1px solid #555',
+                              background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
+                              border: '1px solid var(--border)',
                               borderRadius: '6px',
-                              color: '#fff',
+                              color: 'var(--text)',
                               cursor: 'pointer',
                               fontSize: '13px',
                               fontWeight: '500'
@@ -3599,7 +3849,7 @@ export default function Dashboard() {
                     <span>Data</span>
 
                     <button
-                      onClick={() => loadDashboardData(true)}
+                      onClick={collectMoreDataFromDashboardFilters}
                       className="primary-action"
                       type="button"
                     >
@@ -3609,6 +3859,257 @@ export default function Dashboard() {
                 )}
           </div>
         </div>
+
+        {SHOW_OVERALL_HEALTH_CHECK && (
+          <section className="overall-health-section" aria-label="Overall health check">
+            <div className={`overall-health-header${healthCheckCollapsed ? ' overall-health-header-collapsed' : ''}`}>
+              <div>
+                <p className="eyebrow">Overall health check</p>
+                {!healthCheckCollapsed && (
+                  <h3>
+                    Workflow trend alerts
+                    <InfoIcon explanation={{
+                      title: 'Workflow Trend Alerts',
+                      text: {
+                        paragraphs: [
+                          'Fits a trend line across the runs (with valid duration data) in the chosen "Trend window" to detect whether duration (performance) or failure rate (reliability) is generally increasing, and by how much.'
+                        ],
+                        list: [
+                          {
+                            label: 'Current selection:',
+                            text: ' an aggregate alert computed across every workflow currently included by your filters, in addition to each workflow\'s own alert.'
+                          },
+                          {
+                            label: 'Delta:',
+                            text: ' the total change the trend line predicts from the start to the end of the window.'
+                          },
+                          {
+                            label: 'Previous:',
+                            text: ' the trend line\'s fitted value at the start of the window.'
+                          },
+                          {
+                            label: 'Recent:',
+                            text: ' the trend line\'s fitted value at the end of the window.'
+                          },
+                          {
+                            label: 'Window:',
+                            text: ' how many runs were used for that calculation — this can be lower than the requested window size if the workflow doesn\'t have that many runs (with valid duration data) yet.'
+                          }
+                        ]
+                      }
+                    }} />
+                  </h3>
+                )}
+              </div>
+
+              <div className="overall-health-header-controls">
+                {!healthCheckCollapsed && (
+                <div className="filter-group trend-window-group" ref={dropdownRefs.trendWindow}>
+                  <label>Trend window</label>
+                  <div className="dropdown-container">
+                    <button
+                      className="dropdown-toggle"
+                      type="button"
+                      aria-expanded={openDropdowns.trendWindow}
+                      onClick={() => setOpenDropdowns(prev => ({ ...prev, trendWindow: !prev.trendWindow }))}
+                    >
+                      {trendWindowLabel}
+                      <span className="dropdown-arrow">▼</span>
+                    </button>
+
+                    {openDropdowns.trendWindow && (
+                      <div className="dropdown-menu">
+                        {TREND_WINDOW_PRESETS.map(preset => (
+                          <label key={String(preset.value)} className="dropdown-item">
+                            <input
+                              type="radio"
+                              name="trendWindowSize"
+                              checked={trendWindowSize === preset.value}
+                              onChange={() => setTrendWindowSize(preset.value)}
+                            />
+                            <span>{preset.label}</span>
+                          </label>
+                        ))}
+
+                        <label className="dropdown-item trend-window-custom-item">
+                          <input
+                            type="radio"
+                            name="trendWindowSize"
+                            checked={!trendWindowPreset}
+                            onChange={() => {}}
+                          />
+                          <span>Custom:</span>
+                          <input
+                            type="number"
+                            min="1"
+                            className="trend-window-custom-input"
+                            placeholder="e.g. 30"
+                            value={trendWindowCustomInput}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setTrendWindowCustomInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') applyCustomTrendWindowSize();
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="trend-window-custom-apply"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              applyCustomTrendWindowSize();
+                            }}
+                          >
+                            Apply
+                          </button>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                )}
+
+                <button
+                  type="button"
+                  className={`overall-health-status overall-health-status-${trendSummaryTone}`}
+                  onClick={() => setHealthCheckCollapsed(prev => !prev)}
+                  aria-expanded={!healthCheckCollapsed}
+                  aria-label={healthCheckCollapsed ? 'Expand overall health check' : 'Collapse overall health check'}
+                >
+                  {trendAlerts.length > 0
+                    ? `${trendAlerts.length} degradation${trendAlerts.length > 1 ? 's' : ''} detected`
+                    : 'No degradation detected'}
+                  <span className={`overall-health-status-arrow${healthCheckCollapsed ? ' overall-health-status-arrow-collapsed' : ''}`} aria-hidden="true">▼</span>
+                </button>
+              </div>
+            </div>
+
+            {!healthCheckCollapsed && (
+              <>
+              {trendAlerts.length > 0 ? (
+              <div className={`overall-health-alert-frame overall-health-alert-frame-${trendSummaryTone}`}>
+                <ul className="trend-alert-list" aria-label="Detected workflow degradations">
+                  {trendAlerts.map(alert => (
+                    <li
+                      key={alert.id}
+                      className={`trend-alert-row trend-alert-row-${alert.severity}`}
+                      aria-label={`${alert.title} for ${alert.workflowName}`}
+                    >
+                      <span className={`trend-alert-indicator trend-alert-indicator-${alert.severity}`} aria-hidden="true" />
+                      <div className="trend-alert-main">
+                        <div className="trend-alert-title-line">
+                          <strong>{alert.title}</strong>
+                          <span>{alert.type}</span>
+                        </div>
+                        <p>{alert.summary}</p>
+                        <small>
+                          {alert.workflowName}
+                          {alert.firstRunDate && alert.latestRunDate
+                            ? `, ${alert.firstRunDate} to ${alert.latestRunDate}`
+                            : alert.latestRunDate
+                              ? `, latest ${alert.latestRunDate}`
+                              : ''}
+                        </small>
+                        {alert.isCapped && (
+                          <small className="trend-alert-capped-note">
+                            Requested last {alert.requestedWindowSize} runs, but only {alert.availableRunsTotal} runs (with valid duration data) exist for this workflow — showing trend for those {alert.availableRunsTotal}.
+                          </small>
+                        )}
+                      </div>
+                      <dl className="trend-alert-row-metrics">
+                        <div>
+                          <dt>Delta</dt>
+                          <dd className={`trend-alert-delta trend-alert-delta-${alert.severity}`}>
+                            {formatTrendDeltaValue(alert)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Previous</dt>
+                          <dd>{formatTrendMetricValue(alert, alert.previousValue)}</dd>
+                        </div>
+                        <div>
+                          <dt>Recent</dt>
+                          <dd>{formatTrendMetricValue(alert, alert.recentValue)}</dd>
+                        </div>
+                        <div>
+                          <dt>Window</dt>
+                          <dd>
+                            {alert.runCount} runs
+                            {alert.isCapped && (
+                              <span className="trend-alert-window-split"> (max {alert.availableRunsTotal})</span>
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="overall-health-empty overall-health-info">
+                <strong>No degradation detected.</strong>
+                <span>
+                  {negativeTrendAnalysis.insufficientData
+                    ? `More historical runs are needed for ${trendScopeLabel}.`
+                    : `${trendScopeLabel} is stable across ${negativeTrendAnalysis.runsAnalyzed || 0} runs.`}
+                </span>
+              </div>
+            )}
+
+              <div className="overall-health-scores">
+                <div className="overall-health-scores-header">
+                  <h4>
+                    Workflow health score
+                    <InfoIcon explanation={{
+                      title: 'Workflow Health Score',
+                      text: {
+                        paragraphs: [
+                          'A 0-100 score summarizing how healthy each workflow (and the current selection as a whole) is, based only on the metrics available.'
+                        ],
+                        list: [
+                          {
+                            label: 'Base:',
+                            text: ' the workflow\'s success rate, as a percentage. Example: 95% successful runs starts at a score of 95.'
+                          },
+                          {
+                            label: 'Trend penalty:',
+                            text: ' points are subtracted if "Workflow trend alerts" detects a degradation for that same workflow — 10 points for a warning-severity trend, 20 points for a danger-severity trend (only the bigger one applies if both are detected). Example: that 95 becomes 85 with a warning-level degradation, or 75 with a danger-level one. No penalty is applied when there isn\'t enough history to check for a trend.'
+                          },
+                          {
+                            label: 'Color:',
+                            text: ' green at 90 and above, orange from 70 to 89, red below 70.'
+                          }
+                        ]
+                      }
+                    }} />
+                  </h4>
+                </div>
+
+                {healthScoreRows.length > 0 ? (
+                  <ul className="health-score-list" aria-label="Workflow health scores">
+                    {healthScoreRows.map(row => (
+                      <li
+                        key={row.name}
+                        className={`health-score-row health-score-row-${row.tone}`}
+                        aria-label={`Health score for ${row.name}`}
+                      >
+                        <span className={`health-score-indicator health-score-indicator-${row.tone}`} aria-hidden="true" />
+                        <span className="health-score-row-name">{row.name}</span>
+                        <span className="health-score-row-label">{row.label}</span>
+                        <span className="health-score-row-value">{row.score === null ? '—' : row.score}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="overall-health-empty overall-health-info">
+                    <strong>No health scores available.</strong>
+                    <span>No workflow data to score yet.</span>
+                  </div>
+                )}
+              </div>
+              </>
+            )}
+          </section>
+        )}
 
         {/* Stats */}
         <div className="stats-row">
@@ -3729,6 +4230,30 @@ export default function Dashboard() {
                   Jobs
                 </button>
                 <button
+                  id="stats-tab-degradations"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'degradations'}
+                  aria-controls="stats-panel-degradations"
+                  className={`stats-tab-button ${activeStatsTab === 'degradations' ? 'active' : ''}`}
+                  onClick={() => setActiveStatsTab('degradations')}
+                >
+                  <span className="tab-icon"><UIIcon name="degradations" /></span>
+                  Degradations
+                </button>
+                <button
+                  id="stats-tab-flaky"
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStatsTab === 'flaky'}
+                  aria-controls="stats-panel-flaky"
+                  className={`stats-tab-button ${activeStatsTab === 'flaky' ? 'active' : ''}`}
+                  onClick={() => setActiveStatsTab('flaky')}
+                >
+                  <span className="tab-icon"><UIIcon name="flaky" /></span>
+                  Flaky
+                </button>
+                <button
                   id="stats-tab-branch"
                   type="button"
                   role="tab"
@@ -3810,7 +4335,7 @@ export default function Dashboard() {
                               <div style={{
                                 flex: 1,
                                 height: '20px',
-                                background: '#333',
+                                background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                 borderRadius: '4px',
                                 overflow: 'hidden',
                                 display: 'flex'
@@ -3852,24 +4377,24 @@ export default function Dashboard() {
                     <div style={{
                       padding: '15px',
                       marginBottom: jobStats.length > 0 ? '15px' : '0',
-                      background: '#2a2a2a',
+                      background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
                       borderRadius: '6px',
-                      border: '1px solid #444',
+                      border: '1px solid var(--border)',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '15px'
                     }}>
                       <div className="spinner"></div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ color: '#fff', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
+                        <div style={{ color: 'var(--text)', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
                           Collecting job data...
                         </div>
-                        <div style={{ color: '#aaa', fontSize: '12px', marginBottom: '8px' }}>
+                        <div style={{ color: 'var(--muted)', fontSize: '12px', marginBottom: '8px' }}>
                           {jobProgress.runs_processed} / {jobProgress.total_runs} runs processed ({jobProgress.jobs_collected} jobs collected)
                         </div>
                         <div style={{
                           height: '4px',
-                          background: '#333',
+                          background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                           borderRadius: '2px',
                           overflow: 'hidden'
                         }}>
@@ -3888,7 +4413,7 @@ export default function Dashboard() {
                     <div style={{
                       padding: '40px',
                       textAlign: 'center',
-                      color: '#999'
+                      color: 'var(--muted)'
                     }}>
                       No job data available. Start data collection to see job statistics.
                     </div>
@@ -3917,7 +4442,7 @@ export default function Dashboard() {
                           return (
                             <tr key={j.name}>
                               <td className="branch-name">{j.name}</td>
-                              <td style={{ color: '#bbb', fontSize: '13px' }}>{j.workflowName || 'unknown'}</td>
+                              <td style={{ color: 'var(--muted)', fontSize: '13px' }}>{j.workflowName || 'unknown'}</td>
                               <td>{j.totalRuns}</td>
                               <td>{j.failures}</td>
                               <td>{j.skipped}</td>
@@ -3933,7 +4458,7 @@ export default function Dashboard() {
                                   <div style={{
                                     flex: 1,
                                     height: '20px',
-                                    background: '#333',
+                                    background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                     borderRadius: '4px',
                                     overflow: 'hidden',
                                     display: 'flex'
@@ -3954,6 +4479,292 @@ export default function Dashboard() {
                               </td>
                               <td>{j.medianDuration}s</td>
                               <td>{j.totalDuration}s</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })()}
+
+            {activeStatsTab === 'degradations' && (
+              <div
+                id="stats-panel-degradations"
+                role="tabpanel"
+                aria-labelledby="stats-tab-degradations"
+                className={`table-wrapper ${workflowDegradations.length > 10 ? 'table-wrapper-scroll' : ''}`}
+              >
+                {workflowDegradationsLoading && (
+                  <div style={{
+                    padding: '28px 40px',
+                    textAlign: 'center',
+                    color: 'var(--muted)'
+                  }}>
+                    Checking workflow commits for YAML changes...
+                  </div>
+                )}
+
+                {!workflowDegradationsLoading && workflowDegradationsError && (
+                  <div style={{
+                    padding: '16px 40px',
+                    textAlign: 'center',
+                    color: 'var(--warning)'
+                  }}>
+                    {workflowDegradationsError}
+                  </div>
+                )}
+
+                {!workflowDegradationsLoading && !workflowDegradationsError && workflowDegradations.length === 0 && !progress.isStreaming && (
+                  <div style={{
+                    padding: '40px',
+                    textAlign: 'center',
+                    color: 'var(--muted)'
+                  }}>
+                    No YAML-related workflow degradations detected for the selected filters.
+                  </div>
+                )}
+
+                {workflowDegradations.length > 0 && (
+                  <table className="branch-table">
+                    <thead>
+                      <tr>
+                        <th>Workflow</th>
+                        <th>Branch</th>
+                        <th>Changed YAML</th>
+                        <th>Before</th>
+                        <th>After</th>
+                        <th>Increase</th>
+                        <th>Commit</th>
+                        <th>Detected</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {workflowDegradations.map(item => {
+                        const detectedAt = item.detectedAt
+                          ? new Date(item.detectedAt).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric'
+                            })
+                          : '—';
+
+                        return (
+                          <tr key={item.id}>
+                            <td className="branch-name">{item.workflowName}</td>
+                            <td>{item.branch || '—'}</td>
+                            <td>
+                              <div style={{ display: 'grid', gap: '3px' }}>
+                                {item.changedFiles.map(file => (
+                                  <span key={file} style={{ color: 'var(--muted)', fontSize: '12px', fontFamily: 'monospace' }}>
+                                    {file}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td>{item.previousMedian.toFixed(1)}s</td>
+                            <td>{item.nextMedian.toFixed(1)}s</td>
+                            <td style={{ color: '#ff9800', fontWeight: 600 }}>
+                              +{item.increasePercent.toFixed(0)}%
+                            </td>
+                            <td className="branch-name">
+                              {item.commitUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(item.commitUrl, '_blank')}
+                                  style={{
+                                    color: 'var(--accent)',
+                                    background: 'none',
+                                    border: 0,
+                                    padding: 0,
+                                    font: 'inherit',
+                                    fontFamily: 'monospace',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {item.shortSha}
+                                </button>
+                              ) : item.shortSha}
+                            </td>
+                            <td>{detectedAt}</td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {item.commitUrl && (
+                                  <button
+                                    type="button"
+                                    className="panel-icon-button"
+                                    title="Open commit"
+                                    aria-label={`Open commit ${item.shortSha}`}
+                                    onClick={() => window.open(item.commitUrl, '_blank')}
+                                  >
+                                    <UIIcon name="branch" />
+                                  </button>
+                                )}
+                                {item.runUrl && (
+                                  <button
+                                    type="button"
+                                    className="panel-icon-button"
+                                    title="Open workflow run"
+                                    aria-label={`Open workflow run for ${item.workflowName}`}
+                                    onClick={() => window.open(item.runUrl, '_blank')}
+                                  >
+                                    <UIIcon name="play" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {activeStatsTab === 'flaky' && (() => {
+              return (
+                <div
+                  id="stats-panel-flaky"
+                  role="tabpanel"
+                  aria-labelledby="stats-tab-flaky"
+                  className={`table-wrapper ${flakyTests.length > 10 ? 'table-wrapper-scroll' : ''}`}
+                >
+                  {jobProgress.isCollecting && jobProgress.total_runs > 0 && (
+                    <div style={{
+                      padding: '15px',
+                      marginBottom: '12px',
+                      background: 'color-mix(in srgb, var(--card-bg) 74%, var(--bg))',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '15px'
+                    }}>
+                      <div className="spinner"></div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ color: 'var(--text)', marginBottom: '5px', fontSize: '14px', fontWeight: '500' }}>
+                          Collecting job data...
+                        </div>
+                        <div style={{ color: 'var(--muted)', fontSize: '12px', marginBottom: '8px' }}>
+                          {jobProgress.runs_processed} / {jobProgress.total_runs} runs processed ({jobProgress.jobs_collected} jobs collected)
+                        </div>
+                        <div style={{
+                          height: '4px',
+                          background: 'color-mix(in srgb, var(--border) 60%, transparent)',
+                          borderRadius: '2px',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{
+                            width: `${(jobProgress.runs_processed / jobProgress.total_runs) * 100}%`,
+                            height: '100%',
+                            background: '#4caf50',
+                            transition: 'width 0.3s ease'
+                          }}></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {flakyTests.length === 0 && jobProgress.isCollecting && (
+                    <div style={{
+                      padding: '28px 40px',
+                      textAlign: 'center',
+                      color: 'var(--muted)'
+                    }}>
+                      No flaky jobs have been found yet. New matches will appear here as job data is collected.
+                    </div>
+                  )}
+                  {flakyTests.length === 0 && !jobProgress.isCollecting && !progress.isStreaming && (
+                    <div style={{
+                      padding: '40px',
+                      textAlign: 'center',
+                      color: 'var(--muted)'
+                    }}>
+                      No flaky jobs detected for the selected filters.
+                    </div>
+                  )}
+                  {flakyTests.length > 0 && (
+                    <table className="branch-table">
+                      <thead>
+                        <tr>
+                          <th>Commit</th>
+                          <th>Workflow</th>
+                          <th>Job</th>
+                          <th>Successes</th>
+                          <th>Failures</th>
+                          <th>Total Runs</th>
+                          <th>Last Seen</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {flakyTests.map(item => {
+                          const latestRunUrl = item.runUrls?.[item.runUrls.length - 1];
+                          const lastSeen = item.latestSeenAt
+                            ? new Date(item.latestSeenAt).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })
+                            : 'Unknown';
+
+                          return (
+                            <tr key={item.id}>
+                              <td className="branch-name">
+                                {item.commitUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => window.open(item.commitUrl, '_blank')}
+                                    style={{
+                                      color: 'var(--accent)',
+                                      background: 'none',
+                                      border: 0,
+                                      padding: 0,
+                                      font: 'inherit',
+                                      fontFamily: 'monospace',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    {item.shortSha || 'unknown'}
+                                  </button>
+                                ) : (
+                                  <span style={{ fontFamily: 'monospace' }}>{item.shortSha || 'unknown'}</span>
+                                )}
+                              </td>
+                              <td style={{ color: 'var(--muted)', fontSize: '13px' }}>{item.workflowName || 'unknown'}</td>
+                              <td>{item.jobName || 'unknown'}</td>
+                              <td>{item.successes}</td>
+                              <td>{item.failures}</td>
+                              <td>{item.totalRuns}</td>
+                              <td>{lastSeen}</td>
+                              <td>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                  {item.commitUrl && (
+                                    <button
+                                      type="button"
+                                      className="panel-icon-button"
+                                      title="Open commit"
+                                      aria-label={`Open commit ${item.shortSha}`}
+                                      onClick={() => window.open(item.commitUrl, '_blank')}
+                                    >
+                                      <UIIcon name="branch" />
+                                    </button>
+                                  )}
+                                  {latestRunUrl && (
+                                    <button
+                                      type="button"
+                                      className="panel-icon-button"
+                                      title="Open latest run"
+                                      aria-label={`Open latest run for ${item.jobName}`}
+                                      onClick={() => window.open(latestRunUrl, '_blank')}
+                                    >
+                                      <UIIcon name="play" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}
@@ -4029,7 +4840,7 @@ export default function Dashboard() {
                                 <div style={{
                                   flex: 1,
                                   height: '20px',
-                                  background: '#333',
+                                  background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                   borderRadius: '4px',
                                   overflow: 'hidden',
                                   display: 'flex'
@@ -4103,7 +4914,7 @@ export default function Dashboard() {
                               <div style={{
                                 flex: 1,
                                 height: '20px',
-                                background: '#333',
+                                background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                 borderRadius: '4px',
                                 overflow: 'hidden',
                                 display: 'flex'
@@ -4144,10 +4955,10 @@ export default function Dashboard() {
                     style={{
                       width: '100%',
                       padding: '10px 15px',
-                      background: '#222',
-                      border: '1px solid #444',
+                      background: 'var(--card-bg)',
+                      border: '1px solid var(--border)',
                       borderRadius: '4px',
-                      color: '#fff',
+                      color: 'var(--text)',
                       fontSize: '14px',
                       boxSizing: 'border-box',
                       display: 'block'
@@ -4192,7 +5003,7 @@ export default function Dashboard() {
                                   <div style={{
                                     flex: 1,
                                     height: '20px',
-                                    background: '#333',
+                                    background: 'color-mix(in srgb, var(--border) 60%, transparent)',
                                     borderRadius: '4px',
                                     overflow: 'hidden',
                                     display: 'flex'
@@ -4259,9 +5070,9 @@ export default function Dashboard() {
                   data={visibleRunsOverTime}
                   margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis dataKey="date" stroke="#bcd" />
-                  <YAxis stroke="#bcd" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                  <XAxis dataKey="date" stroke={chartAxisColor} />
+                  <YAxis stroke={chartAxisColor} />
                   <Tooltip />
                   <Legend />
                   <Bar dataKey="successes" stackId="a" fill="#4caf50" name="Successes" />
@@ -4312,10 +5123,10 @@ export default function Dashboard() {
                   data={visibleDurationVariability}
                   margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis dataKey="date" stroke="#bcd" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                  <XAxis dataKey="date" stroke={chartAxisColor} />
                   <YAxis
-                    stroke="#bcd"
+                    stroke={chartAxisColor}
                     label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }}
                   />
                   <Tooltip />
@@ -4324,8 +5135,9 @@ export default function Dashboard() {
                   <Area
                     type="monotone"
                     dataKey="maxDuration"
-                    fill="#ff980030"
-                    stroke="#ff9800"
+                    fill={maxDurationFill}
+                    stroke={maxDurationColor}
+                    strokeWidth={2}
                     name="Max"
                   />
 
@@ -4333,7 +5145,8 @@ export default function Dashboard() {
                     type="monotone"
                     dataKey="minDuration"
                     fill="#4caf5030"
-                    stroke="#4caf50"
+                    stroke={minDurationColor}
+                    strokeWidth={2}
                     name="Min"
                   />
 
@@ -4401,10 +5214,10 @@ export default function Dashboard() {
                     data={visibleCumulativeFailure}
                     margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                    <XAxis dataKey="date" stroke="#bcd" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                    <XAxis dataKey="date" stroke={chartAxisColor} />
                     <YAxis
-                      stroke="#bcd"
+                      stroke={chartAxisColor}
                       label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }}
                     />
                     <Tooltip />
@@ -4491,11 +5304,11 @@ export default function Dashboard() {
                     <div style={{ color: '#4caf50', fontWeight: 'bold', marginTop: '5px' }}>Mean: {formatTimeForTooltip(tooltipData.mean)}</div>
                   </div>
                 )}
-                <svg width="100%" height="100%" viewBox="0 0 900 320" preserveAspectRatio="xMidYMid meet" style={{ overflow: 'visible' }}>
+                <svg width="100%" height="100%" viewBox="0 0 700 460" preserveAspectRatio="xMidYMid meet" style={{ overflow: 'visible' }}>
                   {(() => {
-                    const chartWidth = 900;
-                    const chartHeight = 320;
-                    const margin = { top: 20, right: 30, bottom: 60, left: 120 };
+                    const chartWidth = 700;
+                    const chartHeight = 460;
+                    const margin = { top: 36, right: 34, bottom: 86, left: 136 };
                     const plotWidth = chartWidth - margin.left - margin.right;
                     const plotHeight = chartHeight - margin.top - margin.bottom;
 
@@ -4513,7 +5326,7 @@ export default function Dashboard() {
 
                     const xScale = reasonableMax > 0 ? plotWidth / reasonableMax : 1;
                     const boxSpacing = plotHeight / (visibleTimeToFix.length + 1);
-                    const boxHeight = Math.min(boxSpacing * 0.6, 40);
+                    const boxHeight = Math.min(boxSpacing * 0.62, 52);
 
                     return (
                       <g transform={`translate(${margin.left}, ${margin.top})`}>
@@ -4523,7 +5336,7 @@ export default function Dashboard() {
                           y1={0}
                           x2={0}
                           y2={plotHeight}
-                          stroke="#bcd"
+                          stroke={chartAxisColor}
                           strokeWidth={1.5}
                         />
 
@@ -4533,7 +5346,7 @@ export default function Dashboard() {
                           y1={plotHeight}
                           x2={plotWidth}
                           y2={plotHeight}
-                          stroke="#bcd"
+                          stroke={chartAxisColor}
                           strokeWidth={1.5}
                         />
 
@@ -4549,15 +5362,15 @@ export default function Dashboard() {
                                 y1={0}
                                 x2={xPos}
                                 y2={plotHeight}
-                                stroke="#122"
+                                stroke={chartGridColor}
                                 strokeDasharray="3 3"
                                 opacity={0.3}
                               />
                               <text
                                 x={xPos}
                                 y={plotHeight + 20}
-                                fill="#bcd"
-                                fontSize="11"
+                                fill={chartAxisColor}
+                                fontSize="17"
                                 textAnchor="middle"
                               >
                                 {displayValue < 10 ? displayValue.toFixed(1) : Math.round(displayValue)}{timeUnit.label}
@@ -4574,8 +5387,8 @@ export default function Dashboard() {
                               key={`y-label-${index}`}
                               x={-10}
                               y={yPos + 5}
-                              fill="#bcd"
-                              fontSize="11"
+                              fill={chartAxisColor}
+                              fontSize="17"
                               textAnchor="end"
                             >
                               {item.workflow.length > 15 ? item.workflow.substring(0, 12) + '...' : item.workflow}
@@ -4638,7 +5451,7 @@ export default function Dashboard() {
                                     x={plotWidth + 5}
                                     y={yPos + 4}
                                     fill="#ff9800"
-                                    fontSize="9"
+                                    fontSize="15"
                                     textAnchor="start"
                                   >
                                     {formatWithUnit(item.max, timeUnit.divisor, timeUnit.label)}
@@ -4685,8 +5498,8 @@ export default function Dashboard() {
                         <text
                           x={plotWidth / 2}
                           y={plotHeight + 45}
-                          fill="#bcd"
-                          fontSize="12"
+                          fill={chartAxisColor}
+                          fontSize="18"
                           textAnchor="middle"
                           fontWeight="bold"
                         >
@@ -4695,12 +5508,12 @@ export default function Dashboard() {
 
                         {/* Y-axis label */}
                         <text
-                          x={-60}
+                          x={-76}
                           y={plotHeight / 2}
-                          fill="#bcd"
-                          fontSize="12"
+                          fill={chartAxisColor}
+                          fontSize="18"
                           textAnchor="middle"
-                          transform={`rotate(-90, -60, ${plotHeight / 2})`}
+                          transform={`rotate(-90, -76, ${plotHeight / 2})`}
                           fontWeight="bold"
                         >
                           Workflow
@@ -4769,9 +5582,9 @@ export default function Dashboard() {
                     data={visibleDurationExplosion}
                     margin={{ top: 10, right: 30, left: 0, bottom: 20 }}
                   >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#122" />
-                  <XAxis dataKey="date" stroke="#bcd" angle={-45} textAnchor="end" height={80} />
-                  <YAxis stroke="#bcd" label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                  <XAxis dataKey="date" stroke={chartAxisColor} angle={-45} textAnchor="end" height={80} />
+                  <YAxis stroke={chartAxisColor} label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }} />
                   <Tooltip
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
@@ -4790,7 +5603,7 @@ export default function Dashboard() {
                                   Next median: {data.worseningPoint.nextMedian.toFixed(1)}s
                                 </p>
                                 {data.worseningPoint.commitSha && (
-                                  <p style={{ color: '#bcd', margin: '3px 0', fontSize: '10px', fontFamily: 'monospace' }}>
+                                  <p style={{ color: chartAxisColor, margin: '3px 0', fontSize: '10px', fontFamily: 'monospace' }}>
                                     Commit: {data.worseningPoint.commitSha.substring(0, 7)}
                                   </p>
                                 )}
@@ -4933,11 +5746,11 @@ export default function Dashboard() {
                     data={visibleFailureWorsening}
                     margin={{ top: 10, right: 28, left: 42, bottom: 36 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#122" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
 
                     <XAxis
                       dataKey="date"
-                      stroke="#bcd"
+                      stroke={chartAxisColor}
                       angle={-45}
                       textAnchor="end"
                       height={92}
@@ -4948,7 +5761,7 @@ export default function Dashboard() {
                     />
 
                     <YAxis
-                      stroke="#bcd"
+                      stroke={chartAxisColor}
                       width={82}
                       domain={[0, 100]}
                       tickMargin={8}
@@ -4957,7 +5770,7 @@ export default function Dashboard() {
                         angle: -90,
                         position: 'insideLeft',
                         offset: -2,
-                        fill: '#bcd'
+                        fill: chartAxisColor
                       }}
                     />
 
@@ -5001,7 +5814,7 @@ export default function Dashboard() {
 
                                   {data.worseningPoint.commitSha && (
                                     <p style={{
-                                      color: '#bcd',
+                                      color: chartAxisColor,
                                       margin: '3px 0',
                                       fontSize: '10px',
                                       fontFamily: 'monospace'

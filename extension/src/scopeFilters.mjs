@@ -10,6 +10,97 @@ export function normalizeWorkflowIds(workflowIds) {
   ));
 }
 
+export function sameWorkflowScope(left = [], right = []) {
+  const leftIds = normalizeWorkflowIds(left);
+  const rightIds = normalizeWorkflowIds(right);
+  return (
+    leftIds.length === rightIds.length &&
+    leftIds.every((value, index) => value === rightIds[index])
+  );
+}
+
+export function mergeWorkflowNames(collectedWorkflowNames = [], workflowOptions = []) {
+  const names = new Set();
+
+  for (const name of collectedWorkflowNames) {
+    if (name && name !== 'all') {
+      names.add(name);
+    }
+  }
+
+  for (const workflow of workflowOptions) {
+    if (workflow?.name) {
+      names.add(workflow.name);
+    }
+  }
+
+  return ['all', ...Array.from(names).sort()];
+}
+
+export function workflowIdsForNames(workflowOptions = [], selectedWorkflowNames = []) {
+  if (!Array.isArray(selectedWorkflowNames) || selectedWorkflowNames.includes('all')) {
+    return [];
+  }
+
+  const selectedNames = new Set(selectedWorkflowNames.filter(Boolean));
+  return normalizeWorkflowIds(
+    workflowOptions
+      .filter(workflow => selectedNames.has(workflow?.name))
+      .map(workflow => workflow.id)
+  );
+}
+
+export function extendWorkflowScopeForSelection(
+  workflowOptions = [],
+  existingWorkflowIds = [],
+  selectedWorkflowNames = [],
+) {
+  const selectedIds = workflowIdsForNames(workflowOptions, selectedWorkflowNames);
+  if (!Array.isArray(selectedWorkflowNames) || selectedWorkflowNames.includes('all')) {
+    return [];
+  }
+
+  const existingIds = normalizeWorkflowIds(existingWorkflowIds);
+  if (existingIds.length === 0) {
+    return [];
+  }
+
+  return normalizeWorkflowIds([...existingIds, ...selectedIds]);
+}
+
+export function workflowIdsForSelectionDelta(
+  workflowOptions = [],
+  existingWorkflowIds = [],
+  selectedWorkflowNames = [],
+) {
+  if (!Array.isArray(selectedWorkflowNames) || selectedWorkflowNames.includes('all')) {
+    return [];
+  }
+
+  const existingIds = new Set(normalizeWorkflowIds(existingWorkflowIds));
+  if (existingIds.size === 0) {
+    return [];
+  }
+
+  return workflowIdsForNames(workflowOptions, selectedWorkflowNames)
+    .filter(id => !existingIds.has(id));
+}
+
+export function workflowNamesForIds(workflowOptions = [], workflowIds = []) {
+  const ids = normalizeWorkflowIds(workflowIds);
+  if (ids.length === 0) {
+    return ['all'];
+  }
+
+  const workflowsById = new Map(
+    workflowOptions.map(workflow => [Number(workflow?.id), workflow?.name]).filter(([id, name]) => (
+      Number.isInteger(id) && id > 0 && Boolean(name)
+    ))
+  );
+
+  return ids.map(id => workflowsById.get(id)).filter(Boolean);
+}
+
 function formatToday() {
   const today = new Date();
   const year = today.getFullYear();
@@ -33,6 +124,7 @@ export function buildExtractionFilters({
   start,
   end,
   workflowIds = [],
+  refreshWorkflowIds = [],
   fetchJobDetails = false,
   forceRefresh = false,
   today,
@@ -41,6 +133,7 @@ export function buildExtractionFilters({
   const filters = {
     end: resolvedDates.end,
     workflowIds: normalizeWorkflowIds(workflowIds),
+    refreshWorkflowIds: normalizeWorkflowIds(refreshWorkflowIds),
     fetchJobDetails: Boolean(fetchJobDetails),
     forceRefresh: Boolean(forceRefresh),
   };

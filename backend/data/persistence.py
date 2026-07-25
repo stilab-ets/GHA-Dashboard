@@ -142,6 +142,26 @@ class DataPersistence:
         data = self._load_data(repo)
         data['jobs_by_run'][run_id_str] = jobs
         self._save_data(repo, data)
+
+    def save_jobs_batch(self, repo: str, jobs_by_run: Dict[str, List[Dict[str, Any]]]):
+        """
+        Save jobs for multiple runs in one repository file write.
+
+        Args:
+            repo: Repository name (owner/repo)
+            jobs_by_run: Mapping of workflow run ID to job dictionaries
+        """
+        if not jobs_by_run:
+            return
+
+        data = self._load_data(repo)
+
+        for run_id, jobs in jobs_by_run.items():
+            run_id_str = str(run_id)
+            if run_id_str:
+                data['jobs_by_run'][run_id_str] = jobs
+
+        self._save_data(repo, data)
     
     def get_run(self, repo: str, run_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific run by ID."""
@@ -157,6 +177,20 @@ class DataPersistence:
         """Get jobs for a specific run."""
         data = self._load_data(repo)
         return data['jobs_by_run'].get(str(run_id))
+
+    def get_jobs_for_runs(self, repo: str, run_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        """Get persisted jobs for multiple runs with a single disk read."""
+        if not run_ids:
+            return {}
+
+        data = self._load_data(repo)
+        jobs_by_run = data['jobs_by_run']
+
+        return {
+            str(run_id): jobs_by_run[str(run_id)]
+            for run_id in run_ids
+            if str(run_id) in jobs_by_run
+        }
     
     def has_run(self, repo: str, run_id: str) -> bool:
         """Check if a run exists in storage."""
