@@ -116,9 +116,10 @@ https://docs.google.com/forms/d/e/1FAIpQLSc6Von65ZCGnbB91yq0Ry8Fi6xpsxnja86ILuKI
 2. Execute `python app.py --e2e`
 1. Go to the extension folder via `cd ../extension` 
 2. Execute `npm run test:e2e`
+3. Execute `npm run test:unit`
 
 > [!NOTE]
-> As playwright do not support extension for firefox, all E2E tests use chromium
+> As playwright do not support extension for Firefox, all E2E tests use chromium
 
 ### Backend
 

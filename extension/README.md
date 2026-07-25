@@ -18,19 +18,29 @@ Quick start (development)
    npm run dev
    ```
 
-Build & package (produce ready-to-load `build/`)
-1. Build and assemble the extension into `build/`:
-   ```powershell
-   npm run pack
-   ```
+
+
+Build and load the extension :
+
+#### Option #1: Chromium
+
+1. Go to the extension folder via `cd extension` 
+2. Execute `npm run pack` or `npm run pack chromium`
+3. Open Chrome/Brave/etc.. and go to `chrome://extensions/`
+4. Enable **Developer mode** (top right)
+5. Click **Load unpacked**
+6. Select the folder: `GHA-Dashboard/extension/build/`
+
+#### Option #2: Firefox
+
+1. Go to the extension folder via `cd extension` 
+2. Execute `npm run pack firefox`
+3. Open Firefox and go to `about:debugging#/runtime/this-firefox`
+4. Click **Load Temporary Add-on...**
+5. Select the manifest: `GHA-Dashboard/extension/build/manifest.json`
    This runs `vite build` and copies manifest, background scripts and other runtime files into `build/`.
 
-2. Load the extension in Chrome/Edge (no server required):
-   - Open `chrome://extensions`
-   - Enable "Developer mode"
-   - Click "Load unpacked" and select the `build/` folder
-
-3. (Optional) Create a distributable ZIP (Windows PowerShell):
+(Optional) Create a distributable ZIP (Windows PowerShell):
    ```powershell
    npm run dist
    ```
@@ -53,4 +63,9 @@ Run PlayWright tests:
 4. Run the PlayWright tests:
    ```powershell
    npm run test:e2e
+   ```
+
+5. Run the Unit tests:
+   ```powershell
+   npm run test:unit
    ```
