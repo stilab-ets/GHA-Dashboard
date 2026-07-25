@@ -114,6 +114,10 @@ Available metrics and views include:
 - branch comparison
 - failure rate timeline
 - duration spikes and anomaly indicators
+- job details
+- degradations
+- flaky tests
+- health score
 
 ## 8. Troubleshooting
 

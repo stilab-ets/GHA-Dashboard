@@ -1,0 +1,37 @@
+@startuml
+skinparam componentStyle uml2
+
+' Acteurs avec leurs couleurs respectives
+actor "Développeur" as dev #LightBlue
+actor "Chef d'équipe" as chef #Pink
+actor "Gestionnaire" as gest #LightGreen
+
+' Définition des zones rectangulaires avec des alias
+rectangle "GHA-Dashboard" as TBD {
+    component "Frontend (Extension)" as front
+    component "Backend" as back
+}
+
+rectangle "GitHub" as SYS_GH {
+    component "API GitHub Actions" as gh_api
+}
+
+rectangle "GHAminer" as OUTIL {
+    component "Extraction des workflows, logs,\nerreurs, durées" as ghaminer_comp
+}
+
+' Relations Acteurs -> Frontend
+dev -down-> front : Suit les métriques
+chef -down-> front : Analyse les performances
+gest -down-> front : Suit les taux d'échecs
+
+' Relations internes au Tableau de bord
+front -down-> back : Requete API Rest\n(GET /metrics)
+back -up-> front : Envoie les résultats (JSON)
+
+' Relations externes (qui pointent vers les boîtes ou composants selon l'image)
+back -right-> OUTIL : Exécute GHAminer
+SYS_GH -up-> OUTIL : Données Workflows et logs
+OUTIL -down-> SYS_GH : Requete API GitHub
+
+@enduml
