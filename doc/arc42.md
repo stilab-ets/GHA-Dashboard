@@ -155,10 +155,50 @@ Observe l'évolution du taux d'échec des workflows pour identifier les période
 3. Le système affiche un graphique linéaire illustrant le pourcentage d'échec au fil du temps.
 4. L'utilisateur compare les résultats selon différentes périodes.
 
+**Scénario alternatif :**
+4.a L'utilisateur ouvre le pop-up d'informations pour déchiffrer le contenu du KPI séléctionné.
+4.b L'utilisateur clique sur le bouton d'agrandissement pour voir le graphique en plein écran.
+
 ---
 
-> [!WARNING]
-> TODO : completer le reste des CUs une fois que le projet est rendu à la dernière itération
+### UC-06 : Analyser les flaky tests au fil du temps
+
+Observe l'évolution des flaky tests des workflows pour identifier les périodes instables.
+
+**Préconditions :**
+- UC-03 complété.
+
+**Postconditions :**
+- Les métriques affichées reflètent les flaky tests pour la période sélectionnée.
+
+**Scénario principal (succès) :**
+1. L'utilisateur sélectionne une période d'analyse (jour, semaine, mois).
+2. L'utilisateur clique sur l'onglet flaky tests dans le tableau de bord.
+3. Le système affiche la liste des flaky tests.
+4. L'utilisateur clique sur le numéro de commit pour se rendre sur le commit causant les flaky tests.
+
+**Scénario alternatif :**
+4.a L'utilisateur clique sur l'icône d'action pour se rendre aux jobs en échec.
+
+---
+
+### UC-07 : Analyser les dégradations au fil du temps
+
+Observe l'évolution des dégradations des workflows pour identifier les périodes instables.
+
+**Préconditions :**
+- UC-03 complété.
+
+**Postconditions :**
+- Les métriques affichées reflètent les dégradations pour la période sélectionnée.
+
+**Scénario principal (succès) :**
+1. L'utilisateur sélectionne une période d'analyse (jour, semaine, mois).
+2. L'utilisateur clique sur l'onglet des dégradations dans le tableau de bord.
+3. Le système affiche la liste des dégradations.
+4. L'utilisateur clique sur le numéro de commit pour se rendre sur le commit causant les dégradations.
+
+---
 
 ### Glossaire (Ubiquitous Language)
 | Terme | Définition |
