@@ -3,19 +3,35 @@ left to right direction
 actor "Développeur" as Dev
 
 rectangle " Tableau de bord GitHub Actions" #LightYellow {
-  
-  usecase "UC01 : Consulter le tableau de bord" as UC01
-  
-  usecase "UC02 : Visualiser les statistiques globales" as UC02
+  usecase "UC-01 : Configurer l’accès à GitHub\n(OAuth App)" as UC01
 
-  usecase "UC03 : Identifier les causes d’échec" as UC03
+  usecase "UC-02 : Configurer l’accès à GitHub\n(PAT)" as UC02
+
+  usecase "UC-03 : Consulter le tableau de bord" as UC03
+
+  usecase "UC-04 : Filtrer les métriques" as UC04
+
+  usecase "UC-05 : Analyser les échecs\nau fil du temps" as UC05
+
+  usecase "UC-06 : Analyser les flaky tests\nau fil du temps" as UC06
+
+  usecase "UC-07 : Analyser les dégradations\nau fil du temps" as UC07
 }
 
 Dev --> UC01
 Dev --> UC02
 Dev --> UC03
+Dev --> UC04
+Dev --> UC05
+Dev --> UC06
+Dev --> UC07
 
-UC02 -[#blue,dashed]-> UC01 : <<extend>>
-UC03 -[#blue,dashed]-> UC01 : <<extend>>
+UC03 -[#blue,dashed]-> UC01 : <<include>>
+UC03 -[#blue,dashed]-> UC02 : <<include>>
+
+UC04 -[#blue,dashed]-> UC03 : <<extend>>
+UC05 -[#blue,dashed]-> UC03 : <<extend>>
+UC06 -[#blue,dashed]-> UC03 : <<extend>>
+UC07 -[#blue,dashed]-> UC03 : <<extend>>
 
 @enduml

@@ -224,10 +224,7 @@ Le diagramme ci-dessous présente l'environement global du système, montrant le
 
 ## Diagramme de cas d'utilisation :
 Voici le diagramme illustrant les interactions principales entre les acteurs et le système :
-![Diagramme de cas d'utilisation](diagramme_use_case.png)
-
-> [!WARNING]
-> À mettre à jour une fois que le développement est quasi-complété
+![Diagramme de cas d'utilisation](use_case_diagram.png)
 
 ---
 
@@ -267,34 +264,7 @@ Voici le diagramme illustrant les interactions principales entre les acteurs et 
 ### Architecture en couches                   
 ![Architecture en couches](architecture_couches.svg)
 
-## 6. Vue d'exécution
-
-### Diagramme de séquence pour UC-01 : Consulter le tableau de bord
-![Diagramme de séquence pour UC-01](architecture_sequence_diagram.png)
-
-### Flux d'exécution pour UC-02 : Filtrer les métriques
-
-1. **Utilisateur** sélectionne des filtres (workflow, branche, acteur, période) dans l'interface..
-2. **Extension Multi-navigateur** envoie une requête GET avec les paramètres de filtrage à Flask. 
-3. **Flask** interroge JSON avec les critères de filtrage
-4. **Flask** recalcule les métriques pour le sous-ensemble filtré
-5. **Extension Multi-Navigateur** reçoit les nouvelles métriques et met à jour l'affichage dynamiquement
-
-> [!WARNING]
-> TODO
-
-### Flux d'exécution pour UC-05 : Analyser les échecs au fil du temps
-
-1. **Utilisateur** sélectionne une période d'analyse (jour/semaine/mois)
-2. **Extension Multi-Navigateur** envoie une requête GET avec la période à Flask
-3. **Flask** interroge JSON pour obtenir l'historique des workflow runs sur la période
-4. **Flask** calcule le taux d'échec par intervalle de temps (agrégation temporelle)
-5. **Extension Multi-Navigateur** reçoit les données et génère un graphique linéaire
-6. **Utilisateur** visualise l'évolution du taux d'échec dans le temps  
-
----
-
-## 7. Vue de déploiement
+## 6. Vue de déploiement
 
 ### Architecture de déploiement en local
 
@@ -334,9 +304,9 @@ Charger l'extension temporaire en pointant vers `extension/build/manifest`.
 - `3000` : Flask API (exposition externe)
 ---
 
-## 8. Concepts transversaux
+## 7. Concepts transversaux
 
-### 8.1 Sécurité
+### 7.1 Sécurité
 
 - **Authentification GitHub** : L'extension utilise les tokens d'authentification GitHub de l'utilisateur déjà connecté.
   - Par OAuth App de GitHub ou la copie manuelle du token.
@@ -344,20 +314,20 @@ Charger l'extension temporaire en pointant vers `extension/build/manifest`.
 - **HTTPS uniquement** : Toutes les communications avec GitHub se font en HTTPS.
 - **CORS** : Configuration appropriée pour permettre uniquement les requêtes depuis l'extension Multi-Navigateur.
 
-### 8.2 Performance
+### 7.2 Performance
 
 - **Cache** : Mise en cache des résultats de requêtes fréquentes dans JSON.
 - **Pagination** : Récupération paginée des workflow runs pour limiter la charge mémoire.
 - **Agrégation côté serveur** : Calculs métriques effectués par Flask pour alléger le frontend.
 
-### 8.3 Gestion des erreurs
+### 7.3 Gestion des erreurs
 
 - **API GitHub rate limiting** : Gestion des limites de taux avec retry et backoff exponentiel.
 - **Erreurs réseau** : Affichage de messages utilisateur clairs en cas d'indisponibilité.
 - **Données manquantes** : Valeurs par défaut et messages informatifs si aucun workflow trouvé.
 - **Logs structurés** : Logging centralisé dans chaque service pour faciliter le débogage.
 
-### 8.4 Tests
+### 7.4 Tests
 
 - **Tests unitaires frontend** : Lancés automatiquement avec PlayWright.
 - **Tests unitaires backend** : pytest (Flask).
@@ -366,7 +336,7 @@ Charger l'extension temporaire en pointant vers `extension/build/manifest`.
 
 ---
 
-## 9. Décisions d'architecture
+## 8. Décisions d'architecture
 
 ### ADRs du projet
 
@@ -374,7 +344,7 @@ Voir le dossier `adr` pour plus d'informations.
 
 ---
 
-## 10. Exigences qualité
+## 9. Exigences qualité
 
 ### Performance
 
@@ -436,7 +406,7 @@ Voir le dossier `adr` pour plus d'informations.
 
 ---
 
-## 11. Risques et dettes techniques
+## 10. Risques et dettes techniques
 
 ### Risques identifiés
 
@@ -468,7 +438,7 @@ Voir le dossier `adr` pour plus d'informations.
 
 ---
 
-## 12. Glossaire
+## 11. Glossaire
 
 | Terme | Définition |
 |-------|------------|
