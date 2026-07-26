@@ -4,7 +4,7 @@ Uses JSON format for storage, organized by repository.
 """
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
@@ -80,7 +80,7 @@ class DataPersistence:
     def _save_data(self, repo: str, data: Dict[str, Any]):
         """Save data for a repository to disk."""
         repo_file = self._get_repo_file(repo)
-        data['last_updated'] = datetime.utcnow().isoformat()
+        data['last_updated'] = datetime.now(timezone.utc).isoformat()
         
         try:
             # Write atomically using a temp file
