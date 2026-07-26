@@ -46,6 +46,8 @@ test('detects same commit and job with success and failure', () => {
   assert.equal(flakyTests[0].successes, 1);
   assert.equal(flakyTests[0].failures, 1);
   assert.equal(flakyTests[0].transitions, 1);
+  assert.equal(flakyTests[0].firstSeenAt, '2026-06-01T10:00:00Z');
+  assert.equal(flakyTests[0].latestSeenAt, '2026-06-01T10:05:00Z');
   assert.equal(flakyTests[0].commitUrl, 'https://github.com/example/repo/commit/abc123456789');
 });
 
@@ -65,6 +67,77 @@ test('detects same commit and job with failure and success', () => {
 
   assert.equal(flakyTests.length, 1);
   assert.equal(flakyTests[0].transitions, 1);
+});
+
+test('detects both outcomes regardless of how many successes or failures occur', () => {
+  const flakyTests = detectFlakyTests([
+    run({
+      id: 1,
+      createdAt: '2026-06-01T10:00:00Z',
+      jobs: [job('unit tests', 'success')],
+    }),
+    run({
+      id: 2,
+      createdAt: '2026-06-01T10:03:00Z',
+      jobs: [job('unit tests', 'success')],
+    }),
+    run({
+      id: 3,
+      createdAt: '2026-06-01T10:05:00Z',
+      jobs: [job('unit tests', 'failure')],
+    }),
+  ], 'example/repo');
+
+  assert.equal(flakyTests.length, 1);
+  assert.equal(flakyTests[0].successes, 1);
+  assert.equal(flakyTests[0].failures, 1);
+  assert.equal(flakyTests[0].observedSuccesses, 2);
+});
+
+test('shows only the latest completed success-failures-success episode', () => {
+  const flakyTests = detectFlakyTests([
+    run({ id: 1, createdAt: '2026-06-01T10:00:00Z', jobs: [job('unit tests', 'failure')] }),
+    run({ id: 2, createdAt: '2026-06-01T10:01:00Z', jobs: [job('unit tests', 'success')] }),
+    run({ id: 3, createdAt: '2026-06-01T10:02:00Z', jobs: [job('unit tests', 'failure')] }),
+    run({ id: 4, createdAt: '2026-06-01T10:03:00Z', jobs: [job('unit tests', 'failure')] }),
+    run({ id: 5, createdAt: '2026-06-01T10:04:00Z', jobs: [job('unit tests', 'success')] }),
+    run({ id: 6, createdAt: '2026-06-01T10:05:00Z', jobs: [job('unit tests', 'success')] }),
+    run({ id: 7, createdAt: '2026-06-01T10:06:00Z', jobs: [job('unit tests', 'failure')] }),
+    run({ id: 8, createdAt: '2026-06-01T10:07:00Z', jobs: [job('unit tests', 'success')] }),
+  ], 'example/repo');
+
+  assert.equal(flakyTests.length, 1);
+  assert.equal(flakyTests[0].successes, 1);
+  assert.equal(flakyTests[0].failures, 1);
+  assert.equal(flakyTests[0].totalRuns, 2);
+  assert.equal(flakyTests[0].observedSuccesses, 4);
+  assert.equal(flakyTests[0].observedFailures, 4);
+  assert.equal(flakyTests[0].hasCompletedEpisode, true);
+  assert.equal(flakyTests[0].firstSeenAt, '2026-06-01T10:06:00Z');
+  assert.equal(flakyTests[0].latestSeenAt, '2026-06-01T10:07:00Z');
+  assert.deepEqual(flakyTests[0].runUrls, [
+    'https://github.com/example/repo/actions/runs/7',
+    'https://github.com/example/repo/actions/runs/8',
+  ]);
+});
+
+test('does not combine identical commits and jobs across branches', () => {
+  const flakyTests = detectFlakyTests([
+    run({
+      id: 1,
+      branch: 'main',
+      createdAt: '2026-06-01T10:00:00Z',
+      jobs: [job('unit tests', 'success')],
+    }),
+    run({
+      id: 2,
+      branch: 'feature/example',
+      createdAt: '2026-06-01T10:05:00Z',
+      jobs: [job('unit tests', 'failure')],
+    }),
+  ], 'example/repo');
+
+  assert.deepEqual(flakyTests, []);
 });
 
 test('detects success and failure even when neutral outcomes sit between them', () => {
@@ -87,7 +160,8 @@ test('detects success and failure even when neutral outcomes sit between them', 
   ], 'example/repo');
 
   assert.equal(flakyTests.length, 1);
-  assert.equal(flakyTests[0].totalRuns, 3);
+  assert.equal(flakyTests[0].totalRuns, 2);
+  assert.equal(flakyTests[0].observedTotalRuns, 3);
   assert.equal(flakyTests[0].transitions, 1);
 });
 
@@ -118,7 +192,8 @@ test('does not require an adjacent success failure transition', () => {
   assert.equal(flakyTests.length, 1);
   assert.equal(flakyTests[0].successes, 1);
   assert.equal(flakyTests[0].failures, 1);
-  assert.equal(flakyTests[0].totalRuns, 4);
+  assert.equal(flakyTests[0].totalRuns, 2);
+  assert.equal(flakyTests[0].observedTotalRuns, 4);
 });
 
 test('does not combine the same job across different commits', () => {
