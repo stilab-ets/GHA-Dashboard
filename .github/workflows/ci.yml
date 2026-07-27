@@ -11,6 +11,10 @@ jobs:
 
   extension-tests:
     uses: ./.github/workflows/extension-tests.yml
+    secrets:
+      TEST_GITHUB_TOKEN: ${{ secrets.TEST_GITHUB_TOKEN }}
+      TEST_GITHUB_USERNAME: ${{ secrets.TEST_GITHUB_USERNAME }}
+      CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
 
   status-check:
     needs: [ backend-tests, extension-tests ]
@@ -19,7 +23,7 @@ jobs:
     steps:
       - name: Check test results
         run: |
-          if [[ "${{ needs.backend-tests.result }}" == "failure" || "${{ needs.extension-tests.result }}" == "failure" ]]; then
+          if [[ "${{ needs.backend-tests.result }}" != "success" || "${{ needs.extension-tests.result }}" != "success" ]]; then
             echo "Some tests failed"
             exit 1
           fi

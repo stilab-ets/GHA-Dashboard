@@ -1,3 +1,8 @@
+from gevent import monkey
+
+# Prevents a sensibility to timeouts or blocks due to the fact that ghaminer_stream uses requests/urllib3 which is not gevent-aware.
+monkey.patch_all()
+
 from data.manager import DataManager
 from data.persistence import DataPersistence
 from ghaminer_stream import convert_ghaminer_run_to_dashboard, dedupe_runs_by_id, get_run_identity
