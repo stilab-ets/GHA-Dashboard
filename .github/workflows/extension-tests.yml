@@ -2,21 +2,26 @@ name: Extension Tests (Playwright)
 
 on:
   workflow_call:
+    secrets:
+      TEST_GITHUB_TOKEN:
+        required: true
+      TEST_GITHUB_USERNAME:
+        required: true
+      CHROME_EXTENSION_ID:
+        required: true
   workflow_dispatch:
-  pull_request:
-   branches: [ main, feature/** ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
-        node-version: '18'
+        node-version: '24'
 
     - name: Install dependencies
       run: |
@@ -29,9 +34,9 @@ jobs:
         npx playwright install chromium
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
-        python-version: '3.10'
+        python-version: '3.13'
 
     - name: Install dependencies
       run: |
@@ -41,9 +46,16 @@ jobs:
         pip install pytest
 
     - name: Create .env file
+      env:
+        TEST_GITHUB_TOKEN: ${{ secrets.TEST_GITHUB_TOKEN }}
+        TEST_GITHUB_USERNAME: ${{ secrets.TEST_GITHUB_USERNAME }}
+        CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
       run: |
         cd backend
-        echo "TEST_GITHUB_TOKEN=${{ secrets.TEST_GITHUB_TOKEN }}" >> .env
+        test -n "$TEST_GITHUB_TOKEN" || { echo "::error::TEST_GITHUB_TOKEN is not configured"; exit 1; }
+        test -n "$TEST_GITHUB_USERNAME" || { echo "::error::TEST_GITHUB_USERNAME is not configured"; exit 1; }
+        test -n "$CHROME_EXTENSION_ID" || { echo "::error::CHROME_EXTENSION_ID is not configured"; exit 1; }
+        echo "TEST_GITHUB_TOKEN=${{ secrets.TEST_GITHUB_TOKEN }}" > .env
         echo "TEST_GITHUB_USERNAME=${{ secrets.TEST_GITHUB_USERNAME }}" >> .env
         echo "CHROME_EXTENSION_ID=${{ secrets.CHROME_EXTENSION_ID }}" >> .env
 
