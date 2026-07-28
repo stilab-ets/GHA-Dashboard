@@ -3226,9 +3226,7 @@ export default function Dashboard() {
   const moreDegradationsCount = Math.max(0, trendAlerts.length - 1);
   const showMoreDegradationsLabel = showMoreDegradations
     ? 'Show less'
-    : moreDegradationsCount > 0
-      ? `Show ${moreDegradationsCount} more & health score`
-      : 'Show health score';
+    : `Show ${moreDegradationsCount} more`;
   const trendWindowSize = filters.trendWindowSize ?? null;
   const trendWindowPreset = TREND_WINDOW_PRESETS.find(preset => preset.value === trendWindowSize);
   const trendWindowLabel = trendWindowPreset
@@ -4077,7 +4075,18 @@ export default function Dashboard() {
               </div>
             )}
 
-              {showMoreDegradations && (
+              {moreDegradationsCount > 0 && (
+                <button
+                  type="button"
+                  className="overall-health-more-toggle"
+                  onClick={() => setShowMoreDegradations(prev => !prev)}
+                  aria-expanded={showMoreDegradations}
+                >
+                  {showMoreDegradationsLabel}
+                  <span className={`overall-health-status-arrow${!showMoreDegradations ? ' overall-health-status-arrow-collapsed' : ''}`} aria-hidden="true">▼</span>
+                </button>
+              )}
+
               <div className="overall-health-scores">
                 <div className="overall-health-scores-header">
                   <h4>
@@ -4128,17 +4137,6 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
-              )}
-
-              <button
-                type="button"
-                className="overall-health-more-toggle"
-                onClick={() => setShowMoreDegradations(prev => !prev)}
-                aria-expanded={showMoreDegradations}
-              >
-                {showMoreDegradationsLabel}
-                <span className={`overall-health-status-arrow${!showMoreDegradations ? ' overall-health-status-arrow-collapsed' : ''}`} aria-hidden="true">▼</span>
-              </button>
               </>
           </section>
         )}
