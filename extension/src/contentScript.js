@@ -110,12 +110,32 @@
         box-shadow: 0 12px 28px rgba(16, 24, 40, 0.2);
         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         overflow-wrap: break-word;
+        scrollbar-width: thin;
+        scrollbar-color: #98a2b3 transparent;
       }
       #gha-dashboard-hint-popup[data-theme="dark"] {
         color: #ddd;
         background: #222;
         border-color: #555;
         box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+        scrollbar-color: #6e7681 transparent;
+      }
+      #gha-dashboard-hint-popup::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      #gha-dashboard-hint-popup::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      #gha-dashboard-hint-popup::-webkit-scrollbar-thumb {
+        background-color: #98a2b3;
+        border-radius: 999px;
+        border: 2px solid #fff;
+        background-clip: padding-box;
+      }
+      #gha-dashboard-hint-popup[data-theme="dark"]::-webkit-scrollbar-thumb {
+        background-color: #6e7681;
+        border-color: #222;
       }
       #gha-dashboard-hint-popup .gha-dashboard-hint-title {
         margin: 0 0 8px;

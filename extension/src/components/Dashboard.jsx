@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useState, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchDashboardDataViaWebSocket, clearWebSocketCache, filterRunsLocally, convertRunsToDashboard, cacheRunsForRepo, cancelWebSocketCollection } from '../websocket';
 import { buildDashboardCollectionFilters, extendWorkflowScopeForSelection, filterRunsForScope, mergeWorkflowNames, normalizeWorkflowIds, workflowIdsForSelectionDelta, workflowNamesForIds } from '../scopeFilters.mjs';
@@ -694,7 +694,7 @@ export default function Dashboard() {
   const [trendWindowCustomInput, setTrendWindowCustomInput] = useState('');
   const [collectionWorkflowDropdownOpen, setCollectionWorkflowDropdownOpen] = useState(false);
 
-  const [healthCheckCollapsed, setHealthCheckCollapsed] = useState(false);
+  const [showMoreDegradations, setShowMoreDegradations] = useState(false);
   const [activeStatsTab, setActiveStatsTab] = useState('workflows');
   const [contributorSearchQuery, setContributorSearchQuery] = useState('');
   const [activeBranchEventTab, setActiveBranchEventTab] = useState('all');
@@ -979,6 +979,57 @@ export default function Dashboard() {
     return result.githubToken ?? null;
   }
 
+  // `data.rawRuns` is a brand new array reference on every dashboard refresh
+  // (including in-progress streaming ticks that don't actually add runs),
+  // which used to make the degradation-check effect below re-run — and
+  // flicker its "Checking workflow commits..." state — far more often than
+  // the underlying run set actually changed. Depending on this stable id
+  // signature instead keeps the effect from re-running unless the runs
+  // themselves changed.
+  const rawRunsSignature = useMemo(() => (
+    (data?.rawRuns || []).map(run => run.id).join(',')
+  ), [data?.rawRuns]);
+
+  // Sorting/scoring every workflow's runs is O(n log n) per workflow and was
+  // previously re-run on every single render (dropdown hovers, tooltip
+  // updates, etc.), which caused visible lag on repos with a lot of runs.
+  // Memoizing keeps it from re-running unless the underlying data actually
+  // changed. This must stay above the "no data"/"error" early returns below —
+  // hooks can't be called conditionally, and declaring it after them crashes
+  // React with "Rendered fewer hooks than expected" as soon as those early
+  // returns stop firing (e.g. right after collection finishes and data loads).
+  const healthScoreRows = useMemo(() => {
+    const rawRunsByWorkflow = (data?.rawRuns || []).reduce((groups, workflowRun) => {
+      const name = workflowRun.workflow_name || 'Unknown workflow';
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(workflowRun);
+      return groups;
+    }, new Map());
+    const alerts = Array.isArray(data?.negativeTrendAnalysis?.alerts)
+      ? data.negativeTrendAnalysis.alerts
+      : [];
+    const workflowRows = (data?.workflowStats || []).map(stat => ({
+      name: stat.name,
+      ...calculateHealthScore({
+        ...computeWindowSuccessStats(rawRunsByWorkflow.get(stat.name) || [], { windowSize: filters.trendWindowSize }),
+        trendAlerts: alerts.filter(alert => alert.scope === 'workflow' && alert.workflowName === stat.name)
+      })
+    }));
+
+    if (workflowRows.length <= 1) return workflowRows;
+
+    return [
+      {
+        name: 'Current selection',
+        ...calculateHealthScore({
+          ...computeWindowSuccessStats(data?.rawRuns || [], { windowSize: filters.trendWindowSize }),
+          trendAlerts: alerts.filter(alert => alert.scope === 'selection')
+        })
+      },
+      ...workflowRows
+    ];
+  }, [data?.rawRuns, data?.workflowStats, data?.negativeTrendAnalysis, filters.trendWindowSize]);
+
   useEffect(() => {
     let cancelled = false;
     const runs = data?.rawRuns || [];
@@ -1020,7 +1071,9 @@ export default function Dashboard() {
     }
 
     const loadDegradations = async () => {
-      setWorkflowDegradations([]);
+      // Keep any previously confirmed degradations visible while this
+      // refresh runs — clearing them up front caused the table to flash
+      // empty on every refresh instead of just updating in place.
       setWorkflowDegradationsLoading(true);
       setWorkflowDegradationsError(null);
 
@@ -1111,7 +1164,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [currentRepo, data?.rawRuns]);
+  }, [currentRepo, rawRunsSignature]);
 
   const buildScopedQuery = (scope = getCollectionScope()) => {
     const params = new URLSearchParams();
@@ -3170,31 +3223,12 @@ export default function Dashboard() {
   const trendScopeLabel = !selectedWorkflowCount || workflowFilterValues.includes('all')
     ? 'All workflows'
     : `${selectedWorkflowCount} selected workflow${selectedWorkflowCount > 1 ? 's' : ''}`;
-  const rawRunsByWorkflow = (rawRuns || []).reduce((groups, workflowRun) => {
-    const name = workflowRun.workflow_name || 'Unknown workflow';
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push(workflowRun);
-    return groups;
-  }, new Map());
-  const healthScoreWorkflowRows = (data.workflowStats || []).map(stat => ({
-    name: stat.name,
-    ...calculateHealthScore({
-      ...computeWindowSuccessStats(rawRunsByWorkflow.get(stat.name) || [], { windowSize: filters.trendWindowSize }),
-      trendAlerts: trendAlerts.filter(alert => alert.scope === 'workflow' && alert.workflowName === stat.name)
-    })
-  }));
-  const healthScoreRows = healthScoreWorkflowRows.length > 1
-    ? [
-      {
-        name: 'Current selection',
-        ...calculateHealthScore({
-          ...computeWindowSuccessStats(rawRuns || [], { windowSize: filters.trendWindowSize }),
-          trendAlerts: trendAlerts.filter(alert => alert.scope === 'selection')
-        })
-      },
-      ...healthScoreWorkflowRows
-    ]
-    : healthScoreWorkflowRows;
+  const moreDegradationsCount = Math.max(0, trendAlerts.length - 1);
+  const showMoreDegradationsLabel = showMoreDegradations
+    ? 'Show less'
+    : moreDegradationsCount > 0
+      ? `Show ${moreDegradationsCount} more & health score`
+      : 'Show health score';
   const trendWindowSize = filters.trendWindowSize ?? null;
   const trendWindowPreset = TREND_WINDOW_PRESETS.find(preset => preset.value === trendWindowSize);
   const trendWindowLabel = trendWindowPreset
@@ -3862,48 +3896,45 @@ export default function Dashboard() {
 
         {SHOW_OVERALL_HEALTH_CHECK && (
           <section className="overall-health-section" aria-label="Overall health check">
-            <div className={`overall-health-header${healthCheckCollapsed ? ' overall-health-header-collapsed' : ''}`}>
+            <div className="overall-health-header">
               <div>
                 <p className="eyebrow">Overall health check</p>
-                {!healthCheckCollapsed && (
-                  <h3>
-                    Workflow trend alerts
-                    <InfoIcon explanation={{
-                      title: 'Workflow Trend Alerts',
-                      text: {
-                        paragraphs: [
-                          'Fits a trend line across the runs (with valid duration data) in the chosen "Trend window" to detect whether duration (performance) or failure rate (reliability) is generally increasing, and by how much.'
-                        ],
-                        list: [
-                          {
-                            label: 'Current selection:',
-                            text: ' an aggregate alert computed across every workflow currently included by your filters, in addition to each workflow\'s own alert.'
-                          },
-                          {
-                            label: 'Delta:',
-                            text: ' the total change the trend line predicts from the start to the end of the window.'
-                          },
-                          {
-                            label: 'Previous:',
-                            text: ' the trend line\'s fitted value at the start of the window.'
-                          },
-                          {
-                            label: 'Recent:',
-                            text: ' the trend line\'s fitted value at the end of the window.'
-                          },
-                          {
-                            label: 'Window:',
-                            text: ' how many runs were used for that calculation — this can be lower than the requested window size if the workflow doesn\'t have that many runs (with valid duration data) yet.'
-                          }
-                        ]
-                      }
-                    }} />
-                  </h3>
-                )}
+                <h3>
+                  Workflow trend alerts
+                  <InfoIcon explanation={{
+                    title: 'Workflow Trend Alerts',
+                    text: {
+                      paragraphs: [
+                        'Fits a trend line across the runs (with valid duration data) in the chosen "Trend window" to detect whether duration (performance) or failure rate (reliability) is generally increasing, and by how much.'
+                      ],
+                      list: [
+                        {
+                          label: 'Current selection:',
+                          text: ' an aggregate alert computed across every workflow currently included by your filters, in addition to each workflow\'s own alert.'
+                        },
+                        {
+                          label: 'Delta:',
+                          text: ' the total change the trend line predicts from the start to the end of the window.'
+                        },
+                        {
+                          label: 'Previous:',
+                          text: ' the trend line\'s fitted value at the start of the window.'
+                        },
+                        {
+                          label: 'Recent:',
+                          text: ' the trend line\'s fitted value at the end of the window.'
+                        },
+                        {
+                          label: 'Window:',
+                          text: ' how many runs were used for that calculation — this can be lower than the requested window size if the workflow doesn\'t have that many runs (with valid duration data) yet.'
+                        }
+                      ]
+                    }
+                  }} />
+                </h3>
               </div>
 
               <div className="overall-health-header-controls">
-                {!healthCheckCollapsed && (
                 <div className="filter-group trend-window-group" ref={dropdownRefs.trendWindow}>
                   <label>Trend window</label>
                   <div className="dropdown-container">
@@ -3966,29 +3997,20 @@ export default function Dashboard() {
                     )}
                   </div>
                 </div>
-                )}
 
-                <button
-                  type="button"
-                  className={`overall-health-status overall-health-status-${trendSummaryTone}`}
-                  onClick={() => setHealthCheckCollapsed(prev => !prev)}
-                  aria-expanded={!healthCheckCollapsed}
-                  aria-label={healthCheckCollapsed ? 'Expand overall health check' : 'Collapse overall health check'}
-                >
+                <div className={`overall-health-status overall-health-status-${trendSummaryTone}`}>
                   {trendAlerts.length > 0
                     ? `${trendAlerts.length} degradation${trendAlerts.length > 1 ? 's' : ''} detected`
                     : 'No degradation detected'}
-                  <span className={`overall-health-status-arrow${healthCheckCollapsed ? ' overall-health-status-arrow-collapsed' : ''}`} aria-hidden="true">▼</span>
-                </button>
+                </div>
               </div>
             </div>
 
-            {!healthCheckCollapsed && (
-              <>
+            <>
               {trendAlerts.length > 0 ? (
               <div className={`overall-health-alert-frame overall-health-alert-frame-${trendSummaryTone}`}>
                 <ul className="trend-alert-list" aria-label="Detected workflow degradations">
-                  {trendAlerts.map(alert => (
+                  {(showMoreDegradations ? trendAlerts : trendAlerts.slice(0, 1)).map(alert => (
                     <li
                       key={alert.id}
                       className={`trend-alert-row trend-alert-row-${alert.severity}`}
@@ -4055,6 +4077,7 @@ export default function Dashboard() {
               </div>
             )}
 
+              {showMoreDegradations && (
               <div className="overall-health-scores">
                 <div className="overall-health-scores-header">
                   <h4>
@@ -4085,20 +4108,19 @@ export default function Dashboard() {
                 </div>
 
                 {healthScoreRows.length > 0 ? (
-                  <ul className="health-score-list" aria-label="Workflow health scores">
+                  <div className="health-score-card-row" aria-label="Workflow health scores">
                     {healthScoreRows.map(row => (
-                      <li
+                      <div
                         key={row.name}
-                        className={`health-score-row health-score-row-${row.tone}`}
+                        className={`health-score-card health-score-card-${row.tone}`}
                         aria-label={`Health score for ${row.name}`}
                       >
-                        <span className={`health-score-indicator health-score-indicator-${row.tone}`} aria-hidden="true" />
-                        <span className="health-score-row-name">{row.name}</span>
-                        <span className="health-score-row-label">{row.label}</span>
-                        <span className="health-score-row-value">{row.score === null ? '—' : row.score}</span>
-                      </li>
+                        <div className="health-score-card-name">{row.name}</div>
+                        <div className="health-score-card-value">{row.score === null ? '—' : row.score}</div>
+                        <div className="health-score-card-label">{row.label}</div>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 ) : (
                   <div className="overall-health-empty overall-health-info">
                     <strong>No health scores available.</strong>
@@ -4106,8 +4128,18 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+              )}
+
+              <button
+                type="button"
+                className="overall-health-more-toggle"
+                onClick={() => setShowMoreDegradations(prev => !prev)}
+                aria-expanded={showMoreDegradations}
+              >
+                {showMoreDegradationsLabel}
+                <span className={`overall-health-status-arrow${!showMoreDegradations ? ' overall-health-status-arrow-collapsed' : ''}`} aria-hidden="true">▼</span>
+              </button>
               </>
-            )}
           </section>
         )}
 
