@@ -5128,10 +5128,10 @@ export default function Dashboard() {
                 <BarChart
                   key={getChartZoomKey('dailyRuns', dailyRunsZoom, runsOverTime.length)}
                   data={visibleRunsOverTime}
-                  margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                  margin={{ top: 10, right: 20, left: 0, bottom: 20 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
-                  <XAxis dataKey="date" stroke={chartAxisColor} />
+                  <XAxis dataKey="date" stroke={chartAxisColor} angle={-45} textAnchor="end" height={80} />
                   <YAxis stroke={chartAxisColor} />
                   <Tooltip />
                   <Legend />
@@ -5181,10 +5181,10 @@ export default function Dashboard() {
                     runsOverTime.length
                   )}
                   data={visibleDurationVariability}
-                  margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
+                  margin={{ top: 10, right: 20, left: 0, bottom: 20 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
-                  <XAxis dataKey="date" stroke={chartAxisColor} />
+                  <XAxis dataKey="date" stroke={chartAxisColor} angle={-45} textAnchor="end" height={80} />
                   <YAxis
                     stroke={chartAxisColor}
                     label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }}
@@ -5272,10 +5272,10 @@ export default function Dashboard() {
                       failureDurationOverTime.length
                     )}
                     data={visibleCumulativeFailure}
-                    margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
+                    margin={{ top: 10, right: 20, left: 0, bottom: 20 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
-                    <XAxis dataKey="date" stroke={chartAxisColor} />
+                    <XAxis dataKey="date" stroke={chartAxisColor} angle={-45} textAnchor="end" height={80} />
                     <YAxis
                       stroke={chartAxisColor}
                       label={{ value: 'Duration (s)', angle: -90, position: 'insideLeft' }}
