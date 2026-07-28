@@ -984,14 +984,10 @@
 }
 
 .chart-wheel-area-large,
-.failure-worsening-body {
-    height: 320px;
-    min-height: 320px;
-}
-
+.failure-worsening-body,
 .time-to-fix-chart {
-    height: 420px;
-    min-height: 420px;
+    height: 280px;
+    min-height: 280px;
 }
 
 .dashboard-chart-popup-layer {
