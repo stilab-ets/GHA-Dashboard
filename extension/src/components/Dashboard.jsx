@@ -4070,7 +4070,9 @@ export default function Dashboard() {
                 <span>
                   {negativeTrendAnalysis.insufficientData
                     ? `More historical runs are needed for ${trendScopeLabel}.`
-                    : `${trendScopeLabel} is stable across ${negativeTrendAnalysis.runsAnalyzed || 0} runs.`}
+                    : trendScopeLabel === 'All workflows'
+                      ? `${trendScopeLabel} are stable across ${negativeTrendAnalysis.runsAnalyzed || 0} runs.`
+                      : `${trendScopeLabel} is stable across ${negativeTrendAnalysis.runsAnalyzed || 0} runs.`}
                 </span>
               </div>
             )}
