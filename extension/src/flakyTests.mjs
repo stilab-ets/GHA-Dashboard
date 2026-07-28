@@ -45,6 +45,36 @@ function countTransitions(observations) {
   return transitions;
 }
 
+function findLatestCompletedEpisode(observations) {
+  let baselineSuccess = null;
+  let pendingFailures = [];
+  let latestEpisode = null;
+
+  observations.forEach(observation => {
+    const conclusion = normalizeConclusion(observation.job?.conclusion);
+
+    if (conclusion === 'success') {
+      if (baselineSuccess && pendingFailures.length > 0) {
+        latestEpisode = {
+          baselineSuccess,
+          failures: [...pendingFailures],
+          recoverySuccess: observation,
+        };
+      }
+
+      baselineSuccess = observation;
+      pendingFailures = [];
+      return;
+    }
+
+    if (conclusion === 'failure' && baselineSuccess) {
+      pendingFailures.push(observation);
+    }
+  });
+
+  return latestEpisode;
+}
+
 export function detectFlakyTests(runs, repo) {
   if (!Array.isArray(runs) || runs.length === 0) return [];
 
@@ -62,7 +92,7 @@ export function detectFlakyTests(runs, repo) {
       const jobName = normalizeText(job?.name);
       if (!jobName) return;
 
-      const key = `${commitSha}\u0000${workflowName}\u0000${jobName}`;
+      const key = `${branch}\u0000${commitSha}\u0000${workflowName}\u0000${jobName}`;
       if (!groups.has(key)) {
         groups.set(key, {
           commitSha,
@@ -84,47 +114,66 @@ export function detectFlakyTests(runs, repo) {
   return Array.from(groups.values())
     .map(group => {
       const observations = [...group.observations].sort(compareObservations);
-      const successes = observations.filter(
+      const successObservations = observations.filter(
         item => normalizeConclusion(item.job?.conclusion) === 'success'
-      ).length;
-      const failures = observations.filter(
+      );
+      const failureObservations = observations.filter(
         item => normalizeConclusion(item.job?.conclusion) === 'failure'
-      ).length;
+      );
+      const successes = successObservations.length;
+      const failures = failureObservations.length;
       const transitions = countTransitions(observations);
 
+      // A job is flaky when unchanged code and tests produce both outcomes.
+      // Ordering and the number of transitions do not affect detection.
       if (successes === 0 || failures === 0) {
         return null;
       }
 
+      const latestCompletedEpisode = findLatestCompletedEpisode(observations);
+      const cardFailures = latestCompletedEpisode?.failures || failureObservations;
+      const cardSuccess = latestCompletedEpisode?.recoverySuccess
+        || successObservations[successObservations.length - 1];
+      const cardObservations = [...cardFailures, cardSuccess]
+        .filter(Boolean)
+        .sort(compareObservations);
+      const firstCardObservation = cardObservations[0];
+      const latestCardObservation = cardObservations[cardObservations.length - 1];
       const latestObservation = observations.reduce((latest, current) => (
         getRunTime(current.run) >= getRunTime(latest.run) ? current : latest
       ), observations[0]);
 
       const runUrls = Array.from(new Set(
-        observations
+        cardObservations
           .map(item => normalizeText(item.run?.html_url))
           .filter(Boolean)
       ));
 
       return {
-        id: `${group.commitSha}:${group.workflowName}:${group.jobName}`,
+        id: `${group.branch}:${group.commitSha}:${group.workflowName}:${group.jobName}`,
         commitSha: group.commitSha,
         shortSha: group.commitSha.slice(0, 7),
         commitUrl: buildCommitUrl(repo, group.commitSha),
         workflowName: group.workflowName,
         jobName: group.jobName,
         branch: group.branch || '',
-        successes,
-        failures,
-        totalRuns: observations.length,
+        successes: 1,
+        failures: cardFailures.length,
+        totalRuns: cardObservations.length,
+        observedSuccesses: successes,
+        observedFailures: failures,
+        observedTotalRuns: observations.length,
         transitions,
-        latestSeenAt: latestObservation?.run?.created_at || latestObservation?.run?.updated_at || '',
+        hasCompletedEpisode: Boolean(latestCompletedEpisode),
+        firstSeenAt: firstCardObservation?.run?.created_at || firstCardObservation?.run?.updated_at || '',
+        latestSeenAt: latestCardObservation?.run?.created_at || latestCardObservation?.run?.updated_at || '',
+        latestObservedAt: latestObservation?.run?.created_at || latestObservation?.run?.updated_at || '',
         runUrls,
       };
     })
     .filter(Boolean)
     .sort((left, right) => {
-      const latestDiff = Date.parse(right.latestSeenAt || 0) - Date.parse(left.latestSeenAt || 0);
+      const latestDiff = Date.parse(right.latestObservedAt || 0) - Date.parse(left.latestObservedAt || 0);
       if (latestDiff !== 0 && !Number.isNaN(latestDiff)) return latestDiff;
       return left.jobName.localeCompare(right.jobName);
     });

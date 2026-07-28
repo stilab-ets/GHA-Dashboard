@@ -4625,12 +4625,23 @@ export default function Dashboard() {
             )}
 
             {activeStatsTab === 'flaky' && (() => {
+              const formatFlakyDate = value => {
+                if (!value) return 'Unknown';
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) return 'Unknown';
+                return date.toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric'
+                });
+              };
+
               return (
                 <div
                   id="stats-panel-flaky"
                   role="tabpanel"
                   aria-labelledby="stats-tab-flaky"
-                  className={`table-wrapper ${flakyTests.length > 10 ? 'table-wrapper-scroll' : ''}`}
+                  className="flaky-panel"
                 >
                   {jobProgress.isCollecting && jobProgress.total_runs > 0 && (
                     <div style={{
@@ -4686,90 +4697,107 @@ export default function Dashboard() {
                     </div>
                   )}
                   {flakyTests.length > 0 && (
-                    <table className="branch-table">
-                      <thead>
-                        <tr>
-                          <th>Commit</th>
-                          <th>Workflow</th>
-                          <th>Job</th>
-                          <th>Successes</th>
-                          <th>Failures</th>
-                          <th>Total Runs</th>
-                          <th>Last Seen</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <>
+                      <div className="flaky-panel-heading">
+                        <div>
+                          <h3>Flaky tests</h3>
+                          <p>Jobs that returned both successful and failed results on the same commit.</p>
+                        </div>
+                        <span className="flaky-result-count">
+                          {flakyTests.length} {flakyTests.length === 1 ? 'match' : 'matches'}
+                        </span>
+                      </div>
+                      <div className="flaky-card-grid">
                         {flakyTests.map(item => {
                           const latestRunUrl = item.runUrls?.[item.runUrls.length - 1];
-                          const lastSeen = item.latestSeenAt
-                            ? new Date(item.latestSeenAt).toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric'
-                              })
-                            : 'Unknown';
 
                           return (
-                            <tr key={item.id}>
-                              <td className="branch-name">
+                            <article className="flaky-card" key={item.id}>
+                              <div className="flaky-card-header">
+                                <div className="flaky-card-title">
+                                  <span className="flaky-warning-icon" aria-hidden="true">
+                                    <UIIcon name="flaky" />
+                                  </span>
+                                  <div>
+                                    <h4>{item.jobName || 'unknown'}</h4>
+                                    <p>{item.workflowName || 'unknown'}</p>
+                                  </div>
+                                </div>
+                                <span className="status-pill warning">Flaky</span>
+                              </div>
+
+                              <div className="flaky-card-context">
                                 {item.commitUrl ? (
                                   <button
                                     type="button"
+                                    className="flaky-commit"
                                     onClick={() => window.open(item.commitUrl, '_blank')}
-                                    style={{
-                                      color: 'var(--accent)',
-                                      background: 'none',
-                                      border: 0,
-                                      padding: 0,
-                                      font: 'inherit',
-                                      fontFamily: 'monospace',
-                                      cursor: 'pointer'
-                                    }}
                                   >
-                                    {item.shortSha || 'unknown'}
+                                    <UIIcon name="branch" />
+                                    <span>{item.shortSha || 'unknown'}</span>
                                   </button>
                                 ) : (
-                                  <span style={{ fontFamily: 'monospace' }}>{item.shortSha || 'unknown'}</span>
+                                  <span className="flaky-commit">
+                                    <UIIcon name="branch" />
+                                    <span>{item.shortSha || 'unknown'}</span>
+                                  </span>
                                 )}
-                              </td>
-                              <td style={{ color: 'var(--muted)', fontSize: '13px' }}>{item.workflowName || 'unknown'}</td>
-                              <td>{item.jobName || 'unknown'}</td>
-                              <td>{item.successes}</td>
-                              <td>{item.failures}</td>
-                              <td>{item.totalRuns}</td>
-                              <td>{lastSeen}</td>
-                              <td>
-                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                  {item.commitUrl && (
-                                    <button
-                                      type="button"
-                                      className="panel-icon-button"
-                                      title="Open commit"
-                                      aria-label={`Open commit ${item.shortSha}`}
-                                      onClick={() => window.open(item.commitUrl, '_blank')}
-                                    >
-                                      <UIIcon name="branch" />
-                                    </button>
-                                  )}
-                                  {latestRunUrl && (
-                                    <button
-                                      type="button"
-                                      className="panel-icon-button"
-                                      title="Open latest run"
-                                      aria-label={`Open latest run for ${item.jobName}`}
-                                      onClick={() => window.open(latestRunUrl, '_blank')}
-                                    >
-                                      <UIIcon name="play" />
-                                    </button>
-                                  )}
+                                {item.branch && <span className="flaky-branch">{item.branch}</span>}
+                              </div>
+
+                              <div className="flaky-outcomes" aria-label={`${item.successes} successes and ${item.failures} failures`}>
+                                <div className="flaky-outcome success">
+                                  <span>{item.successes}</span>
+                                  <small>{item.successes === 1 ? 'Success' : 'Successes'}</small>
                                 </div>
-                              </td>
-                            </tr>
+                                <div className="flaky-outcome failure">
+                                  <span>{item.failures}</span>
+                                  <small>{item.failures === 1 ? 'Failure' : 'Failures'}</small>
+                                </div>
+                                <div className="flaky-outcome total">
+                                  <span>{item.totalRuns}</span>
+                                  <small>Total runs</small>
+                                </div>
+                              </div>
+
+                              <div className="flaky-dates">
+                                <div>
+                                  <span>{item.hasCompletedEpisode ? 'First failure' : 'First shown result'}</span>
+                                  <strong>{formatFlakyDate(item.firstSeenAt || item.latestSeenAt)}</strong>
+                                </div>
+                                <div>
+                                  <span>{item.hasCompletedEpisode ? 'Recovery success' : 'Last shown result'}</span>
+                                  <strong>{formatFlakyDate(item.latestSeenAt)}</strong>
+                                </div>
+                              </div>
+
+                              <div className="flaky-card-actions">
+                                {item.commitUrl && (
+                                  <button
+                                    type="button"
+                                    className="flaky-action-button"
+                                    onClick={() => window.open(item.commitUrl, '_blank')}
+                                  >
+                                    <UIIcon name="branch" />
+                                    Commit
+                                  </button>
+                                )}
+                                {latestRunUrl && (
+                                  <button
+                                    type="button"
+                                    className="flaky-action-button"
+                                    onClick={() => window.open(latestRunUrl, '_blank')}
+                                  >
+                                    <UIIcon name="play" />
+                                    Latest run
+                                  </button>
+                                )}
+                              </div>
+                            </article>
                           );
                         })}
-                      </tbody>
-                    </table>
+                      </div>
+                    </>
                   )}
                 </div>
               );
