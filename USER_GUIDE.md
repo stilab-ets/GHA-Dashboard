@@ -14,25 +14,46 @@ The intended flow is: start the Flask server locally, load the extension, then l
 ## 1. Prerequisites
 
 - Python
-- Any supported Browser
+- Node.js
+- A supported browser:
   - Chromium (Google Chrome, Brave, etc...)
   - Firefox
 - Optional: a GitHub Personal Access Token with `repo` or `public_repo` permission if you do not wish to use the Github OAuth App
 
 ## 2. Backend Setup
 
-Clone the project:
+Get the project source by downloading the ZIP from GitHub or by cloning it:
 
 ```bash
+# Optional, if Git is installed
 git clone https://github.com/stilab-ets/GHA-Dashboard
 cd GHA-Dashboard/backend
 ```
+
+If you downloaded the ZIP, extract it and open a terminal in the extracted
+`GHA-Dashboard/backend` directory instead.
 
 Install backend dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
+
+From the `backend/` directory, create the environment file:
+
+```powershell
+# PowerShell
+Copy-Item .env.example .env
+```
+
+```bash
+# macOS/Linux
+cp .env.example .env
+```
+
+The `.env` file is required for the local extension origin configuration. Keep
+the `CHROME_EXTENSION_ID` value from `.env.example` unless the ID shown by the
+browser for the loaded extension is different.
 
 Start the Flask backend:
 
@@ -59,6 +80,8 @@ Two authentication modes are supported:
 The token is sent to the local backend only when the extension starts data collection.
 
 ## 4. Installing the Extension
+
+From the project root, open the `extension/` directory and build the extension.
 
 #### Option #1: Chromium
 
